@@ -1,10 +1,10 @@
 {
     "name": "development-skills",
     "owner": {
-        "name": "Leonardo Marcelino Vieira",
-        "email": "leonardo.marcelino@outlook.com"
+        "name": "event-sorcerer",
+        "url": "https://github.com/event-sorcerer"
     },
-    "description": "Personal marketplace of development-workflow plugins (spec-driven, board-tracked, TDD build loops).",
+    "description": "Marketplace of development-workflow plugins (spec-driven, board-tracked, TDD build loops).",
     "version": "1.0.0",
     "plugins": [
         {
@@ -12,8 +12,16 @@
             "source": "./plugins/spec-workflow",
             "description": "Spec-driven autonomous build workflow: GitHub Project board as source of truth, TDD via delegated dev agents, quality gate, checkpoint/handoff loop. Configured per-repo via .claude/project.json (versioned schema).",
             "version": "0.1.0",
-            "author": { "name": "Leonardo Marcelino Vieira" },
-            "keywords": ["workflow", "tdd", "github-projects", "spec-driven", "build-loop"]
+            "author": {
+                "name": "event-sorcerer"
+            },
+            "keywords": [
+                "workflow",
+                "tdd",
+                "github-projects",
+                "spec-driven",
+                "build-loop"
+            ]
         }
     ]
 }
