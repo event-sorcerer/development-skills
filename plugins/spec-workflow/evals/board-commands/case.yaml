@@ -1,0 +1,79 @@
+schema_version: "1.1"
+name: board-commands
+description: >
+  With a valid project.json, the board skill must translate intents into the
+  right board.sh subcommands (including comment replies), without inventing
+  raw gh commands or hardcoding field ids.
+tags: [board, config]
+context:
+  scaffold_script: |
+    git init -q .
+    mkdir -p .claude docs
+    cat > .claude/project.json <<'EOF'
+    {
+        "schemaVersion": 1,
+        "project": { "name": "fixture", "description": "eval fixture", "mainBranch": "main", "branchPattern": "fx/<id>-<slug>" },
+        "boards": [{
+            "id": "main", "provider": "github-project",
+            "owner": "fixture-owner", "repo": "fixture-owner/fixture",
+            "projectNumber": 1, "projectId": "PVT_fixture0000000",
+            "fields": {
+                "status": { "fieldId": "PVTSSF_fixStatus", "options": { "Backlog": "aa01", "In progress": "aa02", "In review": "aa03", "QA": "aa04", "Ready": "aa05", "Deployed": "aa06" } },
+                "priority": { "fieldId": "PVTSSF_fixPrio", "options": { "P0": "bb01", "P1": "bb02", "P2": "bb03" } },
+                "estimate": { "fieldId": "PVTF_fixEst" }
+            },
+            "statusFlow": ["Backlog", "In progress", "In review", "QA", "Ready", "Deployed"]
+        }],
+        "specs": [{
+            "id": "core", "board": "main", "specPath": "SPEC.md", "backlogPath": "docs/BACKLOG.md", "taskPrefix": "FX",
+            "epics": [
+                { "id": "E0", "taskRanges": [[1, 9]] },
+                { "id": "E1", "taskRanges": [[10, 19]], "blockedBy": [{ "epic": "E0", "untilStatus": "Deployed" }] }
+            ],
+            "invariants": ["Fixture invariant."]
+        }],
+        "commands": { "gate": "true" }
+    }
+    EOF
+    echo "# fixture spec" > SPEC.md
+    echo "# fixture backlog" > docs/BACKLOG.md
+    git add -A && git commit -qm scaffold
+execution:
+  prompt: >
+    Using the spec-workflow board skill, tell me the EXACT commands you would run to:
+    (a) move issue 7 to In review, (b) file a P0 bug titled "webhook drops
+    events" originating from issue 7, and (c) reply on issue 7 telling the
+    human the bug was filed. Do NOT execute anything — just show the three
+    commands and briefly note when moving to "In review" is allowed.
+  model: sonnet
+  max_turns: 8
+  allowed_tools: [Skill, Read, Bash]
+runs: 3
+graders:
+  - type: regex
+    name: move-command
+    target: last_message
+    pattern: 'board\.sh"? move 7 "In review"'
+    match: contains
+  - type: regex
+    name: bug-command
+    target: last_message
+    pattern: 'board\.sh"? bug "[^"]+" P0 7'
+    match: contains
+  - type: regex
+    name: comment-command
+    target: last_message
+    pattern: 'board\.sh"? comment 7'
+    match: contains
+  - type: regex
+    name: no-raw-field-ids
+    target: last_message
+    pattern: "PVTSSF_"
+    match: not_contains
+  - type: llm
+    name: gate-rule-stated
+    criteria: >
+      The answer states that a task may move to "In review" only when the
+      project's gate command is green, and all three commands go through the
+      plugin's board.sh script (not ad-hoc gh project calls with field ids).
+expected_outcome: Three correct board.sh commands plus the gate-green rule.

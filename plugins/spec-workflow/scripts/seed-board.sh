@@ -18,7 +18,6 @@ set -uo pipefail
 TASKS_FILE="${1:?usage: seed-board.sh <tasks-file>}"
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 CONFIG="${PROJECT_CONFIG:-$ROOT/.claude/project.json}"
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 eval "$(python3 - "$CONFIG" "${BOARD:-}" <<'PY'
 import json, sys

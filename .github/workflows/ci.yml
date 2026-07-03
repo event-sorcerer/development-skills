@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: shellcheck plugins/*/scripts/*.sh plugins/*/tests/*.sh
+
+      - name: plugin tests (config validator + preflight fixtures)
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name ci
+          for t in plugins/*/tests/run-tests.sh; do bash "$t"; done
+
+      - name: validate eval case files
+        run: |
+          pip install --quiet pyyaml
+          for c in plugins/*/tests/check-evals.py; do python3 "$c"; done
+
+  validate-manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: install claude code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: validate marketplace + plugin manifests
+        run: |
+          claude plugin validate .
+          for p in plugins/*/; do claude plugin validate "$p"; done

@@ -1,0 +1,49 @@
+schema_version: "1.1"
+name: craft-spec-draft
+description: >
+  craft-spec produces a build-ready SPEC.md + docs/BACKLOG.md from a written
+  brief (interview skipped): numbered sections, non-goals, imperative
+  invariants, epics with task-number ranges and acceptance criteria.
+tags: [craft-spec, quality]
+context:
+  scaffold_script: |
+    git init -q .
+    git commit -q --allow-empty -m init
+execution:
+  prompt: >
+    Use the spec-workflow craft-spec skill to create the spec for this project.
+    I am not available for questions, so skip the interview and treat this
+    brief as my answers, choosing sensible defaults for the rest:
+    a self-hosted URL shortener for small teams. Short links with custom
+    slugs, click analytics (count + referrer only, privacy-first: no IP
+    retention), team workspaces with member roles (admin/member), REST API
+    with API-key auth. Non-goals for v1: QR codes, custom domains, paid
+    plans. Stack: TypeScript + Postgres. Quality: TDD, one gate command.
+    Deliver SPEC.md and docs/BACKLOG.md (task prefix US), then stop —
+    do not create any GitHub project or run board commands.
+  model: sonnet
+  max_turns: 30
+  timeout_seconds: 600
+  allowed_tools: [Skill, Bash, Read, Write, Edit]
+runs: 2
+graders:
+  - type: file_exists
+    name: spec-written
+    path: SPEC.md
+  - type: file_exists
+    name: backlog-written
+    path: docs/BACKLOG.md
+  - type: llm
+    name: spec-quality
+    criteria: >
+      Judge the produced SPEC.md and docs/BACKLOG.md against the craft-spec
+      review checklist: (1) sections are numbered (§) and requirements are
+      phrased testably; (2) an explicit, non-empty non-goals section exists
+      and includes QR codes, custom domains, and paid plans; (3) hard
+      invariants (e.g. no IP retention, workspace isolation) appear in their
+      own section, phrased imperatively; (4) the backlog has epics in build
+      order with per-epic US-task number ranges, and each task has priority,
+      story points, and acceptance criteria; (5) analytics respect the
+      privacy constraint (count + referrer only). Score down for missing
+      pieces, untestable phrasing, or scope creep beyond the brief.
+expected_outcome: A review-checklist-passing spec + backlog pair for the brief.

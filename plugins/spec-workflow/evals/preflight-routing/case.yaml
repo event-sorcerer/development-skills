@@ -1,0 +1,37 @@
+schema_version: "1.1"
+name: preflight-routing
+description: >
+  In a repo with NO .claude/project.json, invoking next-task must stop at the
+  load-time preflight and route the user to setup-project — not attempt board
+  operations or invent a task.
+tags: [preflight, routing]
+context:
+  scaffold_script: |
+    git init -q .
+    git commit -q --allow-empty -m init
+execution:
+  prompt: >
+    Pick the next task for me to work on (use the spec-workflow next-task skill).
+  model: sonnet
+  max_turns: 8
+  allowed_tools: [Skill, Bash]
+runs: 3
+graders:
+  - type: regex
+    name: mentions-setup-project
+    target: last_message
+    pattern: "setup-project"
+    match: contains
+  - type: tool_used
+    name: no-board-mutations
+    tool: Bash
+    input_match: "board\\.sh (move|prio|est|bug|comment|edit-body)"
+    max: 0
+  - type: llm
+    name: stopped-and-routed
+    criteria: >
+      The agent recognized the project is not configured for the spec-workflow
+      (missing .claude/project.json), did NOT fabricate a task or attempt any
+      GitHub board operation, and clearly told the user to run the
+      setup-project skill (optionally craft-spec for the spec itself) first.
+expected_outcome: Agent halts at PREFLIGHT FAIL and directs to setup-project.

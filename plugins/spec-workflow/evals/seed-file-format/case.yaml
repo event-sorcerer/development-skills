@@ -1,0 +1,75 @@
+schema_version: "1.1"
+name: seed-file-format
+description: >
+  seed-board translates backlog rows into correctly formatted task-file lines
+  (id|priority|points|epic|title) with numbers inside the epic's configured
+  taskRanges — without running the seeder.
+tags: [seed-board, format]
+context:
+  scaffold_script: |
+    git init -q .
+    mkdir -p .claude docs
+    cat > .claude/project.json <<'EOF'
+    {
+        "schemaVersion": 1,
+        "project": { "name": "fixture", "mainBranch": "main", "branchPattern": "fx/<id>-<slug>" },
+        "boards": [{
+            "id": "main", "provider": "github-project",
+            "owner": "fixture-owner", "repo": "fixture-owner/fixture",
+            "projectNumber": 1, "projectId": "PVT_fixture0000000",
+            "fields": {
+                "status": { "fieldId": "PVTSSF_fixStatus", "options": { "Backlog": "aa01", "In progress": "aa02", "In review": "aa03", "Deployed": "aa04" } },
+                "priority": { "fieldId": "PVTSSF_fixPrio", "options": { "P0": "bb01", "P1": "bb02" } },
+                "estimate": { "fieldId": "PVTF_fixEst" }
+            },
+            "statusFlow": ["Backlog", "In progress", "In review", "Deployed"]
+        }],
+        "specs": [{
+            "id": "core", "board": "main", "specPath": "SPEC.md", "backlogPath": "docs/BACKLOG.md", "taskPrefix": "FX",
+            "epics": [
+                { "id": "E0", "taskRanges": [[1, 9]] },
+                { "id": "E1", "taskRanges": [[10, 19]], "blockedBy": [{ "epic": "E0", "untilStatus": "Deployed" }] }
+            ]
+        }],
+        "commands": { "gate": "true" }
+    }
+    EOF
+    echo "# spec" > SPEC.md
+    cat > docs/BACKLOG.md <<'EOF'
+    # Backlog
+    ## E0 — foundations
+    - FX-001 (P0, 5sp): Repo scaffold with gate command
+    - FX-002 (P0, 3sp): Auth token model
+    ## E1 — features
+    - FX-010 (P1, 8sp): Link creation endpoint
+    EOF
+    git add -A && git commit -qm scaffold
+execution:
+  prompt: >
+    Following the spec-workflow seed-board skill, write the task file for
+    seeding the board from docs/BACKLOG.md to a file named tasks.txt in the
+    repo root. Do NOT run the seeder or any gh/board command — creating
+    tasks.txt is the whole job. Then print its contents.
+  model: sonnet
+  max_turns: 10
+  allowed_tools: [Skill, Read, Write, Bash]
+runs: 3
+graders:
+  - type: file_exists
+    name: tasks-file-written
+    path: tasks.txt
+  - type: regex
+    name: all-three-rows-formatted
+    target: last_message
+    pattern: 'FX-0*(1|2|10)\|P[01]\|\d+\|E[01]\|'
+    flags: g
+    match: "count:3"
+  - type: llm
+    name: rows-faithful
+    criteria: >
+      tasks.txt has exactly one line per backlog task in the format
+      id|priority|points|epic|title, with priorities/points/epics matching
+      docs/BACKLOG.md (FX-001 P0 5 E0, FX-002 P0 3 E0, FX-010 P1 8 E1),
+      titles free of pipe characters, and no invented tasks. The agent did
+      not attempt to run seed-board.sh or any gh command.
+expected_outcome: A correct 3-line pipe-separated task file, seeder not run.

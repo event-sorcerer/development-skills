@@ -32,6 +32,16 @@ claude plugin marketplace update development-skills
 
 or open `/plugin` in Claude Code and use **Update now** on the `development-skills` marketplace.
 
+## Testing
+
+```bash
+bash plugins/spec-workflow/tests/run-tests.sh    # hermetic: validator fixtures + preflight (CI runs this + shellcheck + manifest validation)
+claude plugin eval plugins/spec-workflow         # skill evals (early access; needs API credits)
+```
+
+The evals exercise the skills on real models — including smaller ones (`--model sonnet`) —
+to keep them simple-model-proof.
+
 ## Local development
 
 To hack on the skills, point the marketplace at your clone instead — with a
