@@ -1,0 +1,80 @@
+{
+    "schemaVersion": 1,
+    "project": {
+        "name": "my-platform",
+        "description": "One-line project description used in agent briefs",
+        "mainBranch": "main",
+        "branchPattern": "<prefix>/<id>-<slug>"
+    },
+    "boards": [
+        {
+            "id": "main",
+            "provider": "github-project",
+            "owner": "your-gh-user",
+            "repo": "your-gh-user/my-platform",
+            "projectNumber": 1,
+            "projectId": "PVT_replace_me",
+            "fields": {
+                "status": {
+                    "fieldId": "PVTSSF_replace_me",
+                    "options": {
+                        "Backlog": "aaaaaaaa",
+                        "In progress": "bbbbbbbb",
+                        "In review": "cccccccc",
+                        "QA": "dddddddd",
+                        "Ready": "eeeeeeee",
+                        "Deployed": "ffffffff"
+                    }
+                },
+                "priority": {
+                    "fieldId": "PVTSSF_replace_me",
+                    "options": { "P0": "11111111", "P1": "22222222", "P2": "33333333" }
+                },
+                "estimate": { "fieldId": "PVTF_replace_me" }
+            },
+            "statusFlow": ["Backlog", "In progress", "In review", "QA", "Ready", "Deployed"],
+            "labels": { "bug": "type:bug", "feature": "type:feature" }
+        }
+    ],
+    "specs": [
+        {
+            "id": "core",
+            "title": "Core platform",
+            "board": "main",
+            "specPath": "SPEC.md",
+            "backlogPath": "docs/BACKLOG.md",
+            "taskPrefix": "XX",
+            "epics": [
+                { "id": "EI", "title": "Infra + loop", "taskRanges": [[90, 99]] },
+                {
+                    "id": "E0",
+                    "title": "Foundations",
+                    "taskRanges": [[1, 9]],
+                    "blockedBy": []
+                },
+                {
+                    "id": "E1",
+                    "title": "First feature slice",
+                    "taskRanges": [[10, 19]],
+                    "blockedBy": [{ "epic": "E0", "untilStatus": "Deployed" }]
+                }
+            ],
+            "invariants": [
+                "State hard, non-negotiable rules here; they are pasted into every implementation brief."
+            ]
+        }
+    ],
+    "commands": {
+        "gate": "pnpm gate",
+        "gateFast": "pnpm --filter <pkg> test",
+        "devUp": "./dev.sh",
+        "test": "pnpm test"
+    },
+    "delegation": { "devModel": "sonnet", "reviewModel": "sonnet" },
+    "paths": {
+        "handoffDir": "docs/handoffs",
+        "checkpointFile": ".claude/CHECKPOINT",
+        "devDoc": "docs/DEV.md"
+    },
+    "methodology": { "tdd": true, "isolationSuite": "", "maxInProgress": 1 }
+}

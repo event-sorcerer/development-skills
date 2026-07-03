@@ -1,0 +1,16 @@
+---
+name: dev-up
+description: Bring up the project's local dev stack (commands.devUp in .claude/project.json) for QA/validation or debugging. Not needed for unit/integration TDD — use it when a task must be validated against the running system.
+---
+
+# Local dev stack
+
+```bash
+jq -r '.commands.devUp // empty' .claude/project.json   # then run that command, e.g.: ./dev.sh
+```
+If empty, this project has no configured dev stack — say so and stop.
+
+Project-specific details (profiles, ports, isolation from other stacks, flags, preconditions) live in the doc at `paths.devDoc` (e.g. `docs/DEV.md`) — **read it before bringing the stack up or debugging it.**
+
+## QA use
+After a task merges (*In review* → *QA*), validate the running behavior against the task's acceptance criteria on this stack, then `board.sh move N QA` → on pass → `Ready`. If validation fails on a task already *Ready*, file a bug: `board.sh bug "<desc>" <top-priority> <origin#>`.

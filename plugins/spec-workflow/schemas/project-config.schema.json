@@ -1,0 +1,171 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "spec-workflow/project-config/v1",
+    "title": "spec-workflow project config (.claude/project.json), schemaVersion 1",
+    "type": "object",
+    "required": ["schemaVersion", "project", "boards", "specs", "commands"],
+    "properties": {
+        "schemaVersion": { "const": 1 },
+        "project": {
+            "type": "object",
+            "required": ["name", "mainBranch", "branchPattern"],
+            "properties": {
+                "name": { "type": "string" },
+                "description": { "type": "string" },
+                "mainBranch": { "type": "string" },
+                "branchPattern": {
+                    "type": "string",
+                    "description": "Branch name template. Placeholders: <prefix> (spec taskPrefix, lowercased), <id> (task number, zero-padded as issued), <slug> (kebab-case title)."
+                }
+            }
+        },
+        "boards": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "required": ["id", "provider", "owner", "repo", "projectNumber", "projectId", "fields", "statusFlow"],
+                "properties": {
+                    "id": { "type": "string", "description": "Local identifier; specs reference boards by this id. First board is the default." },
+                    "provider": { "const": "github-project" },
+                    "owner": { "type": "string", "description": "GitHub user/org owning the Project." },
+                    "repo": { "type": "string", "description": "owner/name of the repo where issues live." },
+                    "projectNumber": { "type": "integer" },
+                    "projectId": { "type": "string", "description": "GraphQL node id (PVT_...). Discover with: board.sh fields" },
+                    "fields": {
+                        "type": "object",
+                        "required": ["status", "priority"],
+                        "properties": {
+                            "status": { "$ref": "#/definitions/singleSelectField" },
+                            "priority": {
+                                "allOf": [{ "$ref": "#/definitions/singleSelectField" }],
+                                "description": "Option key order in `options` = priority order, highest first."
+                            },
+                            "estimate": {
+                                "type": "object",
+                                "required": ["fieldId"],
+                                "properties": { "fieldId": { "type": "string" } }
+                            }
+                        }
+                    },
+                    "statusFlow": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Ordered pipeline, e.g. [Backlog, In progress, In review, QA, Ready, Deployed]. Names must match status field option keys."
+                    },
+                    "labels": {
+                        "type": "object",
+                        "properties": {
+                            "bug": { "type": "string", "default": "type:bug" },
+                            "feature": { "type": "string", "default": "type:feature" }
+                        }
+                    }
+                }
+            }
+        },
+        "specs": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "required": ["id", "board", "specPath", "taskPrefix", "epics"],
+                "properties": {
+                    "id": { "type": "string" },
+                    "title": { "type": "string" },
+                    "board": { "type": "string", "description": "boards[].id this spec's tasks live on." },
+                    "specPath": { "type": "string", "description": "Repo-relative path to the spec document." },
+                    "backlogPath": { "type": "string", "description": "Repo-relative path to the backlog doc with per-task acceptance criteria." },
+                    "taskPrefix": {
+                        "type": "string",
+                        "description": "Task id prefix; issue titles look like '<taskPrefix>-<number>: <title>'. Must be unique across specs."
+                    },
+                    "epics": {
+                        "type": "array",
+                        "description": "Ordered by build sequence. Position in this array is the sequencing rank.",
+                        "items": {
+                            "type": "object",
+                            "required": ["id", "taskRanges"],
+                            "properties": {
+                                "id": { "type": "string" },
+                                "title": { "type": "string" },
+                                "taskRanges": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "array",
+                                        "items": { "type": "integer" },
+                                        "minItems": 2,
+                                        "maxItems": 2
+                                    },
+                                    "description": "Inclusive [lo, hi] task-number ranges belonging to this epic."
+                                },
+                                "blockedBy": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "required": ["epic", "untilStatus"],
+                                        "properties": {
+                                            "epic": { "type": "string", "description": "Epic id (same spec) that must complete first." },
+                                            "untilStatus": { "type": "string", "description": "Every task of that epic must have reached this status (or later in statusFlow)." }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "invariants": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Hard rules agents must never violate (fed into implementation briefs verbatim)."
+                    }
+                }
+            }
+        },
+        "commands": {
+            "type": "object",
+            "required": ["gate"],
+            "properties": {
+                "gate": { "type": "string", "description": "Single command that must be green before a task advances to review." },
+                "gateFast": { "type": "string", "description": "Optional fast inner-loop test command template." },
+                "devUp": { "type": "string", "description": "Command that brings up the full local dev stack." },
+                "test": { "type": "string" }
+            }
+        },
+        "delegation": {
+            "type": "object",
+            "properties": {
+                "devModel": { "type": "string", "default": "sonnet", "description": "Model for implementation subagents." },
+                "reviewModel": { "type": "string", "default": "sonnet" }
+            }
+        },
+        "paths": {
+            "type": "object",
+            "properties": {
+                "handoffDir": { "type": "string", "default": "docs/handoffs" },
+                "checkpointFile": { "type": "string", "default": ".claude/CHECKPOINT" },
+                "devDoc": { "type": "string", "description": "Repo-relative doc with project-specific dev-stack details (ports, profiles, isolation)." }
+            }
+        },
+        "methodology": {
+            "type": "object",
+            "properties": {
+                "tdd": { "type": "boolean", "default": true },
+                "isolationSuite": { "type": "string", "description": "Test path glob for the merge-gating isolation suite, if any (e.g. tests/isolation/**)." },
+                "maxInProgress": { "type": "integer", "default": 1 }
+            }
+        }
+    },
+    "definitions": {
+        "singleSelectField": {
+            "type": "object",
+            "required": ["fieldId", "options"],
+            "properties": {
+                "fieldId": { "type": "string" },
+                "options": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string" },
+                    "description": "Option name -> option id. Key order is meaningful (statusFlow order / priority order)."
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,32 @@
+---
+name: seed-board
+description: Seed the GitHub Project board from a spec's backlog — create one issue + board item per task with status/priority/estimate set. Idempotent; safe to re-run. Use after setup-project, or when a new spec or new tasks are added to the backlog.
+---
+
+# Seed the board from the backlog
+
+## 1. Build the task file
+From the spec's backlog doc (`specs[].backlogPath` in `.claude/project.json`), write one line per task to a temp file (`#` comments and blank lines allowed):
+```
+<task-id>|<priority>|<points>|<epic-id>|<title>
+CP-001|P0|5|E0|Repo scaffold: pnpm workspace + tsconfig
+CP-010|P1|8|E1|http-kit vendored (Fastify + route-spec)
+```
+Rules — check each line before running:
+- `task-id` = `<taskPrefix>-<number>`; the prefix must match a `specs[].taskPrefix` and the number must fall inside one of that spec's `epics[].taskRanges` (otherwise `board.sh next` can't sequence it).
+- `priority` must be a priority option name; `epic-id` must be that spec's epic id.
+- Titles must not contain `|`.
+- Multiple specs may be mixed in one file.
+
+## 2. Run the seeder
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/seed-board.sh" /path/to/tasks.txt
+```
+Idempotent: existing issues (matched by exact `"<task-id>: <title>"`) are skipped; fields are (re)applied. Watch for `!!`/`!` lines — each names the task and the failing step; fix and re-run.
+
+## 3. Verify
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/board.sh" list | sort
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/board.sh" next
+```
+Every seeded task should appear in the first status with its priority, and `next` should pick the expected first task.

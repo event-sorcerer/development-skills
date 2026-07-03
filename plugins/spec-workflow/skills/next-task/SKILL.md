@@ -1,0 +1,24 @@
+---
+name: next-task
+description: Select the next task from the project board, honoring priority, epic sequencing, and dependency guards from .claude/project.json, and read the task's human comments before committing to it. Use at the start of each build iteration.
+---
+
+# Pick the next task
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/board.sh" next          # or: next <spec-id> to restrict to one spec
+```
+The script already applies priority order, epic sequencing, and `blockedBy` guards from `.claude/project.json`, and prints `=> PICK: #N` plus any `BLOCKED` items with the reason.
+
+## Then, before committing to the pick (mandatory)
+1. `bash "${CLAUDE_PLUGIN_ROOT}/scripts/board.sh" show N` — read the body **and every comment**. Humans post steering, scope changes, and answers there.
+2. If comments change acceptance criteria or implementation details:
+   - Write the updated body to a temp file and apply it: `board.sh edit-body N <file>` (keep the original structure; fold the comment's decisions into the criteria).
+   - Reply so the human knows it was seen: `printf '%s' "Applied: <one-line summary of what changed>" | board.sh comment N`.
+3. If a comment asks a question you cannot answer or blocks the task (needs credentials, a human decision), reply with your best analysis via `comment`, skip this task, and take the next candidate from the list instead.
+
+## Output
+Report the chosen `#N` and why (priority + epic + any comment-driven changes). Hand off to the `implement-task` skill.
+
+## No work left?
+If `next` prints `(backlog empty)` or only BLOCKED items remain, stop the loop and write a handoff (see the `handoff` skill).
