@@ -1,4 +1,5 @@
 {
+    "$schema": "https://raw.githubusercontent.com/event-sorcerer/development-skills/main/plugins/spec-workflow/schemas/project-config.schema.json",
     "schemaVersion": 1,
     "project": {
         "name": "my-platform",

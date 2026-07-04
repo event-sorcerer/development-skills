@@ -150,7 +150,12 @@
             "properties": {
                 "tdd": { "type": "boolean", "default": true },
                 "isolationSuite": { "type": "string", "description": "Test path glob for the merge-gating isolation suite, if any (e.g. tests/isolation/**)." },
-                "maxInProgress": { "type": "integer", "default": 1 }
+                "maxInProgress": { "type": "integer", "default": 1 },
+                "iterativeUI": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "When true (default), UI-affecting decisions are delegated to the human via the ui-options skill; a local .claude/ITERATIVE_UI_OFF flag also disables it per-clone."
+                }
             }
         }
     },

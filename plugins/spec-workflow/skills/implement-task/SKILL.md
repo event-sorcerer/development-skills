@@ -21,7 +21,7 @@ You (the orchestrator) do **not** write the implementation. You brief a subagent
    ```
 
 ## 1. Spawn the dev agent
-Agent tool with `subagent_type: general-purpose`, `model: <cfg:delegation.devModel>`, and a descriptive `name`. One agent = one task. Fill EVERY section of the brief — specific WHAT/WHY beats generic:
+Agent tool with `subagent_type: general-purpose`, `model: <cfg:delegation.devModel>`, and a descriptive `name`. One agent = one task. Fill EVERY section of the brief — specific WHAT/WHY beats generic. The subagent sees ONLY the brief: paste actual text (criteria, spec excerpts, invariants, error output), never write "as discussed" or "see above".
 
 ```
 You are a senior engineer implementing ONE task of <cfg:project.name> (<cfg:project.description>).

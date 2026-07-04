@@ -12,7 +12,9 @@ If the line above says `PREFLIGHT FAIL`, STOP — follow its instruction instead
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/board.sh" next          # or: next <spec-id> to restrict to one spec
 ```
-The script already applies priority order, epic sequencing, and `blockedBy` guards from `.claude/project.json`, and prints `=> PICK: #N` plus any `BLOCKED` items with the reason.
+The script already applies priority order, epic sequencing, `blockedBy` guards, and the work-in-progress limit from `.claude/project.json`. It prints one of:
+- `=> PICK: #N` (+ any `BLOCKED` items with the reason) — proceed with #N;
+- `=> RESUME: #N` — work is already in progress at the WIP limit: do NOT start anything new; resume #N (its branch exists) and finish it to at least *In review* first.
 
 ## Then, before committing to the pick (mandatory)
 1. `bash "${CLAUDE_PLUGIN_ROOT}/scripts/board.sh" show N` — read the body **and every comment**. Humans post steering, scope changes, and answers there.

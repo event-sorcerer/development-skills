@@ -22,11 +22,15 @@ Each spec is a design document plus a backlog of numbered tasks. One repo can ha
 - For each spec, a backlog doc (e.g. `docs/BACKLOG.md`) should list every task: `<PREFIX>-<number>`, title, epic, priority, story points, acceptance criteria, Definition of Done. Number tasks in per-epic ranges (e.g. E0 = 001–009, E1 = 010–019, infra = 090–099) so ranges map cleanly to epics.
 
 ## Phase 3 — GitHub Project board
-Create one board per `boards[]` entry you plan (usually one), then collect its ids. Exact commands: read `${CLAUDE_PLUGIN_ROOT}/skills/setup-project/references/github-project-setup.md` **now** and follow it. It covers: creating the Project, adding the Status options, Priority and Estimate fields, and discovering every id with `board.sh fields`.
+Create one board per `boards[]` entry you plan (usually one). Exact commands: read `${CLAUDE_PLUGIN_ROOT}/skills/setup-project/references/github-project-setup.md` **now** and follow it. It covers: creating the Project, adding the Status options, Priority and Estimate fields.
 
 ## Phase 4 — write .claude/project.json
-1. Copy the template: `cp "${CLAUDE_PLUGIN_ROOT}/templates/project.example.json" .claude/project.json` (create `.claude/` if needed).
-2. Fill every field. The full schema with descriptions is `${CLAUDE_PLUGIN_ROOT}/schemas/project-config.schema.json`. Key decisions:
+1. Auto-fill the board ids (creates the config from the template if none exists, else updates `boards[0]` in place):
+   ```bash
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/init-config.sh" <owner> <owner/repo> <project-number>
+   ```
+   Review its output: reorder `statusFlow` / priority options if the board returned them in a different order than the intended pipeline/rank.
+2. Fill every field. The full schema with descriptions is `${CLAUDE_PLUGIN_ROOT}/schemas/project-config.schema.json`; keep the template's `$schema` line — it gives humans editor autocomplete/validation. Key decisions:
    - `project.branchPattern` — e.g. `<prefix>/<id>-<slug>` → branches like `cp/012-error-model`.
    - `boards[]` — ids from Phase 3. `statusFlow` order **is** the pipeline; priority `options` order **is** the priority order (highest first).
    - `specs[]` — one entry per spec: unique `taskPrefix`, `epics` in build order with `taskRanges`, and `blockedBy` guards for hard dependencies (e.g. nothing from E1 until E0 is fully Deployed).
@@ -38,7 +42,7 @@ Create one board per `boards[]` entry you plan (usually one), then collect its i
    ```
 
 ## Phase 5 — repo hygiene
-- Add the checkpoint flag to `.gitignore` (default): `echo ".claude/CHECKPOINT" >> .gitignore`
+- Add the local flags to `.gitignore`: `printf '.claude/CHECKPOINT\n.claude/ITERATIVE_UI_OFF\n' >> .gitignore`
 - Create `paths.handoffDir` (default `docs/handoffs/`).
 - If the project has a dev stack, set `commands.devUp` and write the doc at `paths.devDoc` (ports, profiles, preconditions).
 - Commit `.claude/project.json` + docs.

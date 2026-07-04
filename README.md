@@ -66,6 +66,7 @@ Spec-driven autonomous build workflow. A repo declares its boards, specs, epics,
 | `board` | All board reads/writes (single script, no hardcoded ids) |
 | `next-task` | Prioritized + sequenced + guarded pick; reads human comments |
 | `implement-task` | One task via TDD, delegated to a dev subagent with a what/how/why brief |
+| `ui-options` | Iterative UI mode: human picks the UI from an options page (favorite + aspects) |
 | `gate` | The project's single green-before-advance quality command |
 | `build-next` | One full loop iteration — drive with `/loop /spec-workflow:build-next` |
 | `checkpoint` | Pause/resume the loop via a local flag file |

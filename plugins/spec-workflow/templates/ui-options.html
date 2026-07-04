@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<!--
+  ui-options.html — template for the spec-workflow Iterative UI mode.
+  The agent copies this file to docs/ui-options/<task-id>.html and:
+    1. replaces __TASK_ID__, __TASK_TITLE__, __ISSUE_URL__
+    2. duplicates the <section class="option"> block once per design option,
+       replacing __OPTION_ID__ (A, B, C...), __OPTION_NAME__, __OPTION_SUMMARY__,
+       the mockup inside .preview, and the aspect <label> chips (4–8 per option,
+       each a short keyword describing a UI trait, e.g. "dense layout").
+  No external assets — everything inline.
+-->
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI options — __TASK_ID__</title>
+<style>
+  :root { color-scheme: light dark; --accent:#4f6ef7; --border:#8884; }
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0 auto; max-width: 1100px; padding: 1.5rem 1rem 7rem; }
+  header h1 { margin: 0 0 .25rem; font-size: 1.35rem; }
+  .hint { background: #4f6ef71a; border: 1px solid var(--accent); border-radius: 8px; padding: .6rem .9rem; margin: 1rem 0; font-size: .9rem; }
+  .hint code { background: #8883; padding: 0 .3em; border-radius: 4px; }
+  .option { border: 1px solid var(--border); border-radius: 12px; margin: 1.25rem 0; overflow: hidden; }
+  .option > .head { display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem; border-bottom: 1px solid var(--border); }
+  .option > .head h2 { margin: 0; font-size: 1.05rem; flex: 1; }
+  .option .fav { display: flex; align-items: center; gap: .4rem; font-weight: 600; cursor: pointer; }
+  .preview { padding: 1rem; background: #8881; overflow-x: auto; }
+  .aspects { display: flex; flex-wrap: wrap; gap: .5rem; padding: .75rem 1rem 1rem; }
+  .aspects label { border: 1px solid var(--border); border-radius: 999px; padding: .25rem .75rem; cursor: pointer; user-select: none; font-size: .85rem; }
+  .aspects input { vertical-align: -2px; margin-right: .35rem; }
+  .aspects label:has(input:checked) { background: var(--accent); color: #fff; border-color: var(--accent); }
+  textarea { width: 100%; box-sizing: border-box; min-height: 4rem; border-radius: 8px; border: 1px solid var(--border); padding: .6rem; font: inherit; }
+  footer { position: fixed; inset: auto 0 0 0; background: Canvas; border-top: 1px solid var(--border); padding: .75rem 1rem; display: flex; gap: 1rem; align-items: center; justify-content: center; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: .6rem 1.2rem; font: inherit; font-weight: 600; cursor: pointer; }
+  #out { display: none; white-space: pre-wrap; background: #8881; border: 1px dashed var(--border); border-radius: 8px; padding: .75rem; margin-top: 1rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>UI options — __TASK_ID__: __TASK_TITLE__</h1>
+  <div>Pick your favorite option and/or tick the aspects you like in any option, then <b>Copy selection</b> and paste it as a comment on <a href="__ISSUE_URL__">the task issue</a>.</div>
+</header>
+
+<div class="hint">
+  <b>Iterative UI mode is ON</b> (the agent waits for your pick before committing to a UI, and keeps building everything else meanwhile).
+  Turn it off with <code>touch .claude/ITERATIVE_UI_OFF</code> in the repo — or just tell the agent "turn off iterative UI" / that you'll be AFK, and it will decide UIs itself.
+</div>
+
+<!-- BEGIN OPTION (duplicate this whole section per option) -->
+<section class="option" data-option="__OPTION_ID__" data-name="__OPTION_NAME__">
+  <div class="head">
+    <h2>Option __OPTION_ID__ — __OPTION_NAME__</h2>
+    <label class="fav"><input type="radio" name="favorite" value="__OPTION_ID__"> favorite</label>
+  </div>
+  <div class="preview">
+    <!-- self-contained mockup of this option (inline HTML+CSS, no external assets) -->
+    __OPTION_SUMMARY__
+  </div>
+  <div class="aspects">
+    <!-- 4–8 chips; value = short trait keyword -->
+    <label><input type="checkbox" value="__ASPECT_KEYWORD__">__ASPECT_KEYWORD__</label>
+  </div>
+</section>
+<!-- END OPTION -->
+
+<label for="notes"><b>Notes for the agent</b> (optional)</label>
+<textarea id="notes" placeholder="e.g. option B, but with option A's color palette; avoid modals"></textarea>
+<pre id="out"></pre>
+
+<footer>
+  <button id="copy">Copy selection</button>
+  <span id="status"></span>
+</footer>
+
+<script>
+document.getElementById('copy').addEventListener('click', async () => {
+  const fav = document.querySelector('input[name="favorite"]:checked');
+  const lines = ['### UI selection — __TASK_ID__'];
+  if (fav) {
+    const s = fav.closest('.option');
+    lines.push(`- Favorite: Option ${s.dataset.option} — ${s.dataset.name}`);
+  } else {
+    lines.push('- Favorite: (none picked)');
+  }
+  const liked = [];
+  document.querySelectorAll('.option').forEach(s => {
+    const ks = [...s.querySelectorAll('.aspects input:checked')].map(i => i.value);
+    if (ks.length) liked.push(`  - Option ${s.dataset.option} (${s.dataset.name}): ${ks.join(', ')}`);
+  });
+  if (liked.length) lines.push('- Liked aspects:', ...liked);
+  const notes = document.getElementById('notes').value.trim();
+  if (notes) lines.push(`- Notes: ${notes}`);
+  const text = lines.join('\n');
+  const out = document.getElementById('out');
+  out.textContent = text; out.style.display = 'block';
+  try {
+    await navigator.clipboard.writeText(text);
+    document.getElementById('status').textContent = 'Copied — paste it as a comment on the task issue.';
+  } catch {
+    document.getElementById('status').textContent = 'Clipboard blocked — copy the text shown above manually.';
+  }
+});
+</script>
+</body>
+</html>
