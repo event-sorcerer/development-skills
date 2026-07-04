@@ -16,11 +16,17 @@
 <title>UI options — __TASK_ID__</title>
 <style>
   :root { color-scheme: light dark; --accent:#4f6ef7; --border:#8884; }
-  body { font: 15px/1.5 system-ui, sans-serif; margin: 0 auto; max-width: 1100px; padding: 1.5rem 1rem 7rem; }
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0 auto; max-width: 1720px; padding: 1.5rem 1.4rem 7rem; }
+  .options { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(560px, 1fr)); align-items: start; margin: 1.25rem 0; }
   header h1 { margin: 0 0 .25rem; font-size: 1.35rem; }
   .hint { background: #4f6ef71a; border: 1px solid var(--accent); border-radius: 8px; padding: .6rem .9rem; margin: 1rem 0; font-size: .9rem; }
   .hint code { background: #8883; padding: 0 .3em; border-radius: 4px; }
-  .option { border: 1px solid var(--border); border-radius: 12px; margin: 1.25rem 0; overflow: hidden; }
+  .option { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .option.collapsed .preview, .option.collapsed .aspects { display: none; }
+  .option.focused { position: fixed; inset: 0; z-index: 60; border-radius: 0; overflow: auto; background: Canvas; }
+  .option.focused .preview { min-height: 70vh; display: flex; align-items: center; justify-content: center; }
+  .ghost { background: none; border: 1px solid var(--border); color: inherit; border-radius: 999px;
+           padding: .28rem .8rem; font: inherit; font-size: .8rem; cursor: pointer; }
   .option > .head { display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem; border-bottom: 1px solid var(--border); }
   .option > .head h2 { margin: 0; font-size: 1.05rem; flex: 1; }
   .option .fav { display: flex; align-items: center; gap: .4rem; font-weight: 600; cursor: pointer; }
@@ -50,10 +56,13 @@
   <br>Ways back to the agent: comment on <a href="__ISSUE_URL__">the issue</a> (read every iteration, works even after the session ends), or reopen the building session in a terminal: <code>claude --resume __SESSION_ID__</code>.
 </div>
 
-<!-- BEGIN OPTION (duplicate this whole section per option) -->
+<div class="options">
+<!-- BEGIN OPTION (duplicate this whole section per option, inside div.options) -->
 <section class="option" data-option="__OPTION_ID__" data-name="__OPTION_NAME__">
   <div class="head">
     <h2>Option __OPTION_ID__ — __OPTION_NAME__</h2>
+    <button class="ghost tgl-focus" type="button">Focus</button>
+    <button class="ghost tgl-hide" type="button">Hide</button>
     <button class="use" type="button">Use this one</button>
     <label class="fav"><input type="radio" name="favorite" value="__OPTION_ID__"> favorite</label>
   </div>
@@ -67,13 +76,15 @@
   </div>
 </section>
 <!-- END OPTION -->
+</div>
 
 <label for="notes"><b>Notes for the agent</b> (optional)</label>
 <textarea id="notes" placeholder="e.g. option B, but with option A's color palette; avoid modals"></textarea>
 <pre id="out"></pre>
 
 <footer>
-  <button id="copy">Send selection</button>
+  <button id="send">Send selection</button>
+  <button id="copy" class="ghost">Copy instead</button>
   <span id="status"></span>
 </footer>
 
@@ -82,10 +93,10 @@
 // as a plain file it falls back to clipboard -> execCommand -> auto-select.
 const HUB_ID = location.pathname.startsWith('/decision/') ? decodeURIComponent(location.pathname.split('/').pop()) : null;
 const statusEl = () => document.getElementById('status');
-async function deliver(text) {
+async function deliver(text, forceCopy = false) {
   const out = document.getElementById('out');
   out.textContent = text; out.style.display = 'block';
-  if (HUB_ID) {
+  if (HUB_ID && !forceCopy) {
     try {
       const r = await fetch('/api/answer', { method: 'POST', headers: {'Content-Type': 'application/json'},
                                              body: JSON.stringify({ id: HUB_ID, selection: text }) });
@@ -119,7 +130,7 @@ document.querySelectorAll('.use').forEach(btn => btn.addEventListener('click', (
   deliver(withNotes([`### UI selection — __TASK_ID__`,
                      `- Use: Option ${s.dataset.option} — ${s.dataset.name} (as-is, final)`]));
 }));
-document.getElementById('copy').addEventListener('click', () => {
+function composed() {
   const fav = document.querySelector('input[name="favorite"]:checked');
   const lines = ['### UI selection — __TASK_ID__'];
   if (fav) {
@@ -134,8 +145,30 @@ document.getElementById('copy').addEventListener('click', () => {
     if (ks.length) liked.push(`  - Option ${s.dataset.option} (${s.dataset.name}): ${ks.join(', ')}`);
   });
   if (liked.length) lines.push('- Liked aspects:', ...liked);
-  deliver(withNotes(lines));
-});
+  return withNotes(lines);
+}
+document.getElementById('send').addEventListener('click', () => deliver(composed()));
+document.getElementById('copy').addEventListener('click', () => deliver(composed(), true));
+
+// hide / focus one option
+document.querySelectorAll('.tgl-hide').forEach(btn => btn.addEventListener('click', () => {
+  const s = btn.closest('.option');
+  s.classList.toggle('collapsed');
+  btn.textContent = s.classList.contains('collapsed') ? 'Show' : 'Hide';
+}));
+function unfocus() {
+  document.querySelectorAll('.option.focused').forEach(s => {
+    s.classList.remove('focused');
+    s.querySelector('.tgl-focus').textContent = 'Focus';
+  });
+}
+document.querySelectorAll('.tgl-focus').forEach(btn => btn.addEventListener('click', () => {
+  const s = btn.closest('.option');
+  const was = s.classList.contains('focused');
+  unfocus();
+  if (!was) { s.classList.remove('collapsed'); s.classList.add('focused'); btn.textContent = 'Exit focus (Esc)'; }
+}));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') unfocus(); });
 </script>
 </body>
 </html>

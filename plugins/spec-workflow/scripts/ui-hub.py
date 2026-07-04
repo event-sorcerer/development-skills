@@ -46,7 +46,7 @@ HUB_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>Decision hub</title>
 <style>
 :root{color-scheme:light dark;--accent:#4f6ef7;--border:#8884;--muted:#888}
-body{font:15px/1.5 system-ui,sans-serif;max-width:1100px;margin:0 auto;padding:1.2rem 1rem 4rem}
+body{font:15px/1.5 system-ui,sans-serif;margin:0 auto;padding:1.2rem 1.6rem 4rem}
 h1{font-size:1.2rem;margin:.2rem 0}
 .sub{color:var(--muted);font-size:.88rem}
 .card{border:1px solid var(--border);border-radius:12px;margin:1rem 0;overflow:hidden}
@@ -55,7 +55,7 @@ h1{font-size:1.2rem;margin:.2rem 0}
 .card .h b{flex:1}
 .badge{background:var(--accent);color:#fff;border-radius:999px;font-size:.68rem;font-weight:700;padding:.15rem .6rem;text-transform:uppercase;letter-spacing:.05em}
 .age{color:var(--muted);font-size:.78rem}
-iframe{width:100%;height:72vh;border:0;display:block}
+iframe{width:100%;height:82vh;border:0;display:block}
 .done{padding:.7rem 1rem;font-size:.88rem}
 .done pre{white-space:pre-wrap;background:#8881;border-radius:8px;padding:.6rem .8rem;font-size:.82rem}
 .empty{color:var(--muted);text-align:center;padding:3rem 0}
