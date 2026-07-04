@@ -30,11 +30,13 @@ echo "== syntax =="
 for f in "$PLUGIN"/scripts/*.sh "$HERE"/run-tests.sh; do
     if bash -n "$f"; then echo "ok   bash -n $(basename "$f")"; else echo "FAIL bash -n $f"; fails=$((fails + 1)); fi
 done
-if python3 -m py_compile "$PLUGIN/scripts/validate-config.py"; then
-    echo "ok   py_compile validate-config.py"
-else
-    echo "FAIL py_compile"; fails=$((fails + 1))
-fi
+for p in validate-config.py next.py ui-hub.py; do
+    if python3 -m py_compile "$PLUGIN/scripts/$p"; then
+        echo "ok   py_compile $p"
+    else
+        echo "FAIL py_compile $p"; fails=$((fails + 1))
+    fi
+done
 
 echo "== validate-config =="
 out="$(python3 "$PLUGIN/scripts/validate-config.py" "$FIX/valid.project.json")"
@@ -74,6 +76,21 @@ out="$(cd "$T" && bash "$PLUGIN/scripts/preflight.sh" --spec)"
 check "config + spec ok" "preflight ok: config + 1 spec(s) present" "$out"
 out="$(cd "$T" && bash "$PLUGIN/scripts/preflight.sh")"
 check "config-only ok" "preflight ok: config present" "$out"
+
+echo "== ui-hub (lifecycle on a scratch port) =="
+_hubtmp="$(mktemp -d)"
+export UI_HUB_STATE="$_hubtmp/hub" UI_HUB_PORT=4799
+HUB="$PLUGIN/scripts/ui-hub.py"
+out="$(python3 "$HUB" start)";                        check "hub starts" "RUNNING http://127.0.0.1:4799" "$out"
+echo '<h1>d</h1>' > "$UI_HUB_STATE/d.html"
+out="$(python3 "$HUB" ask d1 "T" "$UI_HUB_STATE/d.html" --blocking)"; check "hub ask" "asked 'd1'" "$out"
+out="$(curl -sf http://127.0.0.1:4799/api/state)";    check "hub state has pending" '"id": "d1"' "$out"
+out="$(curl -sf -X POST http://127.0.0.1:4799/api/answer -H 'Content-Type: application/json' -d '{"id":"d1","selection":"- Use: Option A"}')"
+check "hub answer accepted" '"ok": true' "$out"
+out="$(python3 "$HUB" answers --consume)";            check "hub answer collected" "Use: Option A" "$out"
+out="$(python3 "$HUB" answers)";                      check_absent "hub consume archived it" "d1" "$out"
+python3 "$HUB" stop >/dev/null
+unset UI_HUB_STATE UI_HUB_PORT
 
 echo "== init-config (fake gh) =="
 G="$(mktemp -d)"
