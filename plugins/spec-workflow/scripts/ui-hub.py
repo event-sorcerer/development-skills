@@ -47,29 +47,31 @@ HUB_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>Decision hub</title>
 <style>
 :root{color-scheme:light dark;--accent:#4f6ef7;--border:#8884;--muted:#888}
-body{font:15px/1.5 system-ui,sans-serif;margin:0 auto;padding:1.2rem 1.6rem 4rem}
-h1{font-size:1.2rem;margin:.2rem 0}
-.sub{color:var(--muted);font-size:.88rem}
-.card{border:1px solid var(--border);border-radius:12px;margin:1rem 0;overflow:hidden}
-.card.blocking{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
-.card .h{display:flex;gap:.8rem;align-items:center;padding:.6rem 1rem;border-bottom:1px solid var(--border)}
-.card .h b{flex:1}
-.badge{background:var(--accent);color:#fff;border-radius:999px;font-size:.68rem;font-weight:700;padding:.15rem .6rem;text-transform:uppercase;letter-spacing:.05em}
-.age{color:var(--muted);font-size:.78rem}
-iframe{width:100%;height:82vh;border:0;display:block}
-.done{padding:.7rem 1rem;font-size:.88rem}
+body{font:15px/1.5 system-ui,sans-serif;margin:0 auto;padding:.5rem 1rem 2rem}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem}
+.sub{color:var(--muted);font-size:.78rem}
+.sub b{color:inherit;font-weight:600}
+#answered-box{position:relative;font-size:.78rem;color:var(--muted);flex-shrink:0}
+#answered-box summary{cursor:pointer;list-style-position:inside}
+#answered-box[open]>div{position:absolute;right:0;top:calc(100% + .3rem);z-index:90;width:min(480px,90vw);
+  max-height:60vh;overflow:auto;background:Canvas;border:1px solid var(--border);border-radius:10px;padding:.6rem .8rem;box-shadow:0 8px 24px #0004}
+.card{margin:1rem 0}
+.card.blocking iframe{outline:2px solid var(--accent);outline-offset:-2px;border-radius:12px}
+iframe{width:100%;height:88vh;border:0;display:block}
+.done{border:1px solid var(--border);border-radius:12px;padding:.7rem 1rem;font-size:.88rem}
+.done b{display:block;margin-bottom:.3rem}
 .done pre{white-space:pre-wrap;background:#8881;border-radius:8px;padding:.6rem .8rem;font-size:.82rem}
 .empty{color:var(--muted);text-align:center;padding:3rem 0}
 details{margin-top:1.5rem}summary{cursor:pointer;color:var(--muted)}
 </style></head><body>
-<h1>Decision hub</h1>
-<div class="sub">Keep this tab open — the agent adds cards here when it needs your call and picks answers up automatically. Nothing to copy, nowhere else to go.</div>
+<div class="top">
+<div class="sub"><b>Decision hub</b> · keep this tab open — answers reach the agent automatically</div>
+<details id="answered-box"><summary>Answered (<span id="ans-n">0</span>)</summary><div id="answered"></div></details>
+</div>
 <div id="pending"></div>
-<details><summary>Answered</summary><div id="answered"></div></details>
 <script>
 const seen = new Set(); let notifOk = false; let hubRev = null;
 document.addEventListener('click', () => { if (!notifOk && 'Notification' in window) { Notification.requestPermission(); notifOk = true; } }, {once: true});
-function age(t){const m=Math.floor((Date.now()/1000-t)/60);return m<1?'just now':m<60?m+' min':Math.floor(m/60)+' h '+(m%60)+' min';}
 async function tick(){
   let st; try { st = await (await fetch('/api/state')).json(); } catch { return; }
   if (hubRev === null) hubRev = st.hubRev;
@@ -81,11 +83,8 @@ async function tick(){
     if (have.has(d.id)) continue;
     const c = document.createElement('div');
     c.className = 'card' + (d.blocking ? ' blocking' : ''); c.dataset.id = d.id;
-    c.innerHTML = '<div class="h"><b></b>' + (d.blocking ? '<span class="badge">agent is waiting on this</span>' : '') +
-                  '<span class="age">asked ' + age(d.created) + ' ago</span></div>' +
-                  '<iframe src="/decision/' + encodeURIComponent(d.id) + '?rev=' + d.rev + '"></iframe>';
+    c.innerHTML = '<iframe src="/decision/' + encodeURIComponent(d.id) + '?rev=' + d.rev + '"></iframe>';
     c.dataset.rev = d.rev;
-    c.querySelector('b').textContent = d.title;
     p.prepend(c);
     if (!seen.has(d.id) && seen.size && 'Notification' in window && Notification.permission === 'granted')
       new Notification('Decision needed: ' + d.title);
@@ -101,10 +100,11 @@ async function tick(){
   for (const c of [...p.querySelectorAll('.card')])
     if (!st.pending.some(d => d.id === c.dataset.id)) c.remove();
   const a = document.getElementById('answered');
+  document.getElementById('ans-n').textContent = st.answered.length;
   a.innerHTML = '';
   for (const d of st.answered.slice().reverse()) {
     const e = document.createElement('div'); e.className = 'card';
-    e.innerHTML = '<div class="h"><b></b><span class="age">answered</span></div><div class="done"><pre></pre></div>';
+    e.innerHTML = '<div class="done"><b></b><pre></pre></div>';
     e.querySelector('b').textContent = d.title || d.id;
     e.querySelector('pre').textContent = d.selection;
     a.appendChild(e);
@@ -141,6 +141,11 @@ class Handler(BaseHTTPRequestHandler):
             answered = sorted((json.loads(f.read_text()) for f in list(OUTBOX.glob("*.json")) + list((ARCHIVE / "answers").glob("*.json"))),
                               key=lambda d: d.get("answered", 0))
             return self._send(200, {"hubRev": HUB_REV, "pending": pending, "answered": answered[-20:]})
+        if self.path == "/vendor/axe.min.js":
+            f = Path(__file__).parent / "vendor" / "axe.min.js"
+            if f.is_file():
+                return self._send(200, f.read_bytes(), "text/javascript; charset=utf-8")
+            return self._send(404, {"error": "axe.min.js not vendored"})
         if self.path.startswith("/decision/"):
             did = os.path.basename(self.path.split("?")[0])
             f = HTML / f"{did}.html"
@@ -160,6 +165,11 @@ class Handler(BaseHTTPRequestHandler):
         req_file = INBOX / f"{did}.json"
         meta = json.loads(req_file.read_text()) if req_file.is_file() else {"id": did}
         meta.update({"selection": selection, "answered": int(time.time())})
+        if body.get("keep"):
+            # partial feedback (e.g. "fix these a11y issues") — deliver to the agent
+            # but keep the decision card pending so the human can still answer it
+            (OUTBOX / f"{did}.fix-{int(time.time())}.json").write_text(json.dumps(meta, indent=1))
+            return self._send(200, {"ok": True, "kept": True})
         (OUTBOX / f"{did}.json").write_text(json.dumps(meta, indent=1))
         if req_file.is_file():
             req_file.rename(ARCHIVE / "asked" / f"{did}.json")
