@@ -824,6 +824,47 @@ out="$(hookjson 'bash board.sh move 7 \"In review\"' | (cd "$T3M" && bash "$PLUG
 check "marker: move allowed immediately after pass despite tracked .claude dir" "rc=0" "$out"
 rm -rf "$T3M"
 
+echo "== gate enforcement (telemetry.jsonl excluded from fingerprint, SW-023 follow-up) =="
+T3N="$(mktemp -d)"; mkdir -p "$T3N/.claude"
+python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); c["commands"]["gate"]="true"; json.dump(c,open(sys.argv[2],"w"))' \
+    "$FIX/valid.project.json" "$T3N/.claude/project.json"
+( cd "$T3N" && git init -q . && git add .claude/project.json && git commit -q -m init )
+before="$(cd "$T3N" && bash "$PLUGIN/scripts/tree-state.sh")"
+echo '{"kind":"gate","task":"x","ok":true,"ts":"2026-01-01T00:00:00Z"}' > "$T3N/.claude/telemetry.jsonl"
+after="$(cd "$T3N" && bash "$PLUGIN/scripts/tree-state.sh")"
+if [[ "$before" == "$after" ]]; then
+    echo "ok   telemetry: fingerprint unaffected by .claude/telemetry.jsonl appearing"
+else
+    echo "FAIL telemetry: fingerprint changed when .claude/telemetry.jsonl appeared -- before=$before after=$after"
+    fails=$((fails + 1))
+fi
+rm -f "$T3N/.claude/telemetry.jsonl"
+
+# Full integration: gate green, then a routine board.sh move (any task, any
+# status) appends a transition event to the SAME telemetry.jsonl the pass was
+# recorded against; the guard re-check for a DIFFERENT move must still see a
+# VALID, current pass. Also a concurrency-safety property: one lane's routine
+# move must not invalidate another lane's recorded pass (telemetry.jsonl is
+# shared across the whole repo).
+out="$(cd "$T3N" && bash "$PLUGIN/scripts/gate.sh" 2>&1)"
+check "telemetry: gate pass recorded" "GATE PASS recorded" "$out"
+T3NGH="$(mktemp -d)"
+cat >"$T3NGH/gh" <<'FAKE'
+#!/usr/bin/env bash
+set -uo pipefail
+case "$1 $2" in
+    "project item-list") echo "ITEM_7" ;;
+    "project item-edit") echo "edited" ;;
+    *) echo "fake gh: unexpected: $*" >&2; exit 1 ;;
+esac
+FAKE
+chmod +x "$T3NGH/gh"
+out="$(cd "$T3N" && PATH="$T3NGH:$PATH" bash "$PLUGIN/scripts/board.sh" move 7 Backlog 2>&1)"
+check "telemetry: routine move succeeded" "moved #7 -> Backlog" "$out"
+out="$(hookjson 'bash board.sh move 7 \"In review\"' | (cd "$T3N" && bash "$PLUGIN/scripts/guard-board-move.sh" 2>&1); echo "rc=$?")"
+check "telemetry: a routine move must not invalidate a still-current gate pass" "rc=0" "$out"
+rm -rf "$T3N" "$T3NGH"
+
 echo "== session-start hook =="
 T4="$(mktemp -d)"
 ( cd "$T4" && git init -q . )
