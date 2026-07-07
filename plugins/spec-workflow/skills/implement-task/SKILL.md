@@ -51,6 +51,12 @@ Branch already checked out: <branch>.
 4. Run `<cfg:commands.gate>` until GREEN. Then push the branch and open a PR with body
    "Closes #N". Report the PR URL.
 5. Match surrounding code style; small focused commits; update spec/docs if you changed a contract.
+   Documentation you own in this change: <paste the cfg:docs[] sets whose `covers` globs match
+   the task's expected paths — id, path, notes>. If your diff changes behavior/config/usage a
+   set documents, update it in the same PR; if none needed, say why in the PR body.
+6. Author every commit with these exact flags (per-commit -c flags only — never git config writes):
+   git <paste the `flags:` line from `bash "${CLAUDE_PLUGIN_ROOT}/scripts/identity.sh" dev`> commit ...
+   <omit this section if identity.sh reports the dev role OFF or UNRESOLVED>
 
 ## WHY
 <the architectural reason this task exists + the invariant it protects — derive from the spec;
@@ -73,6 +79,10 @@ Large task? Split into sequential briefs (e.g. tests+core, then edge cases), eac
 board.sh move N "In review"     # a hook blocks this unless gate.sh recorded a pass for the current tree
 ```
 Review in **two passes**, each by a review agent (`model: <cfg:delegation.reviewModel>`): (1) **spec compliance** — does the diff satisfy each acceptance criterion and cited spec §, nothing more, nothing less; (2) **code quality** — correctness, style, tests. Relay findings to a dev agent; re-gate. A single combined pass reliably misses "passes tests but isn't what the spec said."
+
+Orchestrator-authored commits (design docs, spec-delta folds) use the `flags:` line from `identity.sh orchestrator` the same per-commit way (skip if OFF/UNRESOLVED).
+
+**Auto-merge** (`methodology.autoMerge: true`): after both passes are clean, do NOT wait for a human — run the PR-review/approve/merge protocol in `${CLAUDE_PLUGIN_ROOT}/skills/build-next/references/auto-review.md` (independent reviewer agent on `cfg:delegation.prReviewModel`, ≤3 fix rounds, approval recorded on the PR, `gh pr merge`, merge announced on the issue + to live teammates).
 
 ## 4. Stop
 One task per invocation. Report: task, gate result, PR link, board status. Later statuses (QA/Ready/Deployed) only when merge/validation/publish actually happen.
