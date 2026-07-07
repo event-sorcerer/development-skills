@@ -1,4 +1,9 @@
 {
+  "decide-oqs-before-brief->frozen-contracts-parallel-prs": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "frozen-contracts-parallel-prs->rebase-before-re-review": {
     "fires": 0,
     "last": null,
