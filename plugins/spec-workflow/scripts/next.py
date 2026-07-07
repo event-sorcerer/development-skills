@@ -68,7 +68,9 @@ def main(cfg_path, bid, items_path, only_spec=""):
             return None
         for g in epic.get("blockedBy", []):
             sts = epic_status.get((spec["id"], g["epic"]), [])
-            if not sts or not all(at_least(st, g["untilStatus"]) for st in sts):
+            if not sts:
+                return f'epic {g["epic"]} unseeded — run seed-board'
+            if not all(at_least(st, g["untilStatus"]) for st in sts):
                 return f'epic {g["epic"]} not fully {g["untilStatus"]}'
         return None
 
