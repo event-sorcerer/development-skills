@@ -57,6 +57,26 @@ else
     fails=$((fails + 1))
 fi
 
+# anti-pattern: an inline `python3 -c` embedded in a .sh script uses an f-string whose
+# quote delimiter (") is nested inside its own {} expression -- e.g. f"{it["id"]}". That is
+# only valid on Python 3.12+ (PEP 701); it raises a SyntaxError on the stock python3 shipped
+# with macOS <= 14, Ubuntu <= 22.04, Debian 11/12, RHEL 8/9. py_compile above only checks
+# standalone .py files and never sees inline `python3 -c` snippets, so this class of bug is
+# otherwise invisible until it hits an interpreter older than whatever's first on the
+# dev/CI PATH. Static, interpreter-independent: no old python3 needs to be installed.
+inline_py_fstring_bugs=""
+for f in "$PLUGIN"/scripts/*.sh; do
+    hit="$(grep -nE 'f"[^"{}]*\{[^{}]*"[^{}]*\}' "$f" || true)"
+    [[ -n "$hit" ]] && inline_py_fstring_bugs+="$f: $hit"$'\n'
+done
+if [[ -z "$inline_py_fstring_bugs" ]]; then
+    echo "ok   no inline python3 -c f-string nests its own quote char in a {} expression (3.12+-only)"
+else
+    echo "FAIL inline python3 -c f-string nests its own quote char in a {} expression -- 3.12+-only syntax, breaks on older stock python3:"
+    echo "$inline_py_fstring_bugs"
+    fails=$((fails + 1))
+fi
+
 echo "== config.py (shared loader) =="
 CT="$(mktemp -d)"; mkdir -p "$CT/.claude"
 cp "$FIX/valid.project.yaml" "$CT/.claude/project.yaml"
@@ -573,11 +593,16 @@ case "$1 $2" in
         if [[ "${FAKE_GH_HANG:-0}" == "1" ]]; then
             sleep "${FAKE_GH_HANG_SECS:-3}"
         fi
-        printf 'In progress\tP0\t#1\tAdd widget\n'
-        printf 'In review\tP1\t#2\tFix bug\n'
-        printf 'Backlog\tP2\t#3\tIdea\n'
-        [[ -n "${FAKE_GH_XSS_TITLE:-}" ]] && printf 'In progress\tP0\t#9\t%s\n' "${FAKE_GH_XSS_TITLE}"
-        true
+        items='[
+  {"id":"ITEM_1","content":{"number":1,"title":"Add widget"},"title":"Add widget","status":"In progress","priority":"P0"},
+  {"id":"ITEM_2","content":{"number":2,"title":"Fix bug"},"title":"Fix bug","status":"In review","priority":"P1"},
+  {"id":"ITEM_3","content":{"number":3,"title":"Idea"},"title":"Idea","status":"Backlog","priority":"P2"}
+]'
+        if [[ -n "${FAKE_GH_XSS_TITLE:-}" ]]; then
+            extra="$(python3 -c 'import json,sys; print(json.dumps({"id":"ITEM_9","content":{"number":9,"title":sys.argv[1]},"title":sys.argv[1],"status":"In progress","priority":"P0"}))' "${FAKE_GH_XSS_TITLE}")"
+            items="$(python3 -c 'import json,sys; a=json.loads(sys.argv[1]); a.append(json.loads(sys.argv[2])); print(json.dumps(a))' "$items" "$extra")"
+        fi
+        python3 -c 'import json,sys; print(json.dumps({"items": json.loads(sys.argv[1])}))' "$items"
         ;;
     *) echo "fake gh: unexpected: $*" >&2; exit 1 ;;
 esac
@@ -868,7 +893,7 @@ cat >"$T3NGH/gh" <<'FAKE'
 #!/usr/bin/env bash
 set -uo pipefail
 case "$1 $2" in
-    "project item-list") echo "ITEM_7" ;;
+    "project item-list") echo '{"items":[{"id":"ITEM_7","content":{"number":7}}]}' ;;
     "project item-edit") echo "edited" ;;
     *) echo "fake gh: unexpected: $*" >&2; exit 1 ;;
 esac
@@ -952,10 +977,8 @@ case "$1 $2" in
     "project item-list")
         n=$(( $(cat "$FAKE_GH_CALLCOUNT" 2>/dev/null || echo 0) + 1 ))
         echo "$n" >"$FAKE_GH_CALLCOUNT"
-        if [[ "$*" == *"select(.content.number=="* ]]; then
-            if [[ "${FAKE_GH_NEVER_VISIBLE:-0}" != "1" && "$n" -ge "${FAKE_GH_VISIBLE_AFTER:-1}" ]]; then
-                echo "ITEM_${FAKE_GH_ISSUE_NUM:-501}"
-            fi
+        if [[ "${FAKE_GH_NEVER_VISIBLE:-0}" != "1" && "$n" -ge "${FAKE_GH_VISIBLE_AFTER:-1}" ]]; then
+            echo "{\"items\":[{\"id\":\"ITEM_${FAKE_GH_ISSUE_NUM:-501}\",\"content\":{\"number\":${FAKE_GH_ISSUE_NUM:-501}}}]}"
         else
             echo '{"items":[]}'
         fi
@@ -1032,10 +1055,8 @@ case "$1 $2" in
     "project item-list")
         n=$(( $(cat "$FAKE_GH_CALLCOUNT" 2>/dev/null || echo 0) + 1 ))
         echo "$n" >"$FAKE_GH_CALLCOUNT"
-        if [[ "$*" == *"select(.content.number=="* ]]; then
-            if [[ "${FAKE_GH_NEVER_VISIBLE:-0}" != "1" && "$n" -ge "${FAKE_GH_VISIBLE_AFTER:-1}" ]]; then
-                echo "ITEM_${FAKE_GH_ISSUE_NUM:-601}"
-            fi
+        if [[ "${FAKE_GH_NEVER_VISIBLE:-0}" != "1" && "$n" -ge "${FAKE_GH_VISIBLE_AFTER:-1}" ]]; then
+            echo "{\"items\":[{\"id\":\"ITEM_${FAKE_GH_ISSUE_NUM:-601}\",\"content\":{\"number\":${FAKE_GH_ISSUE_NUM:-601}}}]}"
         else
             echo '{"items":[]}'
         fi
@@ -1613,7 +1634,7 @@ cat >"$BMGH/gh" <<'FAKE'
 #!/usr/bin/env bash
 set -uo pipefail
 case "$1 $2" in
-    "project item-list") echo "ITEM_1" ;;
+    "project item-list") echo '{"items":[{"id":"ITEM_1","content":{"number":1}}]}' ;;
     "project item-edit") echo "edited" ;;
     *) echo "fake gh: unexpected: $*" >&2; exit 1 ;;
 esac
@@ -1685,6 +1706,213 @@ check "issues verb: gh failure -- actionable error" "ERROR:" "$out"
 check_absent "issues verb: gh failure -- no partial issues JSON on stdout" '"issues"' "$out"
 
 rm -rf "$FTD" "$FTGH"
+
+echo "== board.sh pagination (SW-013: no silent 400/500-item truncation, SPEC 7.4) =="
+PG="$(mktemp -d)"; mkdir -p "$PG/.claude"
+cp "$FIX/valid.project.yaml" "$PG/.claude/project.yaml"
+PGH="$(mktemp -d)"
+cat >"$PGH/gh" <<'FAKE'
+#!/usr/bin/env bash
+set -uo pipefail
+_limit_of() { # extract the value following a --limit flag from "$@"
+    local prev=""
+    for a in "$@"; do
+        if [[ "$prev" == "--limit" ]]; then printf '%s' "$a"; return 0; fi
+        prev="$a"
+    done
+    printf '400'
+}
+case "$1 $2" in
+    "project item-list")
+        [[ -n "${FAKE_GH_LOG:-}" ]] && echo "$*" >>"$FAKE_GH_LOG"
+        if [[ -n "${FAKE_GH_ITEMLIST_CALLCOUNT:-}" ]]; then
+            n=$(( $(cat "$FAKE_GH_ITEMLIST_CALLCOUNT" 2>/dev/null || echo 0) + 1 ))
+            echo "$n" >"$FAKE_GH_ITEMLIST_CALLCOUNT"
+        fi
+        limit="$(_limit_of "$@")"
+        python3 -c "
+import json, sys
+limit, total, special = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
+n = min(limit, total)
+items = []
+for i in range(1, n + 1):
+    if i == special:
+        items.append({'id': 'ITEM_PAGE2', 'content': {'number': i, 'title': 'Task ' + str(i)},
+                      'title': 'Task ' + str(i), 'status': 'Backlog', 'priority': 'P0'})
+    else:
+        items.append({'id': 'ITEM_' + str(i), 'content': {'number': i, 'title': 'Filler ' + str(i)},
+                      'title': 'Filler ' + str(i), 'status': 'Deployed', 'priority': 'P2'})
+print(json.dumps({'items': items}))
+" "$limit" "${FAKE_GH_TOTAL_ITEMS:-450}" "${FAKE_GH_SPECIAL_ITEM:-420}"
+        ;;
+    "project item-edit")
+        [[ -n "${FAKE_GH_LOG:-}" ]] && echo "$*" >>"$FAKE_GH_LOG"
+        echo "edited"
+        ;;
+    "issue list")
+        [[ -n "${FAKE_GH_LOG:-}" ]] && echo "$*" >>"$FAKE_GH_LOG"
+        if [[ -n "${FAKE_GH_ISSUELIST_CALLCOUNT:-}" ]]; then
+            n=$(( $(cat "$FAKE_GH_ISSUELIST_CALLCOUNT" 2>/dev/null || echo 0) + 1 ))
+            echo "$n" >"$FAKE_GH_ISSUELIST_CALLCOUNT"
+        fi
+        limit="$(_limit_of "$@")"
+        python3 -c "
+import json, sys
+limit, total, special = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
+n = min(limit, total)
+issues = []
+for i in range(1, n + 1):
+    if i == special:
+        issues.append({'number': i, 'title': 'Task ' + str(i), 'body': 'x', 'state': 'OPEN'})
+    else:
+        issues.append({'number': i, 'title': 'Filler issue ' + str(i), 'body': 'x', 'state': 'OPEN'})
+print(json.dumps(issues))
+" "$limit" "${FAKE_GH_TOTAL_ISSUES:-450}" "${FAKE_GH_SPECIAL_ITEM:-420}"
+        ;;
+    *) echo "fake gh: unexpected: $*" >&2; exit 1 ;;
+esac
+FAKE
+chmod +x "$PGH/gh"
+
+# scenario 1: list -- a >limit fixture (450 items, base page 400) proves the page-2 item
+# (#420) is visible and NOT silently truncated, and the full 450-item count comes through.
+LOGP1="$(mktemp)"; CCP1="$(mktemp)"
+out="$(cd "$PG" && PATH="$PGH:$PATH" FAKE_GH_LOG="$LOGP1" FAKE_GH_ITEMLIST_CALLCOUNT="$CCP1" \
+    bash "$PLUGIN/scripts/board.sh" list 2>&1)"
+check "list: page-2 item (#420) is present, not truncated at page-1's 400" $'Backlog\tP0\t#420\tTask 420' "$out"
+linecount="$(wc -l <<<"$out" | tr -d ' ')"
+check "list: all 450 items present -- no silent truncation" "450" "$linecount"
+callsp1="$(cat "$CCP1")"
+if [[ "$callsp1" -ge 2 ]]; then echo "ok   list: item-list was actually re-paged (>=2 gh calls) to reach item 450"
+else echo "FAIL list: expected >=2 gh project item-list calls to exhaust 450 items, got $callsp1"; fails=$((fails + 1)); fi
+
+# scenario 2: next -- the page-2 item is the only Backlog item, so it must be picked
+# (the picker only sees what board.sh hands it; this proves board.sh, not next.py, paginates)
+out="$(cd "$PG" && PATH="$PGH:$PATH" bash "$PLUGIN/scripts/board.sh" next 2>&1)"
+check "next: picks the page-2 item that a fixed 400-limit would have hidden" "=> PICK: #420" "$out"
+
+# scenario 3: move (item_id()) -- resolves and edits an item whose id lives on page 2.
+# This is the key regression: before pagination, item_id() silently returned empty for
+# any item beyond the --limit ceiling and move failed with a generic bad-issue# error.
+LOGP3="$(mktemp)"
+out="$(cd "$PG" && PATH="$PGH:$PATH" FAKE_GH_LOG="$LOGP3" bash "$PLUGIN/scripts/board.sh" move 420 "In progress" 2>&1; echo "rc=$?")"
+check "move: resolves + edits a page-2 item id" "moved #420 -> In progress" "$out"
+check "move: rc=0 resolving a page-2 item" "rc=0" "$out"
+check "move: item-edit invoked with the page-2 item's real id" "project item-edit --id ITEM_PAGE2" "$(cat "$LOGP3")"
+
+# scenario 4: issues -- gh issue list also paginates past its own page-1 ceiling. Uses a
+# 900-item fixture (deliberately > the OLD hardcoded 500 ceiling) so a regression here
+# proves real truncation, not just an incidental undercount.
+LOGP4="$(mktemp)"; CCP4="$(mktemp)"
+out="$(cd "$PG" && PATH="$PGH:$PATH" FAKE_GH_LOG="$LOGP4" FAKE_GH_ISSUELIST_CALLCOUNT="$CCP4" FAKE_GH_TOTAL_ISSUES=900 \
+    bash "$PLUGIN/scripts/board.sh" issues 2>&1)"
+check "issues: page-2 issue is present" '"number": 420' "$out"
+issuecount="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin)["issues"]))' <<<"$out")"
+check "issues: all 900 issues present -- no silent truncation past the old 500 ceiling" "900" "$issuecount"
+callsp4="$(cat "$CCP4")"
+if [[ "$callsp4" -ge 2 ]]; then echo "ok   issues: gh issue list was actually re-paged (>=2 calls)"
+else echo "FAIL issues: expected >=2 gh issue list calls to exhaust 900 issues, got $callsp4"; fails=$((fails + 1)); fi
+
+# scenario 5: hard-cap safety backstop -- SPEC 7.4 forbids SILENT truncation. When the
+# escalating-limit loop hits PAGINATE_HARD_CAP without ever seeing a non-full page (still
+# can't prove exhaustion), it must warn on stderr rather than just quietly stopping. Lower
+# both knobs via env so the 450-item fixture provably can't be exhausted before the cap.
+out5="$(cd "$PG" && PATH="$PGH:$PATH" PAGINATE_BASE_LIMIT=10 PAGINATE_HARD_CAP=20 bash "$PLUGIN/scripts/board.sh" list 2>&1 1>/dev/null)"
+check "hard cap: warns on stderr when the cap is hit before exhaustion" "WARNING: hit pagination hard cap (20)" "$out5"
+out5_stdout="$(cd "$PG" && PATH="$PGH:$PATH" PAGINATE_BASE_LIMIT=10 PAGINATE_HARD_CAP=20 bash "$PLUGIN/scripts/board.sh" list 2>/dev/null)"
+check_absent "hard cap: warning stays on stderr, doesn't corrupt stdout output" "WARNING" "$out5_stdout"
+
+rm -rf "$PG" "$PGH" "$LOGP1" "$CCP1" "$LOGP3" "$LOGP4" "$CCP4"
+
+echo "== seed-board.sh pagination (SW-013: sees + doesn't recreate a page-2 item) =="
+SBG="$(mktemp -d)"; mkdir -p "$SBG/.claude"
+cp "$FIX/valid.project.yaml" "$SBG/.claude/project.yaml"
+SBTASKS="$(mktemp)"
+cat >"$SBTASKS" <<'TASKS'
+FX-005|P0|5|E1|page two existing task
+TASKS
+SBGH="$(mktemp -d)"
+cat >"$SBGH/gh" <<'FAKE'
+#!/usr/bin/env bash
+set -uo pipefail
+_limit_of() {
+    local prev=""
+    for a in "$@"; do
+        if [[ "$prev" == "--limit" ]]; then printf '%s' "$a"; return 0; fi
+        prev="$a"
+    done
+    printf '400'
+}
+case "$1 $2" in
+    "label create") exit 0 ;;
+    "issue list")
+        echo "$*" >>"$FAKE_GH_LOG"
+        if [[ "$*" == *"--search"* ]]; then
+            echo "fake gh: unexpected fallback --search issue list -- FX-005 should already have been found on page 2" >&2
+            exit 1
+        fi
+        n=$(( $(cat "$FAKE_GH_ISSUELIST_CALLCOUNT" 2>/dev/null || echo 0) + 1 ))
+        echo "$n" >"$FAKE_GH_ISSUELIST_CALLCOUNT"
+        limit="$(_limit_of "$@")"
+        python3 -c "
+import json, sys
+limit, total, special = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
+n = min(limit, total)
+out = []
+for i in range(1, n + 1):
+    out.append({'title': ('FX-005: page two existing task' if i == special else 'Filler issue ' + str(i))})
+print(json.dumps(out))
+" "$limit" "${FAKE_GH_TOTAL_ISSUES:-450}" "${FAKE_GH_SPECIAL_ITEM:-420}"
+        ;;
+    "issue create")
+        echo "$*" >>"$FAKE_GH_LOG"
+        echo "fake gh: unexpected issue create -- FX-005 already exists (page-2 pagination bug would recreate it)" >&2
+        exit 1
+        ;;
+    "project item-list")
+        echo "$*" >>"$FAKE_GH_LOG"
+        n=$(( $(cat "$FAKE_GH_ITEMLIST_CALLCOUNT" 2>/dev/null || echo 0) + 1 ))
+        echo "$n" >"$FAKE_GH_ITEMLIST_CALLCOUNT"
+        limit="$(_limit_of "$@")"
+        python3 -c "
+import json, sys
+limit, total, special = int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3])
+n = min(limit, total)
+items = []
+for i in range(1, n + 1):
+    if i == special:
+        items.append({'id': 'ITEM_PAGE2', 'content': {'title': 'FX-005: page two existing task'},
+                      'title': 'FX-005: page two existing task'})
+    else:
+        items.append({'id': 'ITEM_' + str(i), 'content': {'title': 'Filler ' + str(i)}, 'title': 'Filler ' + str(i)})
+print(json.dumps({'items': items}))
+" "$limit" "${FAKE_GH_TOTAL_ITEMS:-450}" "${FAKE_GH_SPECIAL_ITEM:-420}"
+        ;;
+    "project item-edit")
+        echo "$*" >>"$FAKE_GH_LOG"
+        echo "edited"
+        ;;
+    *) echo "fake gh: unexpected: $*" >&2; exit 1 ;;
+esac
+FAKE
+chmod +x "$SBGH/gh"
+
+LOGSB="$(mktemp)"; CCSB_I="$(mktemp)"; CCSB_L="$(mktemp)"
+out="$(cd "$SBG" && PATH="$SBGH:$PATH" FAKE_GH_LOG="$LOGSB" FAKE_GH_ISSUELIST_CALLCOUNT="$CCSB_I" FAKE_GH_ITEMLIST_CALLCOUNT="$CCSB_L" \
+    bash "$PLUGIN/scripts/seed-board.sh" "$SBTASKS" 2>&1; echo "rc=$?")"
+check "seed-board: completes (page-2 existing issue correctly found, not recreated)" "rc=0" "$out"
+check "seed-board: does not re-create the page-2 issue (dedup across pages)" "==> done" "$out"
+check_absent "seed-board: no missing-project-item warning for the page-2 item" "no project item for" "$out"
+check "seed-board: sets fields on the page-2 item's real id" "project item-edit --id ITEM_PAGE2" "$(cat "$LOGSB")"
+callssb_i="$(cat "$CCSB_I")"
+if [[ "$callssb_i" -ge 2 ]]; then echo "ok   seed-board: issue-list dedup check was re-paged (>=2 calls) to find FX-005 on page 2"
+else echo "FAIL seed-board: expected >=2 issue-list calls, got $callssb_i"; fails=$((fails + 1)); fi
+callssb_l="$(cat "$CCSB_L")"
+if [[ "$callssb_l" -ge 2 ]]; then echo "ok   seed-board: item-list MAP build was re-paged (>=2 calls) to find FX-005's item on page 2"
+else echo "FAIL seed-board: expected >=2 item-list calls, got $callssb_l"; fails=$((fails + 1)); fi
+
+rm -rf "$SBG" "$SBGH" "$SBTASKS" "$LOGSB" "$CCSB_I" "$CCSB_L"
+
 
 echo "== find-task SKILL.md contract =="
 FTSKILL="$PLUGIN/skills/find-task/SKILL.md"
