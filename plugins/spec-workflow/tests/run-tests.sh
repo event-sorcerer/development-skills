@@ -17,6 +17,15 @@ check() { # name  expected-substring  actual-output
     fi
 }
 
+check_rc() { # name  expected-exit-code  actual-exit-code
+    if [[ "$2" -eq "$3" ]]; then
+        echo "ok   $1"
+    else
+        echo "FAIL $1 — expected exit $2, got $3"
+        fails=$((fails + 1))
+    fi
+}
+
 check_absent() { # name  forbidden-substring  actual-output
     if grep -qF -- "$2" <<<"$3"; then
         echo "FAIL $1 — must NOT contain: $2"
@@ -593,6 +602,47 @@ mm method rebase >/dev/null
 check "mergeMethod set surgically" "rebase" "$(python3 "$PLUGIN/scripts/config.py" "$MT" get methodology.mergeMethod)"
 check "comment still there after method edit" "# reviewerTokenEnv: GH_TOKEN_REVIEWER" "$(cat "$MT/.claude/project.yaml")"
 rm -rf "$MT"
+
+echo "== merge-mode preauth =="
+PA="$(mktemp -d)"
+pa() { (cd "$PA" && bash "$PLUGIN/scripts/merge-mode.sh" "$@"); }
+
+out="$(pa preauth 2>&1)"; rc=$?
+check "preauth no settings -> missing" "preauth: missing" "$out"
+check_rc "preauth no settings exit code" 1 "$rc"
+
+mkdir -p "$PA/.claude"
+cat > "$PA/.claude/settings.json" <<'EOF'
+{"permissions": {"allow": ["Bash(gh pr merge:*)", "Bash(gh pr review:*)"]}}
+EOF
+out="$(pa preauth 2>&1)"; rc=$?
+check "preauth both rules -> ok" "preauth: ok" "$out"
+check_rc "preauth both rules exit code" 0 "$rc"
+
+cat > "$PA/.claude/settings.json" <<'EOF'
+{"permissions": {"allow": ["Bash(gh pr merge:*)"]}}
+EOF
+out="$(pa preauth 2>&1)"; rc=$?
+check "preauth one rule -> names absent rule" "missing Bash(gh pr review:*)" "$out"
+check_absent "preauth one rule -> present rule not named" "missing Bash(gh pr merge:*)" "$out"
+check_rc "preauth one rule exit code" 1 "$rc"
+
+rm "$PA/.claude/settings.json"
+cat > "$PA/.claude/settings.local.json" <<'EOF'
+{"permissions": {"allow": ["Bash(gh pr merge:*)", "Bash(gh pr review:*)"]}}
+EOF
+out="$(pa preauth 2>&1)"; rc=$?
+check "preauth settings.local.json fallback -> ok" "preauth: ok" "$out"
+check_rc "preauth settings.local.json fallback exit code" 0 "$rc"
+rm -rf "$PA"
+
+snippet="$(bash "$PLUGIN/scripts/merge-mode.sh" preauth-snippet)"
+check "preauth-snippet has merge rule" "Bash(gh pr merge:*)" "$snippet"
+check "preauth-snippet has review rule" "Bash(gh pr review:*)" "$snippet"
+check "preauth-snippet has comment rule" "Bash(gh pr comment:*)" "$snippet"
+check "preauth-snippet has push rule" "Bash(git push:*)" "$snippet"
+valid="$(python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print("valid" if "Bash(gh pr merge:*)" in d["permissions"]["allow"] else "invalid")' <<<"$snippet")"
+check "preauth-snippet is valid JSON with the rules" "valid" "$valid"
 
 echo "== concurrency (maxInProgress surgical set) =="
 CC="$(mktemp -d)"; ( cd "$CC" && git init -q . )
