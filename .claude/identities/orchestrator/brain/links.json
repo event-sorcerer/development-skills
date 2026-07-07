@@ -4,6 +4,11 @@
     "last": null,
     "weight": 0.5
   },
+  "permission-nondeterminism->shared-checkout-hazard": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "post-hoc-review-over-rewrite->shared-checkout-hazard": {
     "fires": 0,
     "last": null,

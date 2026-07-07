@@ -1,4 +1,9 @@
 {
+  "paired-pr-single-reviewer->symmetric-boundary-guards": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "template-cfg-in-examples->surgical-yaml-edits": {
     "fires": 0,
     "last": null,
