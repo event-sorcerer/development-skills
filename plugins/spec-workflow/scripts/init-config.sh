@@ -95,6 +95,8 @@ else:
 board["statusFlow"] = list(board["fields"]["status"]["options"])
 
 head = leading_comments(src) if out_is_yaml else ""
+if out_is_yaml and not head.strip():
+    head = leading_comments(template)  # carry the schema modeline onto fresh/converted yaml
 with open(out, "w") as fh:
     if out_is_yaml:
         fh.write(head)

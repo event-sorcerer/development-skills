@@ -2,7 +2,7 @@
 """next.py — pick the next task from board items, applying priority order, epic
 sequencing, blockedBy guards, and the work-in-progress resume guard.
 
-Usage: next.py <project.json> <board-id-or-empty> <item-list.json> [spec-id]
+Usage: next.py <config-path> <board-id-or-empty> <item-list.json> [spec-id]
 <item-list.json> is `gh project item-list --format json` output.
 Prints candidates and either "=> PICK: #N" or "=> RESUME: #N" (WIP limit reached).
 """

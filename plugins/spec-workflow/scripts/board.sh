@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# board.sh — generic GitHub Project board interface, driven by .claude/project.json (schemaVersion 1).
+# board.sh — generic GitHub Project board interface, driven by .claude/project.yaml (schemaVersion 2; legacy .json still read).
 # Part of the spec-workflow plugin. All board reads/writes go through this script so the
 # model never has to know field/option ids.
 #
@@ -13,7 +13,7 @@
 #   board.sh comment <issue#> <<'EOF' ... EOF          # reply to humans on the issue (body on stdin)
 #   board.sh edit-body <issue#> <file>                 # replace issue body (updated acceptance criteria)
 #   board.sh fields                   # discover field + option ids (used by setup-project)
-#   board.sh config                   # validate project.json and print a summary
+#   board.sh config                   # validate the config and print a summary
 #
 # Env: PROJECT_CONFIG (config path override), BOARD (boards[].id override; default = first board).
 set -uo pipefail
@@ -26,11 +26,11 @@ CONFIG="$(python3 "$HERE/config.py" "$ROOT" path)"
 
 # Resolve the active board's ids into shell vars (OWNER REPO PN PID STATUS_FIELD PRIO_FIELD EST_FIELD BUG_LABEL FIRST_STATUS)
 eval "$(python3 - "$CONFIG" "${BOARD:-}" <<'PY'
-import sys
+import json, sys
 import config as C
 cfg = C.load_config(path=sys.argv[1], warn=False)
 bid = sys.argv[2]
-boards = cfg.get("boards") or sys.exit("ERROR: no boards in project.json")
+boards = cfg.get("boards") or sys.exit("ERROR: no boards in the config")
 b = next((x for x in boards if x["id"] == bid), boards[0])
 f = b["fields"]
 def sh(k, v): print(f'{k}={json.dumps(str(v))}')

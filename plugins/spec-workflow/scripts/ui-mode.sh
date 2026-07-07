@@ -3,7 +3,7 @@
 #   ui-mode.sh            # or: status  -> "ON" / "OFF (reason)"
 #   ui-mode.sh off        # stop delegating UI decisions (touches .claude/ITERATIVE_UI_OFF)
 #   ui-mode.sh on         # delegate UI decisions again (removes the flag)
-# Effective rule: ON unless the local flag exists OR project.json sets
+# Effective rule: ON unless the local flag exists OR project.yaml sets
 # methodology.iterativeUI=false (the config is the project-wide kill switch).
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
