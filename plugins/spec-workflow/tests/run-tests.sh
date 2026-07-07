@@ -17,6 +17,15 @@ check() { # name  expected-substring  actual-output
     fi
 }
 
+check_rc() { # name  expected-exit-code  actual-exit-code
+    if [[ "$2" -eq "$3" ]]; then
+        echo "ok   $1"
+    else
+        echo "FAIL $1 — expected exit $2, got $3"
+        fails=$((fails + 1))
+    fi
+}
+
 check_absent() { # name  forbidden-substring  actual-output
     if grep -qF -- "$2" <<<"$3"; then
         echo "FAIL $1 — must NOT contain: $2"
@@ -409,7 +418,7 @@ pa() { (cd "$PA" && bash "$PLUGIN/scripts/merge-mode.sh" "$@"); }
 
 out="$(pa preauth 2>&1)"; rc=$?
 check "preauth no settings -> missing" "preauth: missing" "$out"
-[[ $rc -eq 1 ]] && echo "ok   preauth no settings exit 1" || { echo "FAIL preauth no settings exit 1 — got $rc"; fails=$((fails + 1)); }
+check_rc "preauth no settings exit code" 1 "$rc"
 
 mkdir -p "$PA/.claude"
 cat > "$PA/.claude/settings.json" <<'EOF'
@@ -417,7 +426,7 @@ cat > "$PA/.claude/settings.json" <<'EOF'
 EOF
 out="$(pa preauth 2>&1)"; rc=$?
 check "preauth both rules -> ok" "preauth: ok" "$out"
-[[ $rc -eq 0 ]] && echo "ok   preauth both rules exit 0" || { echo "FAIL preauth both rules exit 0 — got $rc"; fails=$((fails + 1)); }
+check_rc "preauth both rules exit code" 0 "$rc"
 
 cat > "$PA/.claude/settings.json" <<'EOF'
 {"permissions": {"allow": ["Bash(gh pr merge:*)"]}}
@@ -425,7 +434,7 @@ EOF
 out="$(pa preauth 2>&1)"; rc=$?
 check "preauth one rule -> names absent rule" "missing Bash(gh pr review:*)" "$out"
 check_absent "preauth one rule -> present rule not named" "missing Bash(gh pr merge:*)" "$out"
-[[ $rc -eq 1 ]] && echo "ok   preauth one rule exit 1" || { echo "FAIL preauth one rule exit 1 — got $rc"; fails=$((fails + 1)); }
+check_rc "preauth one rule exit code" 1 "$rc"
 
 rm "$PA/.claude/settings.json"
 cat > "$PA/.claude/settings.local.json" <<'EOF'
@@ -433,7 +442,7 @@ cat > "$PA/.claude/settings.local.json" <<'EOF'
 EOF
 out="$(pa preauth 2>&1)"; rc=$?
 check "preauth settings.local.json fallback -> ok" "preauth: ok" "$out"
-[[ $rc -eq 0 ]] && echo "ok   preauth settings.local.json fallback exit 0" || { echo "FAIL preauth settings.local.json fallback exit 0 — got $rc"; fails=$((fails + 1)); }
+check_rc "preauth settings.local.json fallback exit code" 0 "$rc"
 rm -rf "$PA"
 
 snippet="$(bash "$PLUGIN/scripts/merge-mode.sh" preauth-snippet)"
