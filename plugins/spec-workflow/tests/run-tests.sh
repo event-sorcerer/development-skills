@@ -353,6 +353,51 @@ out="$(cat "$BT/.claude/identities/reviewer/brain/.activation.jsonl")"
 check "consult logged to owner brain" '"event": "consult"' "$out"
 check "consult log names consumer" '"consumer": "dev"' "$out"
 
+# finding 1 — budget accounting: joined output (incl. separators) never exceeds the char budget.
+# Short slugs so several title-only blocks fit and inter-block separators accumulate (the repro).
+for i in 1 2 3 4 5 6 7 8; do
+    printf 'body line %s\n' "$i" | brain mint dev "b$i" --tags bud --paths "bud/**" --source x >/dev/null
+done
+out="$(brain recall dev --paths "bud/x.txt" --keywords "" --budget 5 \
+    | python3 -c 'import sys; s=sys.stdin.read().rstrip("\n"); print("WITHIN" if len(s) <= 20 else "OVER:"+str(len(s)))')"
+check "budget accounting stays within bound" "WITHIN" "$out"
+
+# finding 2 — consult log lines omit activation; seed/hop/inject carry it
+out="$(python3 - "$BT/.claude/identities/dev/brain/.activation.jsonl" "$BT/.claude/identities/reviewer/brain/.activation.jsonl" <<'PY'
+import json, sys
+ok = True
+for path in sys.argv[1:]:
+    for line in open(path):
+        line = line.strip()
+        if not line:
+            continue
+        o = json.loads(line)
+        if o["event"] in ("seed", "hop", "inject"):
+            ok = ok and "activation" in o
+        if o["event"] == "consult":
+            ok = ok and "activation" not in o
+            ok = ok and set(o.keys()) == {"ts", "role", "event", "note", "consumer"}
+print("FIELD-SETS-OK" if ok else "FIELD-SETS-BAD")
+PY
+)"
+check "consult omits activation; others keep it" "FIELD-SETS-OK" "$out"
+
+# finding 3 — quote-aware frontmatter list parse: a comma-containing tag is not corrupted
+printf 'quoted comma tag note.\n' | brain mint dev qtag --tags placeholder --paths "qt/**" --source x >/dev/null
+python3 - "$BT" <<'PY'
+import os, re, sys
+p = os.path.join(sys.argv[1], ".claude/identities/dev/brain/notes/qtag.md")
+s = open(p).read()
+open(p, "w").write(re.sub(r"tags: .*", 'tags: ["a,b", "c"]', s))
+PY
+brain directory >/dev/null
+out="$(cat "$BT/.claude/identities/DIRECTORY.md")"
+check "comma-containing tag survives parse" "a,b" "$out"
+check_absent "comma tag not split into fragments" 'b" ' "$out"
+# recall still surfaces the note by its intact second tag
+out="$(brain recall dev --paths "" --keywords "c")"
+check "recall matches note with quoted-comma tag list" "qtag" "$out"
+
 # prune: a never-fired link off an aged note is flagged (isolated pair, never recalled)
 printf 'Old stale idea.\n\nRelated: [[stale-dst]]\n' \
     | brain mint dev stale-src --tags stale --paths "nope/**" --source "old"
