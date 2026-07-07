@@ -160,24 +160,62 @@ check "graph node carries strength" '"strength": 4' "$out"
 check "graph node graduated flag" '"graduated": true' "$out"
 check "graph has link edge" '"source": "dev/cas-retry"' "$out"
 check "graph edge weight" '"weight": 0.6' "$out"
-ev1="$(curl -sf 'http://127.0.0.1:4788/events?since=0')"
-check "events returns seed line" '"event": "seed"' "$ev1"
-cur="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["cursor"])' <<<"$ev1")"
-check "events cursor after seed is 1" "1" "$cur"
-printf '%s\n' '{"ts":"2026-07-06T10:00:01Z","role":"dev","event":"hop","note":"idempotency","activation":0.5,"link":"cas-retry->idempotency"}' >>"$_nvbrain/.activation.jsonl"
-ev2="$(curl -sf "http://127.0.0.1:4788/events?since=$cur")"
-check "events cursor monotonic returns appended hop" '"event": "hop"' "$ev2"
-check_absent "events since cursor excludes old seed" '"event": "seed"' "$ev2"
 out="$(curl -sf http://127.0.0.1:4788/note/dev/cas-retry)"
 check "note renders fixture body" "the loser reloads" "$out"
+# finding 2: path traversal via ../ in the slug must not escape notes/ (arbitrary file read)
+printf 'TOPSECRET-XYZZY' >"$_nvbrain/SECRET.md"       # a file OUTSIDE notes/, one level up
+body="$(curl -s --path-as-is 'http://127.0.0.1:4788/note/dev/../SECRET')"
+check_absent "note path traversal does not leak an out-of-tree file" "TOPSECRET-XYZZY" "$body"
+code="$(curl -s --path-as-is -o /dev/null -w '%{http_code}' 'http://127.0.0.1:4788/note/dev/../SECRET')"
+check "note path traversal returns 404" "404" "$code"
+code="$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:4788/note/dev/..%2fSECRET')"
+check "note dotdot slug (encoded) returns 404" "404" "$code"
 python3 "$NV" stop >/dev/null
+
+# findings 1 + 3: offset-cursor /events — completeness from per-brain byte offsets, not sort order.
+_nvev="$(mktemp -d)"
+for r in dev reviewer orchestrator; do mkdir -p "$_nvev/.claude/identities/$r/brain"; done
+out="$(python3 "$NV" start --dir "$_nvev")"; check "neural-view starts (events root)" "RUNNING http://127.0.0.1:4788" "$out"
+evout="$(P=4788 R="$_nvev" python3 - <<'PY'
+import json, os, urllib.request
+P, R = os.environ["P"], os.environ["R"]
+log = lambda role: os.path.join(R, ".claude/identities", role, "brain", ".activation.jsonl")
+def append(role, i, ts):
+    with open(log(role), "a") as f:
+        f.write(json.dumps({"ts": ts, "role": role, "event": "seed", "note": "n%d" % i, "id": i}) + "\n")
+def poll(token):
+    url = "http://127.0.0.1:%s/events" % P + (("?since=%s" % token) if token else "")
+    return json.load(urllib.request.urlopen(url))
+d0 = poll("")                                   # first poll: end-of-logs, no backlog replay
+print("FIRSTPOLL events=%d" % len(d0["events"]))
+# round 1 — interleaved, deliberately NON-monotonic ts across brains
+append("dev", 1, "2026-07-06T10:00:05Z"); append("orchestrator", 2, "2026-07-06T10:00:01Z"); append("reviewer", 3, "2026-07-06T10:00:09Z")
+d1 = poll(d0["cursor"]); ids1 = sorted(e["id"] for e in d1["events"])
+# round 2 — the replay trap: events with ts EARLIER than ones already delivered in round 1
+append("reviewer", 4, "2026-07-06T10:00:02Z"); append("dev", 5, "2026-07-06T10:00:00Z")
+d2 = poll(d1["cursor"]); ids2 = sorted(e["id"] for e in d2["events"])
+d3 = poll(d2["cursor"])                          # idle poll: nothing appended
+allids = ids1 + ids2
+print("ROUND2 ids=%s" % ids2)                    # must be exactly [4, 5] (delivered once, no replay of round 1)
+print("DELIVERED ids=%s" % sorted(allids))       # no loss: every appended event arrived
+print("DUPS=%d" % (len(allids) - len(set(allids))))  # no duplicate delivery
+print("IDLE events=%d bytesRead=%s" % (len(d3["events"]), d3.get("bytesRead")))  # reads ~zero new bytes
+PY
+)"
+check "events first poll skips backlog" "FIRSTPOLL events=0" "$evout"
+check "events replay-trap delivers only new (no replay)" "ROUND2 ids=[4, 5]" "$evout"
+check "events no loss across interleaved earlier-ts writes" "DELIVERED ids=[1, 2, 3, 4, 5]" "$evout"
+check "events no duplicate delivery" "DUPS=0" "$evout"
+check "events idle poll reads zero new bytes" "IDLE events=0 bytesRead=0" "$evout"
+python3 "$NV" stop >/dev/null
+
 _nvempty="$(mktemp -d)"          # a root with no brains at all
 out="$(python3 "$NV" start --dir "$_nvempty")"; check "neural-view starts on empty root" "RUNNING http://127.0.0.1:4788" "$out"
 out="$(curl -sf http://127.0.0.1:4788/graph)";  check "empty root -> empty nodes" '"nodes": []' "$out"
 out="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4788/)"; check "page still loads on empty root" "200" "$out"
 python3 "$NV" stop >/dev/null
 unset NEURAL_VIEW_STATE NEURAL_VIEW_PORT
-rm -rf "$_nvroot" "$_nvstate" "$_nvempty" "$_hubtmp"
+rm -rf "$_nvroot" "$_nvstate" "$_nvev" "$_nvempty" "$_hubtmp"
 
 echo "== gate enforcement (gate.sh + guard-board-move hook) =="
 T3="$(mktemp -d)"
