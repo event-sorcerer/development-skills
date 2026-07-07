@@ -272,7 +272,7 @@ def read_events_since(root, offsets):
             continue
         start = offsets.get(role, 0)
         size = f.stat().st_size
-        if start > size:              # log shrank/rotated — don't crash, resync
+        if start < 0 or start > size:  # negative / rotated-shrunk offset — don't seek there, resync
             start = 0
         with f.open("rb") as fh:
             fh.seek(start)
@@ -303,7 +303,7 @@ def decode_cursor(token):
         pad = "=" * (-len(token) % 4)
         d = json.loads(base64.urlsafe_b64decode(token + pad))
         if isinstance(d, dict):
-            return {str(k): int(v) for k, v in d.items()}
+            return {str(k): max(0, int(v)) for k, v in d.items()}  # never a negative seek offset
     except Exception:  # noqa: BLE001
         pass
     return None
