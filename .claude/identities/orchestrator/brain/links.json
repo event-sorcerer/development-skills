@@ -9,6 +9,11 @@
     "last": null,
     "weight": 0.5
   },
+  "reproduce-findings-two-pass->smoke-test-is-not-review": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "shared-checkout-hazard->post-hoc-review-over-rewrite": {
     "fires": 0,
     "last": null,
