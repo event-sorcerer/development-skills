@@ -39,7 +39,7 @@ echo "== syntax =="
 for f in "$PLUGIN"/scripts/*.sh "$HERE"/run-tests.sh; do
     if bash -n "$f"; then echo "ok   bash -n $(basename "$f")"; else echo "FAIL bash -n $f"; fails=$((fails + 1)); fi
 done
-for p in config.py identity_lib.py validate-config.py next.py similar.py ui-hub.py brain.py neural-view.py; do
+for p in config.py identity_lib.py validate-config.py next.py similar.py ui-hub.py brain.py neural-view.py feedback.py; do
     if python3 -m py_compile "$PLUGIN/scripts/$p"; then
         echo "ok   py_compile $p"
     else
@@ -818,6 +818,81 @@ check "brain.sh BRAIN_DIR override succeeds" "rc=0" "$out"
 out="$([[ -f "$BW/.claude/custom/dev/brain/notes/ov-note.md" ]] && echo FOUND || echo MISSING)"
 check "brain.sh BRAIN_DIR override targets custom dir" "FOUND" "$out"
 rm -rf "$BW"
+
+echo "== feedback (loop feedback feed) =="
+FT="$(mktemp -d)"; mkdir -p "$FT/.claude"
+cp "$FIX/valid.project.yaml" "$FT/.claude/project.yaml"
+fb() { (cd "$FT" && python3 "$PLUGIN/scripts/feedback.py" "$FT" "$@"); }
+
+# config parsing: shorthand + expanded forms via config.py get
+python3 "$PLUGIN/scripts/config.py" "$FT" set methodology.feedback true >/dev/null
+check "shorthand feedback=true readable" "true" "$(python3 "$PLUGIN/scripts/config.py" "$FT" get methodology.feedback)"
+out="$(python3 "$PLUGIN/scripts/validate-config.py" "$FT/.claude/project.yaml")"
+check "validator accepts shorthand feedback" "VALID: " "$out"
+python3 "$PLUGIN/scripts/config.py" "$FT" set methodology.feedback '{"enabled": true, "feed": ".claude/feedback/feed.yaml", "roles": ["orchestrator"], "autoTriage": false}' >/dev/null
+out="$(python3 "$PLUGIN/scripts/validate-config.py" "$FT/.claude/project.yaml")"
+check "validator accepts expanded feedback" "VALID: " "$out"
+python3 "$PLUGIN/scripts/config.py" "$FT" set methodology.feedback '{"enabled": true, "bogus": 1}' >/dev/null
+out="$(python3 "$PLUGIN/scripts/validate-config.py" "$FT/.claude/project.yaml" || true)"
+check "validator rejects unknown feedback key" "unknown key" "$out"
+python3 "$PLUGIN/scripts/config.py" "$FT" set methodology.feedback '{"enabled": true, "feed": ".claude/feedback/feed.yaml", "roles": ["orchestrator"], "autoTriage": false}' >/dev/null
+
+# status: disabled by default (no methodology.feedback key)
+FD="$(mktemp -d)"; mkdir -p "$FD/.claude"; cp "$FIX/valid.project.yaml" "$FD/.claude/project.yaml"
+out="$(cd "$FD" && python3 "$PLUGIN/scripts/feedback.py" "$FD" status)"
+check "status: disabled by default" "feedback: disabled" "$out"
+rm -rf "$FD"
+
+check "status: enabled + feed path + pending=0" "feedback: enabled feed=.claude/feedback/feed.yaml pending=0" "$(fb status)"
+
+# emit: valid record round-trips into the feed
+out="$(fb emit "$FIX/feedback-valid.yaml")"
+check "emit ok" "OK" "$out"
+check "feed file created" "loop-feedback" "$(cat "$FT/.claude/feedback/feed.yaml" 2>/dev/null)"
+check "status: pending reflects 2 unrouted items" "pending=2" "$(fb status)"
+
+# emit: rejects generalized/summary text carrying project-specific refs (#N)
+out="$(fb emit "$FIX/feedback-bad-refs.yaml" || true)"
+check "emit rejects #N ref" "INVALID" "$out"
+check "emit rejects #N ref: names the offending ref" "#23" "$out"
+
+# emit: rejects generalized text containing the iteration's own task id
+BADTASK="$FT/bad-task.yaml"
+cat >"$BADTASK" <<'YAML'
+schemaVersion: 1
+kind: loop-feedback
+ts: "2026-07-01T12:00:00Z"
+iteration:
+  task: FX-023
+  outcome: merged
+  reviewRounds: 1
+source:
+  role: dev
+  model: claude-sonnet-5
+items:
+  - category: friction
+    area: board
+    severity: low
+    summary: "FX-023 took longer than expected because of board flakiness."
+    generalized: "FX-023 took longer than expected because of board flakiness."
+YAML
+out="$(fb emit "$BADTASK" || true)"
+check "emit rejects task-id in generalized text" "INVALID" "$out"
+
+# pending: lists the unrouted items from the valid record
+out="$(fb pending)"
+check "pending lists record ts" "2026-07-01T10:00:00Z" "$out"
+check "pending lists category" "friction" "$out"
+check "pending lists summary" "Front-load the human merge check-in" "$out"
+
+# route: writes routing back, unknown action rejected, pending drops
+out="$(fb route "2026-07-01T10:00:00Z" 0 bogus-action "n/a" || true)"
+check "route rejects unknown action" "unknown routing action" "$out"
+fb route "2026-07-01T10:00:00Z" 0 brain-note "friction-self-approval" >/dev/null
+fb route "2026-07-01T10:00:00Z" 1 backlog "#41" >/dev/null
+check "status: pending drops to zero after routing" "pending=0" "$(fb status)"
+check "routing written into feed" "brain-note" "$(cat "$FT/.claude/feedback/feed.yaml")"
+rm -rf "$FT"
 
 echo
 if [[ $fails -gt 0 ]]; then echo "$fails test(s) FAILED"; exit 1; fi
