@@ -300,6 +300,35 @@ NODEJS
     check "layoutClusters sizes regions by note count, empty repo floors at MIN_REGION" "LAYOUT3D_OK" "$layout_out"
     check "fitDistance frames every repo region on boot, reload, landscape + portrait" "LAYOUT3D_OK" "$layout_out"
     rm -f "$_nvlayout"
+
+    # security: escapeHtml() is used to interpolate a board task TITLE (attacker-
+    # influenced -- anyone who can title a GitHub issue in a tracked repo) into an
+    # HTML ATTRIBUTE (title="${escapeHtml(t)}" in renderProjects()), not just a text
+    # node. Escaping only &<> leaves a bare double-quote free to break out of the
+    # attribute and inject a live event handler. escapeHtml() must also encode
+    # both quote characters.
+    _nvxss="$(mktemp).cjs"
+    cat >"$_nvxss" <<'NODEJS'
+const fs = require("fs");
+const html = fs.readFileSync(process.argv[2], "utf8");
+function extract(name) {
+    const re = new RegExp("function " + name + "\([^)]*\)\{[\s\S]*?\n\}\n");
+    const m = html.match(re);
+    if (!m) throw new Error("could not find function " + name + "() in template");
+    return m[0];
+}
+eval(extract("escapeHtml"));
+const payload = 'Fix bug" onmouseover="alert(document.cookie)<script>alert(1)</script>';
+const out = escapeHtml(payload);
+if (out.includes('"')) throw new Error("escapeHtml() leaves a raw double-quote in the output: " + out);
+if (out.includes("'")) throw new Error("escapeHtml() leaves a raw single-quote in the output: " + out);
+if (out.includes("<script>")) throw new Error("escapeHtml() leaves a raw <script> tag in the output: " + out);
+if (!out.includes("&quot;")) throw new Error("escapeHtml() does not encode double quotes as &quot;: " + out);
+console.log("ESCAPEHTML_XSS_OK " + out);
+NODEJS
+    xss_out="$(node "$_nvxss" "$NVHTML" 2>&1)"
+    check "escapeHtml() neutralizes a double-quote-breakout XSS payload (attribute context)" "ESCAPEHTML_XSS_OK" "$xss_out"
+    rm -f "$_nvxss"
 fi
 
 echo "== neural-view (lifecycle + endpoints on a scratch port, legacy single-repo mode) =="
@@ -528,6 +557,8 @@ case "$1 $2" in
         printf 'In progress\tP0\t#1\tAdd widget\n'
         printf 'In review\tP1\t#2\tFix bug\n'
         printf 'Backlog\tP2\t#3\tIdea\n'
+        [[ -n "${FAKE_GH_XSS_TITLE:-}" ]] && printf 'In progress\tP0\t#9\t%s\n' "${FAKE_GH_XSS_TITLE}"
+        true
         ;;
     *) echo "fake gh: unexpected: $*" >&2; exit 1 ;;
 esac
@@ -586,6 +617,19 @@ body="$(curl -sf http://127.0.0.1:4792/projects)"
 check "projects: repo without project.yaml is omitted" "{}" "$body"
 python3 "$NV" stop >/dev/null
 
+# scenario 5b: a board task title carrying an XSS payload (attacker-controlled --
+# anyone who can title a GitHub issue) is passed through /projects RAW, unescaped.
+# The server is not the defense here; this pins that fact down so the client-side
+# escapeHtml() (checked above, in the template-contract block) stays the only guard.
+LOG5B="$(mktemp)"; CC5B="$(mktemp)"
+XSS_TITLE='Fix bug" onmouseover="alert(document.cookie)<script>alert(1)</script>'
+out="$(PATH="$NVP_GH:$PATH" FAKE_GH_LOG="$LOG5B" FAKE_GH_CALLCOUNT="$CC5B" FAKE_GH_XSS_TITLE="$XSS_TITLE" python3 "$NV" start --dir "$NVP_REPO")"
+check "neural-view starts (XSS-title fixture)" "RUNNING http://127.0.0.1:4792" "$out"
+body="$(curl -sf http://127.0.0.1:4792/projects)"
+check "projects: server passes an attacker-controlled title through unescaped (client must escape it)" 'onmouseover=' "$body"
+check "projects: server does not strip/encode the embedded <script> tag either" '<script>alert(1)</script>' "$body"
+python3 "$NV" stop >/dev/null
+
 # scenario 5: a hanging board.sh call never blocks another route (/graph)
 LOG5="$(mktemp)"; CC5="$(mktemp)"
 out="$(PATH="$NVP_GH:$PATH" FAKE_GH_LOG="$LOG5" FAKE_GH_CALLCOUNT="$CC5" FAKE_GH_HANG=1 FAKE_GH_HANG_SECS=4 python3 "$NV" start --dir "$NVP_REPO")"
@@ -604,7 +648,7 @@ wait "$_hangpid" 2>/dev/null || true
 rm -f /tmp/nv-hang-out.$$
 python3 "$NV" stop >/dev/null
 unset NEURAL_VIEW_STATE NEURAL_VIEW_PORT NEURAL_VIEW_SCAN
-rm -rf "$NVP_REPO" "$NVP_NOBOARD" "$NVP_GH" "$_nvpstate" "$_nvpscan_empty" "$LOG1" "$CC1" "$LOG2" "$CC2" "$LOG3" "$CC3" "$LOG5" "$CC5"
+rm -rf "$NVP_REPO" "$NVP_NOBOARD" "$NVP_GH" "$_nvpstate" "$_nvpscan_empty" "$LOG1" "$CC1" "$LOG2" "$CC2" "$LOG3" "$CC3" "$LOG5" "$CC5" "$LOG5B" "$CC5B"
 
 echo "== neural-view /sessions (best-effort local Claude session discovery) =="
 NVS_CLAUDE="$(mktemp -d)"
