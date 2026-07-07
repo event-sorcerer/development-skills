@@ -19,6 +19,11 @@
     "last": null,
     "weight": 0.5
   },
+  "loop-state-fingerprint-exclusion->lane-cwd-distrust": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "surgical-yaml-edits->budget-count-join-separators": {
     "fires": 0,
     "last": null,
