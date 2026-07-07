@@ -54,10 +54,36 @@ code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$NEURAL_VIEW_PO
 check "vendor route serves three.module.min.js (200)" "200" "$code"
 ctype="$(curl -s -D - -o /dev/null "http://127.0.0.1:$NEURAL_VIEW_PORT/vendor/three.module.min.js" | tr -d '\r' | grep -i '^content-type:')"
 check "vendor route content-type is javascript" "javascript" "$ctype"
+# bug #58: the ES-module three.js build (r0.150+) imports a separate core file
+# at runtime (`from"./three.core.min.js"`); only the module was vendored, so
+# the browser's resolution of that relative import 404'd and the whole 3D
+# view failed to boot. three.core.min.js must be served same-origin too.
+code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$NEURAL_VIEW_PORT/vendor/three.core.min.js")"
+check "vendor route serves three.core.min.js (200) -- bug #58 regression" "200" "$code"
+ctype="$(curl -s -D - -o /dev/null "http://127.0.0.1:$NEURAL_VIEW_PORT/vendor/three.core.min.js" | tr -d '\r' | grep -i '^content-type:')"
+check "vendor route (three.core.min.js) content-type is javascript" "javascript" "$ctype"
 for trav in "/vendor/../scripts/config.py" "/vendor/..%2fscripts%2fconfig.py" "/vendor/../../etc/passwd" "/vendor/not-on-the-allowlist.js"; do
     code="$(curl -s --path-as-is -o /dev/null -w '%{http_code}' "http://127.0.0.1:$NEURAL_VIEW_PORT$trav")"
     check "vendor route rejects $trav (404)" "404" "$code"
 done
+# import-graph resolution: every relative import in the served module must
+# resolve to a vendor file the server actually serves 200. This is the
+# durable regression guard -- it would have caught bug #58 directly, and
+# catches any future three.js (or other vendored lib) re-split.
+_nvmodbody="$(curl -sf "http://127.0.0.1:$NEURAL_VIEW_PORT/vendor/three.module.min.js")"
+_nvimports="$(printf '%s' "$_nvmodbody" | grep -oE 'from"\./[^"]+"' | sed -E 's/^from"\.\///; s/"$//' | sort -u)"
+check "served module has at least one relative import to verify" "three.core.min.js" "$_nvimports"
+_nvimportfail=0
+while IFS= read -r _nvimp; do
+    [[ -z "$_nvimp" ]] && continue
+    _nvicode="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$NEURAL_VIEW_PORT/vendor/$_nvimp")"
+    if [[ "$_nvicode" != "200" ]]; then
+        echo "FAIL import graph: relative import '$_nvimp' from three.module.min.js does not resolve (got $_nvicode)"
+        fails=$((fails + 1))
+        _nvimportfail=1
+    fi
+done <<<"$_nvimports"
+[[ "$_nvimportfail" -eq 0 ]] && echo "ok   import graph: every relative import from three.module.min.js resolves to a served vendor file"
 # finding 2: path traversal via ../ in the slug must not escape notes/ (arbitrary file read)
 printf 'TOPSECRET-XYZZY' >"$_nvbrain/SECRET.md"       # a file OUTSIDE notes/, one level up
 body="$(curl -s --path-as-is "http://127.0.0.1:$NEURAL_VIEW_PORT/note/$_nvrepo/dev/../SECRET")"

@@ -7,6 +7,7 @@
 echo "== neural-view boot crash + favicon + 3D template contract =="
 NVHTML="$PLUGIN/templates/neural-view.html"
 NVVENDOR_SHA="86bcee248b64f44bcfc23c331ae74619061957d59cab040171dcb6fb5900beb6"
+NVVENDOR_CORE_SHA="05b2609338c76cd65daf74f3ac515bc9a5045e1b3b33edc07d8c9bd55250fa90"
 check_absent "resize() no longer assigns read-only canvas.clientWidth" "canvas.clientWidth =" "$(cat "$NVHTML")"
 check_absent "resize() no longer assigns read-only canvas.clientHeight" "canvas.clientHeight =" "$(cat "$NVHTML")"
 check_absent "template has no CDN/external script or asset references" 'src="http' "$(cat "$NVHTML")"
@@ -29,6 +30,15 @@ if [[ -f "$_nvvendorfile" ]]; then
     check "vendored three.js sha256 matches the recorded, audited version" "$NVVENDOR_SHA" "$got_sha"
 else
     echo "FAIL vendored three.module.min.js is missing at $_nvvendorfile"; fails=$((fails + 1))
+fi
+# bug #58: the ES-module build imports a separate core file at runtime; it
+# must be vendored and integrity-checked exactly like the module build.
+_nvvendorcorefile="$PLUGIN/templates/vendor/three.core.min.js"
+if [[ -f "$_nvvendorcorefile" ]]; then
+    got_core_sha="$(shasum -a 256 "$_nvvendorcorefile" | awk '{print $1}')"
+    check "vendored three.core.js sha256 matches the recorded, audited version" "$NVVENDOR_CORE_SHA" "$got_core_sha"
+else
+    echo "FAIL vendored three.core.min.js is missing at $_nvvendorcorefile"; fails=$((fails + 1))
 fi
 if command -v node >/dev/null 2>&1; then
     script="$(python3 -c "
