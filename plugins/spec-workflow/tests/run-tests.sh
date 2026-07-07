@@ -342,6 +342,48 @@ python3 "$NV" stop >/dev/null
 unset NEURAL_VIEW_STATE NEURAL_VIEW_PORT NEURAL_VIEW_SCAN
 rm -rf "$_scanbase" "$_scanstate"
 
+if [[ "$(id -u)" != "0" ]]; then   # permission tests are meaningless as root (bypasses all checks)
+    echo "== neural-view (scan base with an unreadable child directory) =="
+    _permbase="$(mktemp -d)"
+    _permstate="$(mktemp -d)"
+    _goodrepo="$_permbase/good-repo"; mkdir -p "$_goodrepo/.claude"
+    : >"$_goodrepo/.claude/.neural-network"
+    _denied="$_permbase/denied-repo"; mkdir -p "$_denied/.claude"
+    chmod 000 "$_denied"   # simulates a scan-base child neural-view can't traverse into
+    export NEURAL_VIEW_STATE="$_permstate" NEURAL_VIEW_PORT=4790 NEURAL_VIEW_SCAN="$_permbase"
+    out="$(python3 "$NV" start 2>&1)"
+    check "neural-view survives an unreadable scan-base child (starts)" "RUNNING http://127.0.0.1:4790" "$out"
+    out="$(python3 "$NV" status)"
+    check "status still reports the good repo despite the denied one" "repos=1" "$out"
+    python3 "$NV" stop >/dev/null 2>&1 || true
+    chmod 700 "$_denied"    # restore before cleanup so rm -rf can actually remove it
+    unset NEURAL_VIEW_STATE NEURAL_VIEW_PORT NEURAL_VIEW_SCAN
+    rm -rf "$_permbase" "$_permstate"
+fi
+
+echo "== neural-view (start fails to bind: no false RUNNING claim) =="
+_bindstate="$(mktemp -d)"
+python3 - <<'PY' &
+import socket, time
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", 4791))
+s.listen(1)
+time.sleep(6)
+PY
+_blocker=$!
+sleep 0.3   # let the scratch listener actually bind before racing neural-view for the port
+export NEURAL_VIEW_STATE="$_bindstate" NEURAL_VIEW_PORT=4791
+out="$(python3 "$NV" start 2>&1)"; rc=$?
+check_absent "start does not claim RUNNING when the port is already taken" "RUNNING" "$out"
+check "start's failure message points at server.log" "server.log" "$out"
+if [[ $rc -ne 0 ]]; then echo "ok   start exits non-zero when it fails to bind"
+else echo "FAIL start exits non-zero when it fails to bind — got rc=0"; fails=$((fails + 1)); fi
+kill "$_blocker" 2>/dev/null || true
+wait "$_blocker" 2>/dev/null || true
+unset NEURAL_VIEW_STATE NEURAL_VIEW_PORT
+rm -rf "$_bindstate"
+
 echo "== gate enforcement (gate.sh + guard-board-move hook) =="
 T3="$(mktemp -d)"
 ( cd "$T3" && git init -q . && git commit -q --allow-empty -m init )
