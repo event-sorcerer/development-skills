@@ -498,6 +498,35 @@ out="$(hookjson 'bash board.sh move 7 \"In review\"' | (cd "$T3U" && bash "$PLUG
 check "untracked: ignored-file deletion does not invalidate pass" "rc=0" "$out"
 rm -rf "$T3U"
 
+echo "== gate enforcement (gate-pass marker excluded even when .claude/ has a TRACKED file, SW-010 follow-up) =="
+T3M="$(mktemp -d)"
+mkdir -p "$T3M/.claude"
+python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); c["commands"]["gate"]="true"; json.dump(c,open(sys.argv[2],"w"))' \
+    "$FIX/valid.project.json" "$T3M/.claude/project.json"
+( cd "$T3M" && git init -q . && git add .claude/project.json && git commit -q -m init )
+# No .gitignore entry for .claude/gate-pass, and .claude/ has a tracked file so
+# it can't collapse to a single "?? .claude/" porcelain line — this is the
+# shape that exposes gate-pass to `git status --porcelain` once it exists.
+# Compare tree-state.sh's raw output directly (not through gate.sh's record
+# step): gate.sh's `>"$MARKER"` redirection happens to pre-create gate-pass
+# before tree-state.sh runs, which accidentally masks the porcelain leak in
+# that one call path — this direct comparison is the real, unmasked check.
+before="$(cd "$T3M" && bash "$PLUGIN/scripts/tree-state.sh")"
+: > "$T3M/.claude/gate-pass"
+after="$(cd "$T3M" && bash "$PLUGIN/scripts/tree-state.sh")"
+if [[ "$before" == "$after" ]]; then
+    echo "ok   marker: fingerprint unaffected by .claude/gate-pass appearing in a tracked .claude/ dir"
+else
+    echo "FAIL marker: fingerprint changed when .claude/gate-pass appeared — before=$before after=$after"
+    fails=$((fails + 1))
+fi
+rm -f "$T3M/.claude/gate-pass"
+out="$(cd "$T3M" && bash "$PLUGIN/scripts/gate.sh" 2>&1)"
+check "marker: gate pass recorded" "GATE PASS recorded" "$out"
+out="$(hookjson 'bash board.sh move 7 \"In review\"' | (cd "$T3M" && bash "$PLUGIN/scripts/guard-board-move.sh" 2>&1); echo "rc=$?")"
+check "marker: move allowed immediately after pass despite tracked .claude dir" "rc=0" "$out"
+rm -rf "$T3M"
+
 echo "== session-start hook =="
 T4="$(mktemp -d)"
 ( cd "$T4" && git init -q . )
