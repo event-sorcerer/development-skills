@@ -1039,7 +1039,8 @@ out="$(cd "$AG" && PATH="$AGH:$PATH" FAKE_GH_LOG="$LOGA1" FAKE_GH_CALLCOUNT="$CC
     bash "$PLUGIN/scripts/board.sh" add --type inbound "widget idea from standup" P2 2>&1; echo "rc=$?")"
 check "add --type inbound: filed line names the type" "filed inbound #601 [P2]" "$out"
 check "add --type inbound: exits 0 on success" "rc=0" "$out"
-check "add --type inbound: issue title has no BUG: prefix" 'issue create --title "widget idea from standup"' "$(cat "$LOGA1")"
+check "add --type inbound: issue title has no BUG: prefix" "issue create -R fixture-owner/fixture-project --title widget idea from standup" "$(cat "$LOGA1")"
+check_absent "add --type inbound: never BUG:-prefixed" "BUG: widget idea from standup" "$(cat "$LOGA1")"
 check "add --type inbound: labeled inbound" "--label inbound" "$(cat "$LOGA1")"
 check_absent "add --type inbound: never labeled type:bug" "--label type:bug" "$(cat "$LOGA1")"
 check "add --type inbound: item-add invoked with the created issue's URL" "project item-add 1 --owner fixture-owner --url https://github.com/fixture-owner/fixture-project/issues/601" "$(cat "$LOGA1")"
@@ -1056,7 +1057,7 @@ LOGA3="$(mktemp)"; CCA3="$(mktemp)"
 out="$(cd "$AG" && PATH="$AGH:$PATH" FAKE_GH_LOG="$LOGA3" FAKE_GH_CALLCOUNT="$CCA3" FAKE_GH_ISSUE_NUM=603 FAKE_GH_VISIBLE_AFTER=1 \
     bash "$PLUGIN/scripts/board.sh" bug "widget breaks on save" P1 2>&1; echo "rc=$?")"
 check "bug alias: filed line matches add --type bug shape" "filed bug #603 [P1]" "$out"
-check "bug alias: still prefixes BUG: and uses type:bug label" 'issue create --title "BUG: widget breaks on save" --body "Bug found after a task reached a released status; filed as new work (never reopen shipped tasks)." --label type:bug' "$(cat "$LOGA3")"
+check "bug alias: still prefixes BUG: and uses type:bug label" "issue create -R fixture-owner/fixture-project --title BUG: widget breaks on save --body Bug found after a task reached a released status; filed as new work (never reopen shipped tasks). --label type:bug" "$(cat "$LOGA3")"
 
 # scenario 4: visibility timeout -- honest non-zero failure, no false success line
 LOGA4="$(mktemp)"; CCA4="$(mktemp)"
