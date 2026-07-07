@@ -7,12 +7,16 @@ Usage: next.py <project.json> <board-id-or-empty> <item-list.json> [spec-id]
 Prints candidates and either "=> PICK: #N" or "=> RESUME: #N" (WIP limit reached).
 """
 import json
+import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import config as C  # noqa: E402
+
 
 def main(cfg_path, bid, items_path, only_spec=""):
-    cfg = json.load(open(cfg_path))
+    cfg = C.load_config(path=cfg_path, warn=False)
     data = json.load(open(items_path))
     board = next((x for x in cfg["boards"] if x["id"] == bid), cfg["boards"][0])
     flow = board["statusFlow"]

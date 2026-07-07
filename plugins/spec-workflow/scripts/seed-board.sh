@@ -16,12 +16,16 @@
 set -uo pipefail
 
 TASKS_FILE="${1:?usage: seed-board.sh <tasks-file>}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-CONFIG="${PROJECT_CONFIG:-$ROOT/.claude/project.json}"
+CONFIG="$(python3 "$HERE/config.py" "$ROOT" path)"
+[[ -n "$CONFIG" && -f "$CONFIG" ]] || { echo "ERROR: no .claude/project.yaml (or legacy .json) — run the setup-project skill first" >&2; exit 1; }
 
 eval "$(python3 - "$CONFIG" "${BOARD:-}" <<'PY'
-import json, sys
-cfg = json.load(open(sys.argv[1])); bid = sys.argv[2]
+import sys
+import config as C
+cfg = C.load_config(path=sys.argv[1], warn=False); bid = sys.argv[2]
 b = next((x for x in cfg["boards"] if x["id"] == bid), cfg["boards"][0])
 def sh(k, v): print(f'{k}={json.dumps(str(v))}')
 sh("OWNER", b["owner"]); sh("REPO", b["repo"]); sh("PN", b["projectNumber"]); sh("PID", b["projectId"])
@@ -36,8 +40,9 @@ PY
 )"
 
 prio_id() { python3 - "$CONFIG" "${BOARD:-}" "$1" <<'PY'
-import json, sys
-cfg = json.load(open(sys.argv[1])); bid = sys.argv[2]
+import sys
+import config as C
+cfg = C.load_config(path=sys.argv[1], warn=False); bid = sys.argv[2]
 b = next((x for x in cfg["boards"] if x["id"] == bid), cfg["boards"][0])
 print(b["fields"]["priority"]["options"].get(sys.argv[3], ""))
 PY
@@ -45,8 +50,9 @@ PY
 
 backlog_path() { # task-id -> that spec's backlogPath (or specPath)
     python3 - "$CONFIG" "$1" <<'PY'
-import json, sys
-cfg = json.load(open(sys.argv[1])); tid = sys.argv[2]
+import sys
+import config as C
+cfg = C.load_config(path=sys.argv[1], warn=False); tid = sys.argv[2]
 for s in cfg["specs"]:
     if tid.startswith(s["taskPrefix"] + "-"):
         print(s.get("backlogPath") or s["specPath"]); sys.exit()
