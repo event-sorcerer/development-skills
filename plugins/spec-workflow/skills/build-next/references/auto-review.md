@@ -77,7 +77,37 @@ findings as a `board.sh comment` on the issue, write a `handoff`, leave the
 task *In review* for a human. Endless agent ping-pong is a stop condition, not
 a loop.
 
-## 3. Record the approval
+## 3. Front-load the human check-in (before touching `gh pr review`/`gh pr merge`)
+
+The harness's own permission classifier — not this plugin — gates `gh pr
+review` and `gh pr merge` in auto mode, and it denies them by default no
+matter what `autoMerge` says. Attempting the call and eating a denial costs a
+human round-trip every single time, so check FIRST instead of attempting
+FIRST: run `merge-mode.sh preauth`.
+
+- **`preauth: ok`** — the repo's `.claude/settings.json` (or
+  `settings.local.json`) already allow-lists both commands. Proceed straight
+  to §4 below; a denial here still means ask the human, never retry around it
+  (unchanged rule).
+- **`preauth: missing <rules>`** — do NOT run `gh pr review`/`gh pr merge` yet.
+  Ask the human via AskUserQuestion (header "Merge PR #<n>"), options:
+  - **Merge now (run it for me)** — you proceed with §4 as normal for this PR
+    only; the missing rules stay missing for next time.
+  - **I'll merge myself** — stop here; leave the task *In review*, tell the
+    human the PR is approved and ready.
+  - **Add permission rules so future merges are autonomous** — show
+    `merge-mode.sh preauth-snippet` verbatim as the preview, get the human's
+    explicit go-ahead, then add that block to `.claude/settings.json` (merge
+    into any existing `permissions.allow`, don't clobber other rules) and
+    proceed with §4. Tell the human to commit the settings change.
+  - **Leave In review** — stop here; no merge attempt.
+
+This replaces attempt-then-denied with ask-first: the probe is advisory only
+(it can't see user/global allow-rules), so an `ok` verdict can still hit a
+denial — if it does, that denial is answered the normal way (ask the human,
+never retry around it), not treated as a probe bug.
+
+## 4. Record the approval + merge
 
 - `delegation.reviewerTokenEnv` set (a second GitHub account's token):
   `GH_TOKEN="${<that env var>}" gh pr review <n> --approve --body "<the
@@ -87,8 +117,6 @@ a loop.
   (model: <the reviewer model you used>): <justification>"`. If branch protection REQUIRES
   an approving review, this cannot satisfy it — tell the human they need a
   reviewer token (or relaxed protection) and stop as blocked-on-human.
-
-## 4. Merge + announce
 
 Merge with `<cfg:methodology.mergeMethod|squash>` — a per-repo decision made at
 setup (the `merge-mode.sh method` subcommand changes it later):
