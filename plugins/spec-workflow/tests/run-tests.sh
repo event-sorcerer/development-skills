@@ -224,35 +224,70 @@ function extract(name) {
     return m[0];
 }
 const MIN_REGION = 46, BASE_REGION = 110, MIN_DIST = 80, MAX_DIST = 6000, FOV = 50 * Math.PI / 180;
-const clusters = new Map(), repoCenters = new Map(), repoRadius = new Map();
+let clusters, repoCenters, repoRadius, repoList, nodes;
 const clusterKey = (repo, role) => repo + "|" + role;
 function roleHue() { return 190; }
-const repoList = ["big-repo", "empty-repo"];
-const nodes = [];
-for (let i = 0; i < 20; i++) nodes.push({repo: "big-repo", role: "dev"});
-// empty-repo: zero nodes — must still get a small placeholder region, not equal share
 
 eval(extract("fibSphere"));
 eval(extract("layoutClusters"));
 eval(extract("boundingSphere"));
 eval(extract("fitDistance"));
 
-layoutClusters();
-const bigR = repoRadius.get("big-repo"), emptyR = repoRadius.get("empty-repo");
-if (!(bigR > emptyR)) throw new Error("region with notes must be larger than an empty one: big=" + bigR + " empty=" + emptyR);
-if (Math.abs(emptyR - MIN_REGION) > 0.001) throw new Error("empty repo region must floor at MIN_REGION: got " + emptyR);
+// asserts fitDistance(aspect) actually contains every repo region's own
+// bounding sphere (center + radius + label headroom), not just the
+// aggregate — this is the literal on-boot "everything visible with margin"
+// contract, checked per aspect ratio (landscape + portrait, since a phone
+// loads portrait).
+function assertFits(label, aspect) {
+    const fit = fitDistance(aspect);
+    const hFov = 2 * Math.atan(Math.tan(FOV / 2) * aspect);
+    const half = Math.min(FOV, hFov) / 2;
+    if (fit.distance < MIN_DIST || fit.distance > MAX_DIST) throw new Error(label + ": fitDistance() out of clamp range: " + fit.distance);
+    for (const repo of repoList) {
+        const rc = repoCenters.get(repo); if (!rc) continue;
+        const rad = (repoRadius.get(repo) || MIN_REGION) + 30;   // +30: label headroom, mirrors boundingSphere()'s own pad
+        const distFromTarget = Math.hypot(rc.x - fit.target.x, rc.y - fit.target.y, rc.z - fit.target.z);
+        const angle = Math.atan2(distFromTarget + rad, fit.distance);
+        if (angle > half + 1e-6) throw new Error(label + ": " + repo + " falls outside the fitted FOV (angle=" + angle.toFixed(4) + " half=" + half.toFixed(4) + ")");
+    }
+}
 
-const aspect = 1600 / 900;
-const fit = fitDistance(aspect);
-const hFov = 2 * Math.atan(Math.tan(FOV / 2) * aspect);
-const half = Math.min(FOV, hFov) / 2;
-if (!(fit.distance * Math.sin(half) >= fit.boundR - 0.001)) throw new Error("fitDistance() does not frame the bounding sphere: dist=" + fit.distance + " boundR=" + fit.boundR);
-if (fit.distance < MIN_DIST || fit.distance > MAX_DIST) throw new Error("fitDistance() out of clamp range: " + fit.distance);
-console.log("LAYOUT3D_OK bigR=" + bigR.toFixed(1) + " emptyR=" + emptyR.toFixed(1) + " dist=" + fit.distance.toFixed(1) + " boundR=" + fit.boundR.toFixed(1));
+// case 1: page just booted, before /graph has resolved — the exact state the
+// user's screenshot showed landing on empty space. Must still produce a
+// sane, non-NaN fit (the single-origin-point fallback).
+clusters = new Map(); repoCenters = new Map(); repoRadius = new Map(); repoList = []; nodes = [];
+layoutClusters();
+assertFits("boot (no graph yet)", 1600 / 900);          // no-op loop (repoList empty) — the real check is next
+assertFits("boot (no graph yet, portrait)", 900 / 1600);
+for (const [label, aspect] of [["boot fallback point, landscape", 1600 / 900], ["boot fallback point, portrait", 900 / 1600]]) {
+    const fit = fitDistance(aspect);
+    if (Number.isNaN(fit.distance) || Number.isNaN(fit.target.x)) throw new Error(label + ": fitDistance() produced NaN with no repos yet");
+    const hFov = 2 * Math.atan(Math.tan(FOV / 2) * aspect);
+    const half = Math.min(FOV, hFov) / 2;
+    if (!(fit.distance * Math.sin(half) >= 160 - 0.001)) throw new Error(label + ": the single-origin fallback (r=160) isn't framed: dist=" + fit.distance);
+}
+
+// case 2: a populated multi-repo graph, one repo empty — region size ∝ note
+// count, empty repo floors at MIN_REGION, and every region (including the
+// empty one) is framed.
+clusters = new Map(); repoCenters = new Map(); repoRadius = new Map();
+repoList = ["big-repo", "empty-repo", "mid-repo"];
+nodes = [];
+for (let i = 0; i < 20; i++) nodes.push({repo: "big-repo", role: "dev"});
+for (let i = 0; i < 5; i++) nodes.push({repo: "mid-repo", role: "dev"});
+// empty-repo: zero nodes — must still get a small placeholder region, not equal share
+layoutClusters();
+const bigR = repoRadius.get("big-repo"), emptyR = repoRadius.get("empty-repo"), midR = repoRadius.get("mid-repo");
+if (!(bigR > midR && midR > emptyR)) throw new Error("region size must track note count: big=" + bigR + " mid=" + midR + " empty=" + emptyR);
+if (Math.abs(emptyR - MIN_REGION) > 0.001) throw new Error("empty repo region must floor at MIN_REGION: got " + emptyR);
+assertFits("populated 3-repo graph", 1600 / 900);
+assertFits("populated 3-repo graph, portrait", 900 / 1600);
+
+console.log("LAYOUT3D_OK bigR=" + bigR.toFixed(1) + " midR=" + midR.toFixed(1) + " emptyR=" + emptyR.toFixed(1));
 NODEJS
     layout_out="$(node "$_nvlayout" "$NVHTML" 2>&1)"
     check "layoutClusters sizes regions by note count, empty repo floors at MIN_REGION" "LAYOUT3D_OK" "$layout_out"
-    check "fitDistance frames every repo region's bounding sphere in the camera FOV" "LAYOUT3D_OK" "$layout_out"
+    check "fitDistance frames every repo region on boot, reload, landscape + portrait" "LAYOUT3D_OK" "$layout_out"
     rm -f "$_nvlayout"
 fi
 

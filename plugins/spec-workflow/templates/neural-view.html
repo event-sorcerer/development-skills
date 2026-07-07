@@ -405,6 +405,11 @@ function rebuildScene(){
   // synapses (one Line per link — counts are small enough that per-link
   // objects are simpler than a merged BufferGeometry, and weight/graduated
   // dimming is baked in at rebuild time since it doesn't change per frame).
+  // Each also gets a slow ambient "pulse" sprite that drifts source→target
+  // continuously (the baseline directional-flow cue — see makeTravelAnim for
+  // the brighter, event-driven hop pulse this is deliberately dimmer than).
+  // Skipped entirely under prefers-reduced-motion: links render as static
+  // lines only.
   for(const l of links){
     const dim = (l.a.graduated||l.b.graduated) ? 0.5 : 1;
     const geo = new THREE.BufferGeometry().setFromPoints([
@@ -414,6 +419,17 @@ function rebuildScene(){
     const line = new THREE.Line(geo, mat);
     line.userData = {kind:"synapse", link:l};
     sceneGroup.add(line);
+    l.pulse = null;
+    if(!REDUCED){
+      const pmat = new THREE.SpriteMaterial({map:CORE_TEX, color:threeColor(190,70), transparent:true,
+        opacity:0.32*dim, blending:THREE.AdditiveBlending, depthWrite:false, fog:true});
+      const psprite = new THREE.Sprite(pmat);
+      psprite.scale.set(7,7,1);
+      psprite.userData = {kind:"synapsePulse", link:l};
+      sceneGroup.add(psprite);
+      l.pulse = psprite;
+      l.pulsePhase = Math.random();   // desyncs pulses so the whole network doesn't throb in lockstep
+    }
   }
 
   // consult arcs (curved lines between two role clusters, within one repo).
@@ -520,6 +536,7 @@ function updateVisuals(){
     nd._halo.scale.set(rr*6*(1+nd.hl*0.6), rr*6*(1+nd.hl*0.6), 1);
     nd._halo.material.opacity = Math.min(0.75, 0.28 + pulse*0.2 + nd.hl*0.5);
   }
+  const now = performance.now();
   for(const child of sceneGroup.children){
     const l = child.userData && child.userData.kind==="synapse" ? child.userData.link : null;
     if(!l) continue;
@@ -527,6 +544,13 @@ function updateVisuals(){
     pos.setXYZ(0, l.a.x, l.a.y, l.a.z);
     pos.setXYZ(1, l.b.x, l.b.y, l.b.z);
     pos.needsUpdate = true;
+    if(l.pulse){
+      // ambient directional drift, source(a) → target(b), ~4.5s per lap,
+      // desynced per-link via pulsePhase; deliberately dim/slow relative to
+      // the bright event-driven travel pulse in makeTravelAnim.
+      const p = ((now*0.00022 + l.pulsePhase) % 1);
+      l.pulse.position.set(l.a.x+(l.b.x-l.a.x)*p, l.a.y+(l.b.y-l.a.y)*p, l.a.z+(l.b.z-l.a.z)*p);
+    }
   }
   updateAnims();
 }
