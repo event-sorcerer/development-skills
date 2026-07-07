@@ -3,5 +3,20 @@
     "fires": 0,
     "last": null,
     "weight": 0.5
+  },
+  "post-hoc-review-over-rewrite->shared-checkout-hazard": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "shared-checkout-hazard->post-hoc-review-over-rewrite": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "smoke-test-is-not-review->frozen-contracts-parallel-prs": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
   }
 }
