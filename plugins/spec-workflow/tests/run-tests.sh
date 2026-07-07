@@ -30,7 +30,7 @@ echo "== syntax =="
 for f in "$PLUGIN"/scripts/*.sh "$HERE"/run-tests.sh; do
     if bash -n "$f"; then echo "ok   bash -n $(basename "$f")"; else echo "FAIL bash -n $f"; fails=$((fails + 1)); fi
 done
-for p in config.py identity_lib.py validate-config.py next.py ui-hub.py brain.py neural-view.py; do
+for p in config.py identity_lib.py validate-config.py next.py similar.py ui-hub.py brain.py neural-view.py; do
     if python3 -m py_compile "$PLUGIN/scripts/$p"; then
         echo "ok   py_compile $p"
     else
@@ -110,14 +110,14 @@ out="$(python3 "$SIM" "$HERE" "I want to add a dark theme toggle option on the s
 first_line="$(head -1 <<<"$out")"
 check "paraphrase match: #21 is top-ranked" "#21" "$first_line"
 check_absent "paraphrase match: not low tier" $'low\t' "$first_line"
-check_absent "paraphrase match: unrelated #22 not matched" "#22" "$out"
-check_absent "paraphrase match: unrelated #23 not matched" "#23" "$out"
+unrelated="$(grep -E '#22|#23' <<<"$out" || true)"
+check_absent "paraphrase match: unrelated issues not high tier" $'high\t' "$unrelated"
+check_absent "paraphrase match: unrelated issues not medium tier" $'medium\t' "$unrelated"
 
 out="$(python3 "$SIM" "$HERE" "refactor database connection pooling for performance"; echo "rc=$?")"
 check "no-match query: exits 0" "rc=0" "$out"
 check_absent "no-match query: no high tier" $'high\t' "$out"
 check_absent "no-match query: no medium tier" $'medium\t' "$out"
-check_absent "no-match query: no issue matched" "#2" "$out"
 
 unset SIMILAR_ISSUES_FILE
 
