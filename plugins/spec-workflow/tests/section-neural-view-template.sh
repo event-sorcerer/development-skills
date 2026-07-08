@@ -44,6 +44,21 @@ check "CSS gives .hoverable canvas a pointer cursor without breaking grab/grabbi
 check_absent "hover/projects/sessions code introduces no external fetch" 'fetch("http' "$(cat "$NVHTML")"
 check "template polls GET /projects" 'fetch("/projects")' "$(cat "$NVHTML")"
 check "template polls GET /sessions" 'fetch("/sessions")' "$(cat "$NVHTML")"
+# #75: BRAINS panel groups per repo (never a flat cross-repo list) -- one
+# repo-brains section per repo, orchestrator-first-then-alphabetical roles
+# within it, and empty (zero-note) roles get a dimmed row instead of being
+# omitted entirely (the omission is what made every repo look like a single
+# shared brain trio).
+check "loadGraph() stores the server's per-repo role list for the BRAINS panel" 'window.__repoRoles = g.repoRoles || {};' "$(cat "$NVHTML")"
+check "orderedRoles() puts orchestrator first, remaining roles alphabetical" 'return known.includes("orchestrator") ? ["orchestrator", ...rest] : rest;' "$(cat "$NVHTML")"
+check "renderGauges() builds one repo-brains section per repo" 'section.className="repo-brains";' "$(cat "$NVHTML")"
+check "renderGauges() dims a role's row instead of omitting it when it has zero notes" 'row.className = n ? "brainrow" : "brainrow brainrow-empty";' "$(cat "$NVHTML")"
+check "CSS dims empty brain rows without hiding them" ".brainrow-empty{opacity:.4}" "$(cat "$NVHTML")"
+check "CSS gives each repo section its own header" ".repo-brains-h{" "$(cat "$NVHTML")"
+# #75 micro-fix: the repo-hover tooltip must not double up "board unavailable"
+# when the server itself already prefixes proj.error with it -- render
+# as-is in that case, prepend locally only when the server hasn't (yet).
+check "tooltipHtml() renders proj.error as-is when the server already prefixed it with board unavailable" '/^board unavailable/i.test(raw) ? raw : (raw ? "board unavailable: "+raw : "board unavailable")' "$(cat "$NVHTML")"
 _nvvendorfile="$PLUGIN/templates/vendor/three.module.min.js"
 if [[ -f "$_nvvendorfile" ]]; then
     got_sha="$(shasum -a 256 "$_nvvendorfile" | awk '{print $1}')"
@@ -488,5 +503,92 @@ NODEJS
     hovertest_out="$(node "$_nvhovertest" "$NVHTML" 2>&1)"
     check "hoverTest() resolves overlapping hits by kind priority (note > synapse/pulse > repoLabel > repoRegion) and drives the hoverable cursor affordance" "HOVERTEST_PRIORITY_OK" "$hovertest_out"
     rm -f "$_nvhovertest"
+
+    # #75 behavioral: renderGauges() must (a) group into one section per repo
+    # in repoList order, (b) order roles orchestrator-first-then-alphabetical
+    # within each section via orderedRoles(), and (c) still render a role with
+    # zero notes as a dimmed row rather than omitting it -- the exact bug that
+    # made two repos with no notes yet invisible and every repo look like one
+    # shared brain trio. A minimal fake DOM (createElement/getElementById
+    # returning plain objects that track className/innerHTML/children) drives
+    # the real extracted functions instead of re-implementing their logic.
+    _nvgauges="$(mktemp).cjs"
+    cat >"$_nvgauges" <<'NODEJS'
+const fs = require("fs");
+const html = fs.readFileSync(process.argv[2], "utf8");
+function extract(name) {
+    const re = new RegExp("function " + name + "\\([^)]*\\)\\{[\\s\\S]*?\\n\\}\\n");
+    const m = html.match(re);
+    if (!m) throw new Error("could not find function " + name + "() in template");
+    return m[0];
+}
+function extractOneLine(name) {
+    const re = new RegExp("function " + name + "\\([^)]*\\)\\{[\\s\\S]*?\\}\\n");
+    const m = html.match(re);
+    if (!m) throw new Error("could not find function " + name + "() in template");
+    return m[0];
+}
+
+function makeEl() {
+    return {
+        _className: "", _children: [], _html: "",
+        set className(v) { this._className = v; }, get className() { return this._className; },
+        set innerHTML(v) { this._html = v; }, get innerHTML() { return this._html; },
+        appendChild(c) { this._children.push(c); },
+    };
+}
+let gaugeList;
+const document = {
+    getElementById(id) { if (id === "gauge-list") return gaugeList; throw new Error("unexpected getElementById(" + id + ")"); },
+    createElement() { return makeEl(); },
+};
+const clusterKey = (repo, role) => repo + "|" + role;
+function roleHue() { return 190; }
+function cssColor() { return "hsla(190,95%,72%,.95)"; }
+function arc() { return "<svg></svg>"; }
+eval(extractOneLine("escapeHtml"));
+eval(extractOneLine("orderedRoles"));
+eval(extract("renderGauges"));
+
+// fixture: two repos, alphabetical (repo-a, repo-b). repo-a has all three
+// canonical roles with dev the only one carrying a note; repo-b is entirely
+// brainless (all three roles present in repoRoles, zero notes for any).
+let repoList = ["repo-a", "repo-b"];
+window = { __repoRoles: {
+    "repo-a": ["dev", "orchestrator", "reviewer"],
+    "repo-b": ["dev", "orchestrator", "reviewer"],
+} };
+let nodes = [{ repo: "repo-a", role: "dev", strength: 3 }];
+let links = [];
+
+gaugeList = makeEl();
+renderGauges();
+
+if (gaugeList._children.length !== 2) throw new Error("expected one repo-brains section per repo, got " + gaugeList._children.length);
+const [secA, secB] = gaugeList._children;
+if (secA.className !== "repo-brains" || secB.className !== "repo-brains") throw new Error("sections must use the repo-brains class");
+if (!secA.innerHTML.includes("repo-a")) throw new Error("repo-a section header missing repo name: " + secA.innerHTML);
+if (!secB.innerHTML.includes("repo-b")) throw new Error("repo-b section header missing repo name: " + secB.innerHTML);
+
+if (secA._children.length !== 3) throw new Error("expected 3 role rows in repo-a (canonical roles), got " + secA._children.length);
+const rolesA = secA._children.map(r => { const m = r.innerHTML.match(/class="rname"[^>]*>([a-z]+)</); return m ? m[1] : null; });
+if (rolesA.join(",") !== "orchestrator,dev,reviewer") throw new Error("repo-a roles not orchestrator-first-then-alphabetical: " + rolesA.join(","));
+
+const devRow = secA._children[1];
+if (devRow.className !== "brainrow") throw new Error("repo-a's dev row (has a note) must not be dimmed: " + devRow.className);
+const orchRowA = secA._children[0], revRowA = secA._children[2];
+if (orchRowA.className !== "brainrow brainrow-empty") throw new Error("repo-a's note-less orchestrator row must be dimmed: " + orchRowA.className);
+if (revRowA.className !== "brainrow brainrow-empty") throw new Error("repo-a's note-less reviewer row must be dimmed: " + revRowA.className);
+
+if (secB._children.length !== 3) throw new Error("expected 3 role rows in repo-b (brainless repo), got " + secB._children.length);
+for (const row of secB._children) {
+    if (row.className !== "brainrow brainrow-empty") throw new Error("every role in a brainless repo must render as a dimmed row, not be omitted: " + row.className);
+}
+
+console.log("RENDERGAUGES_GROUPED_ORDERED_EMPTY_OK");
+NODEJS
+    gauges_out="$(node "$_nvgauges" "$NVHTML" 2>&1)"
+    check "renderGauges() groups per repo, orders orchestrator-first-then-alphabetical, and renders empty brains as dimmed rows instead of omitting them (#75)" "RENDERGAUGES_GROUPED_ORDERED_EMPTY_OK" "$gauges_out"
+    rm -f "$_nvgauges"
 fi
 

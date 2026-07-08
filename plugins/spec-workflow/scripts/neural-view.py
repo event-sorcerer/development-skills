@@ -34,6 +34,12 @@ an empty graph. Graph node ids are "<repo>/<role>/<slug>" (unique across repos);
 /note/<repo>/<role>/<slug> addresses one; /events cursors are opaque and carry
 a per-repo, per-role byte offset.
 
+GET /graph also returns repoRoles: {repo: [role, ...]} (alphabetical) — the
+CANONICAL_ROLES (dev/orchestrator/reviewer) unioned with any role that has a
+brain/ dir on disk, per repo. This lets the BRAINS panel show every anchored
+repo with all three roles, dimmed/zero when a role has no notes yet, instead
+of a role silently vanishing because it has no notes to contribute nodes.
+
 GET /projects: {repo: {ok, statusCounts:{status:N}, inProgress:[title], inReview:[title]}}
 or {repo: {ok:false, error}} — per-repo board state, read via THIS plugin's
 board.sh (never `gh project` directly) with cwd=<repo root>, so it resolves
@@ -206,16 +212,27 @@ def read_note(brain, slug):
     return parse_note(f.read_text(errors="replace"))
 
 
+CANONICAL_ROLES = ("dev", "orchestrator", "reviewer")  # mirrors identity_lib.DEFAULTS keys
+
+
 def build_graph(repos):
     """nodes = every note across every repo's brains; edges = each repo's
     links.json entries plus cross-brain consult edges derived from that repo's
     activation logs (consult never crosses a repo boundary). Node/edge ids are
     "<repo>/<role>[/<slug>]" so they stay unique across repos. `repos` in the
     payload lists every DISCOVERED repo (including brainless ones), so the
-    client can still draw an empty labeled constellation for them."""
-    nodes, edges = [], []
+    client can still draw an empty labeled constellation for them.
+
+    repoRoles: {repo: [role, ...]} sorted alphabetically, CANONICAL_ROLES
+    unioned with whatever roles actually have a brain dir on disk (#75) --
+    every anchored repo must show all three canonical roles in the BRAINS
+    panel even before a role's brain/ dir has ever been created, and any
+    future/custom role that DOES have a brain dir still shows up too."""
+    nodes, edges, repo_roles = [], [], {}
     for name, root in repos:
+        roles_here = set(CANONICAL_ROLES)
         for role, brain in iter_brains(root):
+            roles_here.add(role)
             notes_dir = brain / "notes"
             if notes_dir.is_dir():
                 for f in sorted(notes_dir.glob("*.md")):
@@ -264,7 +281,8 @@ def build_graph(repos):
             seen.add(key)
             edges.append({"source": f"{name}/{consumer}", "target": f"{name}/{role}",
                            "type": "consult", "weight": 0.4, "repo": name})
-    return {"nodes": nodes, "edges": edges, "repos": [name for name, _ in repos]}
+        repo_roles[name] = sorted(roles_here)
+    return {"nodes": nodes, "edges": edges, "repos": [name for name, _ in repos], "repoRoles": repo_roles}
 
 
 def _parse_lines(repo, role, blob, out):

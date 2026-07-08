@@ -56,9 +56,14 @@ canvas.grabbing{cursor:grabbing}
 #gauges{top:70px;left:14px;width:214px;max-height:calc(100vh - 130px);overflow:auto;
   padding:.7rem .8rem}
 #gauges h2{margin:0 0 .5rem;font-size:.6rem;letter-spacing:.26em;text-transform:uppercase;color:var(--muted);font-weight:400}
+.repo-brains{margin:0}
+.repo-brains-h{font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;color:var(--cyan);
+  margin:.6rem 0 .1rem;border-top:1px solid rgba(90,190,255,.18);padding-top:.5rem}
+.repo-brains:first-of-type .repo-brains-h{border-top:0;margin-top:0;padding-top:0}
 .brainrow{display:flex;align-items:center;gap:.55rem;padding:.35rem 0;border-top:1px solid rgba(90,190,255,.12)}
-.brainrow:first-of-type{border-top:0}
+.repo-brains .brainrow:first-of-type{border-top:0}
 .brainrow .rname{flex:1;font-size:.66rem;letter-spacing:.12em;text-transform:uppercase}
+.brainrow-empty{opacity:.4}
 .arc{width:34px;height:34px;flex:none}
 
 /* ticker (bottom) */
@@ -507,6 +512,7 @@ async function loadGraph(){
   const prev = nodeById;
   roles = [...new Set(g.nodes.map(n=>n.role))].sort();
   repoList = (g.repos && g.repos.length) ? [...g.repos].sort() : [...new Set(g.nodes.map(n=>n.repo))].sort();
+  window.__repoRoles = g.repoRoles || {};
   nodes = g.nodes.map(n=>{
     const old = prev.get(n.id);
     return Object.assign(n, {
@@ -726,31 +732,43 @@ function logEvent(e){
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 
 // ---- gauges ----
-// One row per (repo,role) combo actually present in the graph — a repo with a
-// marker but no brains yet simply contributes no rows (it still gets a labeled,
-// empty region in the scene via repoList/repoCenters).
+// #75: grouped by repo — one section per repo in repoList (already
+// alphabetical), never a flat cross-repo list. Each section lists ALL of that
+// repo's roles (window.__repoRoles, canonical dev/orchestrator/reviewer union
+// whatever else has a brain dir on disk), orchestrator first then the rest
+// alphabetical, even when a role has zero notes — an empty brain renders as a
+// dimmed zero-count row (brainrow-empty), never omitted (omission is what
+// made every repo look like one shared brain trio).
+function orderedRoles(repo){
+  const known = (window.__repoRoles && window.__repoRoles[repo]) || [];
+  const rest = known.filter(r=>r!=="orchestrator").sort();
+  return known.includes("orchestrator") ? ["orchestrator", ...rest] : rest;
+}
 function renderGauges(){
   const list=document.getElementById("gauge-list"); list.innerHTML="";
   const perCombo = new Map();
   for(const nd of nodes){ const k=clusterKey(nd.repo,nd.role); const s=perCombo.get(k)||{n:0,str:0,repo:nd.repo,role:nd.role}; s.n++; s.str+=nd.strength||1; perCombo.set(k,s); }
   const linkCount = new Map();
   for(const l of links){ const k=clusterKey(l.a.repo,l.a.role); linkCount.set(k,(linkCount.get(k)||0)+1); }
-  const combos = [...perCombo.keys()].sort();
   const maxN = Math.max(1,...[...perCombo.values()].map(s=>s.n));
-  const multi = repoList.length>1;
-  for(const k of combos){
-    const s=perCombo.get(k); const avg=s.n?s.str/s.n:0; const lk=linkCount.get(k)||0;
-    const hue=roleHue(s.role);
-    const label = multi ? `${s.repo} · ${s.role}` : s.role;
-    const row=document.createElement("div"); row.className="brainrow";
-    row.innerHTML =
-      arc(s.n/maxN, hue, s.n) +
-      `<div class="rname" style="color:${cssColor(hue,72,.95)}">${escapeHtml(label)}</div>` +
-      `<div class="label" title="avg strength">str <span class="val">${avg.toFixed(1)}</span></div>` +
-      `<div class="label" title="synapses">syn <span class="val">${lk}</span></div>`;
-    list.appendChild(row);
+  if(!repoList.length){ list.innerHTML='<div class="label">no brains</div>'; return; }
+  for(const repo of repoList){
+    const section=document.createElement("div"); section.className="repo-brains";
+    section.innerHTML = `<div class="repo-brains-h">${escapeHtml(repo)}</div>`;
+    for(const role of orderedRoles(repo)){
+      const k=clusterKey(repo,role); const s=perCombo.get(k);
+      const n=s?s.n:0, avg=(s&&s.n)?s.str/s.n:0, lk=linkCount.get(k)||0;
+      const hue=roleHue(role);
+      const row=document.createElement("div"); row.className = n ? "brainrow" : "brainrow brainrow-empty";
+      row.innerHTML =
+        arc(n/maxN, hue, n) +
+        `<div class="rname" style="color:${cssColor(hue,72,.95)}">${escapeHtml(role)}</div>` +
+        `<div class="label" title="avg strength">str <span class="val">${avg.toFixed(1)}</span></div>` +
+        `<div class="label" title="synapses">syn <span class="val">${lk}</span></div>`;
+      section.appendChild(row);
+    }
+    list.appendChild(section);
   }
-  if(!combos.length) list.innerHTML='<div class="label">no brains</div>';
 }
 function arc(frac, hue, label){
   frac=Math.max(0,Math.min(1,frac)); const R=13, C=2*Math.PI*R, off=C*(1-frac);
@@ -838,7 +856,14 @@ function tooltipHtml(ud){
     const proj = (window.__projects||{})[repo];
     let projHtml;
     if(!proj) projHtml = '<div class="tt-sub tt-dim">no board configured</div>';
-    else if(!proj.ok) projHtml = `<div class="tt-sub tt-dim">board unavailable${proj.error?": "+escapeHtml(proj.error):""}</div>`;
+    else if(!proj.ok){
+      // #75: the server MAY already prefix proj.error with "board unavailable"
+      // itself -- render it as-is when it does, so we never double up the
+      // prefix; otherwise (older/plain error text) prepend it here as before.
+      const raw = proj.error || "";
+      const msg = /^board unavailable/i.test(raw) ? raw : (raw ? "board unavailable: "+raw : "board unavailable");
+      projHtml = `<div class="tt-sub tt-dim">${escapeHtml(msg)}</div>`;
+    }
     else {
       const counts = Object.entries(proj.statusCounts||{}).map(([k,v])=>`${escapeHtml(k)} ${v}`).join(" · ");
       projHtml = `<div class="tt-sub">${counts||"no items"}</div>`;

@@ -155,6 +155,17 @@ mkdir -p "$_gammabrain/notes"
 cat >"$_gammabrain/notes/should-not-appear.md" <<'EOF'
 This repo has no marker file and must be excluded from discovery.
 EOF
+# #75: repo-alpha also grows a non-canonical "ops" role brain, to pin that
+# repoRoles is canonical-roles UNION discovered-on-disk roles, not just the
+# hardcoded three.
+_alphaopsbrain="$_repoA/.claude/identities/ops/brain"
+mkdir -p "$_alphaopsbrain/notes"
+cat >"$_alphaopsbrain/notes/ops-note.md" <<'EOF'
+---
+strength: 1
+---
+A role beyond the canonical three (dev/orchestrator/reviewer).
+EOF
 
 export NEURAL_VIEW_STATE="$_scanstate" NEURAL_VIEW_SCAN="$_scanbase"
 lifecycle_start "neural-view starts (scan discovery, no --dir)" NEURAL_VIEW_PORT 'python3 "$NV" start'
@@ -166,6 +177,12 @@ check_absent "graph excludes unmarked repo-gamma note" "should-not-appear" "$out
 check "graph repos list includes repo-alpha" '"repo-alpha"' "$out"
 check "graph repos list includes brainless marked repo-beta" '"repo-beta"' "$out"
 check_absent "graph repos list excludes unmarked repo-gamma" '"repo-gamma"' "$out"
+# #75: repoRoles must list ALL THREE canonical roles for every anchored repo,
+# even one with brains for only one role on disk (repo-alpha: dev+ops only) or
+# zero brains at all (repo-beta) -- this is what lets the BRAINS panel show
+# empty/dimmed brain entries instead of omitting them.
+check "graph repoRoles for repo-alpha is canonical roles UNION its on-disk ops role, sorted" '"repo-alpha": ["dev", "ops", "orchestrator", "reviewer"]' "$out"
+check "graph repoRoles for repo-beta (marker, zero brains on disk) still lists all three canonical roles" '"repo-beta": ["dev", "orchestrator", "reviewer"]' "$out"
 out="$(curl -sf "http://127.0.0.1:$NEURAL_VIEW_PORT/note/repo-alpha/dev/seed-note")"
 check "multi-repo note fetch addresses by repo/role/slug" "belongs to repo-alpha only" "$out"
 code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$NEURAL_VIEW_PORT/note/repo-gamma/dev/should-not-appear")"
