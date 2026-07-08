@@ -29,6 +29,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
   font-family:var(--mono);overflow:hidden}
 #stage{position:fixed;inset:0}
 canvas{position:absolute;inset:0;display:block;touch-action:none;cursor:grab}
+canvas.hoverable{cursor:pointer}
 canvas.grabbing{cursor:grabbing}
 .hud{position:fixed;background:var(--panel);border:1px solid var(--border);
   border-radius:12px;backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);
@@ -398,8 +399,17 @@ function rebuildScene(){
       const rc = repoCenters.get(repo); if(!rc) continue;
       const rad = repoRadius.get(repo) || MIN_REGION;
       const geo = new THREE.IcosahedronGeometry(rad, 1);
-      const mat = new THREE.MeshBasicMaterial({color: 0x8fa6bd, wireframe:true, transparent:true, opacity:0.12, fog:true});
-      const mesh = new THREE.Mesh(geo, mat);
+      // rendered (and raycast) as its actual wireframe edges, not a solid
+      // Mesh -- a Mesh's face raycast hits anywhere in the projected disc,
+      // including the translucent interior that reads as empty space (#72).
+      // LineSegments+EdgesGeometry renders identically to Mesh
+      // wireframe:true (both draw the same edges via gl.LINES) but raycasts
+      // through the Line path, so raycaster.params.Line.threshold narrows
+      // hits to near the visible lines.
+      const edges = new THREE.EdgesGeometry(geo);
+      geo.dispose();
+      const mat = new THREE.LineBasicMaterial({color: 0x8fa6bd, transparent:true, opacity:0.12, fog:true});
+      const mesh = new THREE.LineSegments(edges, mat);
       mesh.position.set(rc.x, rc.y, rc.z);
       mesh.userData = {kind:"repoRegion", repo};
       sceneGroup.add(mesh);
@@ -486,6 +496,7 @@ function rebuildScene(){
       opacity:0.4, blending:THREE.AdditiveBlending, depthWrite:false, fog:true});
     const halo = new THREE.Sprite(haloMat);
     halo.scale.set(nd.r*6, nd.r*6, 1);
+    halo.userData = {kind:"note", node:nd};   // hover hit target is the visible glow (#72), not the tiny core
     sceneGroup.add(core); sceneGroup.add(halo);
     nd._core = core; nd._halo = halo;
   }
@@ -799,10 +810,11 @@ function renderProjects(){
 // ---- hover inspection (raycast on pointermove, throttled) ----
 const tooltipEl = document.getElementById("tooltip");
 let hoveredNode = null, hoveredLink = null, hoverThrottle = 0;
-function hideTooltip(){ tooltipEl.style.display = "none"; hoveredNode = null; hoveredLink = null; }
+function hideTooltip(){ tooltipEl.style.display = "none"; hoveredNode = null; hoveredLink = null; canvas.classList.remove("hoverable"); }
 function showTooltip(clientX, clientY, html){
   tooltipEl.innerHTML = html;
   tooltipEl.style.display = "block";
+  canvas.classList.add("hoverable");
   const pad = 14;
   let left = clientX + pad, top = clientY + pad;
   if(left + 270 > W) left = clientX - 270 - pad;
@@ -848,15 +860,25 @@ function hoverTest(clientX, clientY){
   const ndc = new THREE.Vector2((clientX/W)*2-1, -(clientY/H)*2+1);
   raycaster.setFromCamera(ndc, camera);
   raycaster.params.Line = {threshold: 4};
-  const targets = [];
-  for(const nd of nodes) if(nd._core) targets.push(nd._core);
+  const noteTargets = [], synapseTargets = [], labelTargets = [], regionTargets = [];
+  for(const nd of nodes) if(nd._halo) noteTargets.push(nd._halo);
   for(const child of sceneGroup.children){
     const k = child.userData && child.userData.kind;
-    if(k==="repoRegion" || k==="repoLabel" || k==="synapse" || k==="synapsePulse") targets.push(child);
+    if(k==="synapse" || k==="synapsePulse") synapseTargets.push(child);
+    else if(k==="repoLabel") labelTargets.push(child);
+    else if(k==="repoRegion") regionTargets.push(child);
   }
-  const hits = raycaster.intersectObjects(targets, false);
-  if(!hits.length){ hideTooltip(); return; }
-  const ud = hits[0].object.userData || {};
+  // priority (#72): note > synapse/pulse > repo label > repo region --
+  // raycast each kind group separately, nearest-in-group-order wins, so a
+  // more specific target (a note) is never shadowed by a coarser one (the
+  // repo region) that happens to sit nearer the camera along the ray.
+  let ud = null;
+  for(const group of [noteTargets, synapseTargets, labelTargets, regionTargets]){
+    if(!group.length) continue;
+    const hits = raycaster.intersectObjects(group, false);
+    if(hits.length){ ud = hits[0].object.userData || {}; break; }
+  }
+  if(!ud){ hideTooltip(); return; }
   hoveredNode = ud.kind==="note" ? ud.node : null;
   hoveredLink = (ud.kind==="synapse" || ud.kind==="synapsePulse") ? ud.link : null;
   showTooltip(clientX, clientY, tooltipHtml(ud));

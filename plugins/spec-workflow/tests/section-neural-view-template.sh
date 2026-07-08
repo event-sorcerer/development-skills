@@ -19,8 +19,28 @@ check "ambient pulse position is interpolated from the link's live endpoints (l.
 check "template has a tooltip DOM element for hover inspection" 'id="tooltip"' "$(cat "$NVHTML")"
 check "tooltip is positioned fixed and never intercepts pointer events" "pointer-events:none;z-index:50" "$(cat "$NVHTML")"
 check "pointermove wires a throttled hover raycast" "hoverTest(ev.clientX, ev.clientY)" "$(cat "$NVHTML")"
-check "hoverTest() raycasts notes, repo regions/labels, and synapses" 'if(k==="repoRegion" || k==="repoLabel" || k==="synapse" || k==="synapsePulse") targets.push(child);' "$(cat "$NVHTML")"
 check "click-to-inspect behavior (hitTest) is untouched by the hover feature" "function hitTest(clientX, clientY){" "$(cat "$NVHTML")"
+# #72: note hover hit area must match the VISIBLE glow (the halo sprite,
+# scaled nd.r*6), not the tiny bright core (nd.r*2) -- the halo carries its
+# own "note" userData so hoverTest()'s note-priority group can raycast it
+# directly instead of the core.
+check "note halo sprite carries note userData so its visible glow is hoverable, not just the tiny core" 'halo.userData = {kind:"note", node:nd};' "$(cat "$NVHTML")"
+check "hoverTest()'s note group raycasts the halo (visible glow), not the small core sprite" "if(nd._halo) noteTargets.push(nd._halo);" "$(cat "$NVHTML")"
+# #72: the repo region boundary must be raycast as its rendered wireframe
+# lines (so raycaster.params.Line.threshold narrows hits to near the visible
+# lines), not as the underlying solid icosahedron Mesh -- a Mesh's face
+# raycast hits anywhere in the projected disc, including the translucent
+# interior that reads as empty space. LineSegments+EdgesGeometry render
+# identically (three.js's Mesh wireframe:true already draws the same edges
+# via gl.LINES) but raycast through the Line path instead of triangle faces.
+check "repo region is built from EdgesGeometry so its rendered wireframe is exactly what's raycast" "new THREE.EdgesGeometry(geo)" "$(cat "$NVHTML")"
+check "repo region hit target is a LineSegments object, not a solid Mesh, so raycasting respects Line.threshold" "new THREE.LineSegments(edges, mat)" "$(cat "$NVHTML")"
+# #72: visible affordance -- cursor becomes pointer while a hover target is
+# under the pointer, composing with (not replacing) the existing grab/
+# grabbing drag cursors.
+check "canvas gets a hoverable class when a hover target is found, driving the cursor affordance" 'canvas.classList.add("hoverable")' "$(cat "$NVHTML")"
+check "canvas loses the hoverable class once no hover target is under the pointer" 'canvas.classList.remove("hoverable")' "$(cat "$NVHTML")"
+check "CSS gives .hoverable canvas a pointer cursor without breaking grab/grabbing" "canvas.hoverable{cursor:pointer}" "$(cat "$NVHTML")"
 check_absent "hover/projects/sessions code introduces no external fetch" 'fetch("http' "$(cat "$NVHTML")"
 check "template polls GET /projects" 'fetch("/projects")' "$(cat "$NVHTML")"
 check "template polls GET /sessions" 'fetch("/sessions")' "$(cat "$NVHTML")"
@@ -371,5 +391,102 @@ NODEJS
     usermoved_out="$(node "$_nvusermoved" "$NVHTML" 2>&1)"
     check "userMoved is set only by a real drag past threshold, wheel, or pinch -- never a bare click/jitter (#71)" "USERMOVED_GATED_ON_REAL_INTERACTION_OK" "$usermoved_out"
     rm -f "$_nvusermoved"
+
+    # #72: hoverTest() must resolve overlapping hits by an explicit kind
+    # priority (note > synapse/pulse > repo label > repo region), NOT by raw
+    # raycast distance -- a repo region's wireframe edge can sit nearer the
+    # camera along the ray than a note it encloses, and pure nearest-wins
+    # would let the coarser region shadow the more specific note. This drives
+    # the real extracted hoverTest() with a stub raycaster whose
+    # intersectObjects() reports a "hit" per group based on the group's own
+    # kind (read off the first target's userData.kind), so the test pins
+    # actual runtime priority behavior, not just source text. The
+    # region-only-near-its-wireframe-lines rule itself is a raycasting
+    # geometry property (LineSegments + raycaster.params.Line.threshold) that
+    # can't be meaningfully simulated without real three.js geometry/camera
+    # math -- that half is covered by the structural EdgesGeometry/
+    # LineSegments checks above instead.
+    _nvhovertest="$(mktemp).cjs"
+    cat >"$_nvhovertest" <<'NODEJS'
+const fs = require("fs");
+const html = fs.readFileSync(process.argv[2], "utf8");
+function extract(name) {
+    const re = new RegExp("function " + name + "\\([^)]*\\)\\{[\\s\\S]*?\\n\\}\\n");
+    const m = html.match(re);
+    if (!m) throw new Error("could not find function " + name + "() in template");
+    return m[0];
+}
+
+const webglOK = true;
+const W = 800, H = 600;
+let sceneGroup = { children: [] };
+let nodes = [];
+let hoveredNode = null, hoveredLink = null;
+let lastTooltipKind = null, hoverableSet = null;
+const canvas = { classList: {
+    add(c) { if (c === "hoverable") hoverableSet = true; },
+    remove(c) { if (c === "hoverable") hoverableSet = false; },
+} };
+function hideTooltip() { hoveredNode = null; hoveredLink = null; lastTooltipKind = null; canvas.classList.remove("hoverable"); }
+function showTooltip(x, y, html) { lastTooltipKind = html; canvas.classList.add("hoverable"); }
+function tooltipHtml(ud) { return ud.kind; }
+class Vector2Stub { constructor(x, y) { this.x = x; this.y = y; } }
+const THREE = { Vector2: Vector2Stub };
+const camera = {};
+
+let HIT = {};   // kind -> whether that group's raycast reports a hit
+const raycaster = {
+    params: {},
+    setFromCamera() {},
+    intersectObjects(targets) {
+        if (!targets.length) return [];
+        const kind = targets[0].userData.kind;
+        return HIT[kind] ? [{ object: targets[0], distance: 1 }] : [];
+    },
+};
+
+eval(extract("hoverTest"));
+
+const noteHalo = { userData: { kind: "note", node: { slug: "n1" } } };
+nodes = [{ _core: {}, _halo: noteHalo }];
+const synapseObj = { userData: { kind: "synapse", link: { a: { slug: "a" }, b: { slug: "b" }, w: .5 } } };
+const labelObj = { userData: { kind: "repoLabel", repo: "r1" } };
+const regionObj = { userData: { kind: "repoRegion", repo: "r1" } };
+sceneGroup.children = [synapseObj, labelObj, regionObj];
+
+function reset() { hoveredNode = null; hoveredLink = null; lastTooltipKind = null; hoverableSet = null; }
+
+// all four kinds report a hit -- note (most specific) must win.
+HIT = { note: true, synapse: true, repoLabel: true, repoRegion: true };
+reset(); hoverTest(1, 1);
+if (lastTooltipKind !== "note") throw new Error("note did not win priority over synapse/repoLabel/repoRegion: got " + lastTooltipKind);
+if (hoverableSet !== true) throw new Error("hoverable class was not set on a note hit");
+
+// note absent -- synapse/pulse must win over repo label/region.
+HIT = { synapse: true, repoLabel: true, repoRegion: true };
+reset(); hoverTest(1, 1);
+if (lastTooltipKind !== "synapse") throw new Error("synapse did not win priority over repoLabel/repoRegion: got " + lastTooltipKind);
+
+// note+synapse absent -- repo label must win over repo region.
+HIT = { repoLabel: true, repoRegion: true };
+reset(); hoverTest(1, 1);
+if (lastTooltipKind !== "repoLabel") throw new Error("repoLabel did not win priority over repoRegion: got " + lastTooltipKind);
+
+// only the region hits -- region is the fallback, lowest priority.
+HIT = { repoRegion: true };
+reset(); hoverTest(1, 1);
+if (lastTooltipKind !== "repoRegion") throw new Error("repoRegion (the only hit) was not reported: got " + lastTooltipKind);
+
+// nothing hits -- tooltip hides and the hoverable affordance clears.
+HIT = {};
+reset(); hoverTest(1, 1);
+if (lastTooltipKind !== null) throw new Error("a tooltip was shown with no raycast hits: " + lastTooltipKind);
+if (hoverableSet !== false) throw new Error("hoverable class was not cleared with no raycast hits");
+
+console.log("HOVERTEST_PRIORITY_OK");
+NODEJS
+    hovertest_out="$(node "$_nvhovertest" "$NVHTML" 2>&1)"
+    check "hoverTest() resolves overlapping hits by kind priority (note > synapse/pulse > repoLabel > repoRegion) and drives the hoverable cursor affordance" "HOVERTEST_PRIORITY_OK" "$hovertest_out"
+    rm -f "$_nvhovertest"
 fi
 
