@@ -28,23 +28,13 @@ else
     fails=$((fails + 1))
 fi
 
-# anti-pattern: an inline `python3 -c` embedded in a .sh script uses an f-string whose
-# quote delimiter (") is nested inside its own {} expression -- e.g. f"{it["id"]}". That is
-# only valid on Python 3.12+ (PEP 701); it raises a SyntaxError on the stock python3 shipped
-# with macOS <= 14, Ubuntu <= 22.04, Debian 11/12, RHEL 8/9. py_compile above only checks
-# standalone .py files and never sees inline `python3 -c` snippets, so this class of bug is
-# otherwise invisible until it hits an interpreter older than whatever's first on the
-# dev/CI PATH. Static, interpreter-independent: no old python3 needs to be installed.
-inline_py_fstring_bugs=""
-for f in "$PLUGIN"/scripts/*.sh; do
-    hit="$(grep -nE 'f"[^"{}]*\{[^{}]*"[^{}]*\}' "$f" || true)"
-    [[ -n "$hit" ]] && inline_py_fstring_bugs+="$f: $hit"$'\n'
-done
-if [[ -z "$inline_py_fstring_bugs" ]]; then
-    echo "ok   no inline python3 -c f-string nests its own quote char in a {} expression (3.12+-only)"
-else
-    echo "FAIL inline python3 -c f-string nests its own quote char in a {} expression -- 3.12+-only syntax, breaks on older stock python3:"
-    echo "$inline_py_fstring_bugs"
-    fails=$((fails + 1))
-fi
+# SUPERSEDED (#45): this section used to also grep scripts/*.sh for the one
+# 3.12+-only nested-quote f-string pattern (e.g. f"{it["id"]}"). That check
+# now lives in section-snippet-lint.sh's scripts/snippet-lint.py, which
+# folds it into a gate-wide version-floor lint over every inline python3 -c
+# / heredoc snippet (both scripts/ and tests/) PLUS a bash-3.2-floor
+# construct check -- generalizing this single pattern instead of duplicating
+# it here. Perturbation-tested before removal: reintroducing this exact
+# pattern into a scratch copy of a real script (board.sh) was confirmed
+# caught by the new lint (see the retro/PR notes for #45).
 

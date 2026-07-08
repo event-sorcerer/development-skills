@@ -31,6 +31,7 @@ source "$HERE/_lib.sh"
 # order, but that one pair is load-bearing -- don't reorder it blindly.
 SECTIONS=(
     section-syntax.sh
+    section-snippet-lint.sh
     section-config.sh
     section-schema-lint.sh
     section-work-mode.sh
