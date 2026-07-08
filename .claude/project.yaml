@@ -103,7 +103,7 @@ delegation:
         reviewer:
             name: Reviewer Agent - {name}
             email: '{local}+reviewer_agent@{domain}'
-            color: '#38a9fa'
+            color: '#ff5b7f'
             models:
             - claude-sonnet-5
             - claude-sonnet-5[1m]

@@ -14,6 +14,8 @@ canvas containing its own role-clusters (dev/reviewer/orchestrator/...).
   neural-view.py status                # RUNNING <url> notes=N brains=N repos=N | STOPPED | STALE: ...
   neural-view.py stop [--force]        # --force also kills a zombie holding the port (see below)
   neural-view.py serve [--port N] [--dir ROOT] [--scan BASE]   # run in the foreground (internal)
+  neural-view.py dev [--port N] [--dir ROOT] [--scan BASE]     # foreground + auto-restart on script
+                                       # change; the page live-reloads via GET /version (dev only)
 
 Stale-server detection: if the pidfile is missing/stale but the configured
 port is still occupied, `status` reports STALE (never a bare STOPPED) and
@@ -122,6 +124,12 @@ FAVICON = (b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
            b'<circle cx="16" cy="16" r="6" fill="#46e6ff"/></svg>')
 
 REPOS = [("", Path(git_root()))]  # list of (repo_name, root); replaced by serve()
+
+# GET /version — dev live-reload signal: `boot` changes on every server
+# process, `template` on every template edit; `dev` is true only under the
+# `dev` command, and the page only ever polls when it is.
+BOOT_ID = f"{os.getpid()}-{int(time.time() * 1000)}"
+DEV_MODE = os.environ.get("NEURAL_VIEW_DEV") == "1"
 
 # GET /projects: per-repo board state, cached (see project_state()) so a slow/
 # hung `gh` call is bounded and never re-invoked more than once per TTL.
@@ -853,6 +861,9 @@ class Handler(BaseHTTPRequestHandler):
             # which viewer POST /open would use, so the inspect panel can
             # label its "View in ..." button without launching anything.
             return self._send(200, {"viewer": detect_viewer()})
+        if path == "/version":
+            tmpl = TEMPLATE.stat().st_mtime_ns if TEMPLATE.is_file() else 0
+            return self._send(200, {"boot": BOOT_ID, "template": tmpl, "dev": DEV_MODE})
         if path.startswith("/note/"):
             parts = path[len("/note/"):].split("/", 2)
             if len(parts) == 3 and parts[0] and parts[1] and parts[2]:
@@ -1145,6 +1156,69 @@ def main():
                     print(f"refusing to kill {zombie_diagnosis(port, zombie)} — its command line does "
                           f"not look like {SCRIPT_NAME}; kill it yourself if that's intended")
                     sys.exit(1)
+
+    elif cmd == "dev":
+        # Foreground dev loop: serve with NEURAL_VIEW_DEV=1 and auto-restart
+        # when a server-side source changes. The page polls /version (only in
+        # dev mode) and reloads itself on a new boot id OR template mtime —
+        # so a template edit is a browser live-reload (no restart needed; the
+        # template is read per request) and a script edit is a server restart
+        # followed by a browser live-reload. Ctrl-C stops everything.
+        port = arg_port(args)
+        pid = pid_alive()
+        if pid:
+            print("dev: stopping the background server first")
+            os.kill(pid, signal.SIGTERM)
+            time.sleep(0.5)
+        here = Path(__file__).resolve().parent
+        watch = [Path(__file__).resolve(), here / "config.py", here / "board.sh", here / "paginate.sh"]
+
+        def mtimes():
+            return tuple(f.stat().st_mtime_ns if f.is_file() else 0 for f in watch)
+
+        child_cmd = [sys.executable, os.path.abspath(__file__), "serve", "--port", str(port)]
+        explicit_dir = raw_arg_dir(args)
+        if explicit_dir:
+            child_cmd += ["--dir", os.path.abspath(explicit_dir)]
+        explicit_scan = raw_arg_scan(args)
+        if explicit_scan:
+            child_cmd += ["--scan", os.path.abspath(explicit_scan)]
+        env = dict(os.environ, NEURAL_VIEW_DEV="1")
+
+        def spawn():
+            print(f"dev: serving http://127.0.0.1:{port} — watching {', '.join(f.name for f in watch)}; template edits live-reload the page")
+            return subprocess.Popen(child_cmd, env=env)  # inherits the terminal, logs stream here
+
+        def reap(proc):
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+        child = spawn()
+        snap = mtimes()
+        try:
+            while True:
+                time.sleep(1)
+                now = mtimes()
+                if now != snap:
+                    snap = now
+                    print("dev: change detected — restarting server")
+                    reap(child)
+                    child = spawn()
+                elif child.poll() is not None:
+                    print(f"dev: server exited (rc={child.returncode}) — waiting for a change to restart", file=sys.stderr)
+                    while mtimes() == snap:
+                        time.sleep(1)
+                    snap = mtimes()
+                    child = spawn()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            if child.poll() is None:
+                reap(child)
+            print("\ndev: stopped")
 
     else:
         print(__doc__)

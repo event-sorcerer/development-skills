@@ -215,7 +215,7 @@ const canvas = document.getElementById("c");
 let W = 0, H = 0, DPR = 1;
 
 // ---- role palette (deterministic hue per role, all in the cyan/blue family) ----
-const ROLE_HUES = {dev:188, reviewer:205, orchestrator:168};
+const ROLE_HUES = {dev:188, reviewer:347, orchestrator:168};   // reviewer: red-pink (#ff5b7f)
 let hueSpin = 150;
 function roleHue(role){ if(!(role in ROLE_HUES)) ROLE_HUES[role] = (hueSpin += 47) % 360; return ROLE_HUES[role]; }
 // a brain's configured color (delegation.identities.<role>.color in that
@@ -250,6 +250,7 @@ function cssColor(h,l,a){ return `hsla(${h},95%,${l}%,${a})`; }
 const MIN_REGION = 46, BASE_REGION = 110;
 let nodes = [], nodeById = new Map(), links = [], roles = [], repoList = [], clusters = new Map();
 let repoCenters = new Map(), repoRadius = new Map();   // world coords/radius, incl. brainless repos
+let liveRepoCenters = new Map();   // live note centroids per repo (updateVisuals) — where the region is DRAWN
 let anims = [];                // active visual activations
 const queue = [];              // pending events, played on a stagger
 let cursor = null, tick = 0;
@@ -568,6 +569,7 @@ function rebuildScene(){
     sceneGroup.add(sprite);
     const label = makeLabelSprite(c.role.toUpperCase(), c.hue, 15);
     label.position.set(c.x, c.y+rad+14, c.z);
+    label.userData = {kind:"roleLabel", repo:c.repo, role:c.role};
     sceneGroup.add(label);
   }
 
@@ -622,7 +624,10 @@ function rebuildScene(){
   // neurons: core (bright, sharp) + halo (soft, pulses/highlights) sprite pair.
   for(const nd of nodes){
     const c = clusters.get(clusterKey(nd.repo,nd.role)), hue = c?c.hue:190;
-    const coreMat = new THREE.SpriteMaterial({map:CORE_TEX, color:threeColor(hue,88), transparent:true,
+    // L 72, not the old 88: at ~88% lightness every hue collapses to near-white
+    // under additive blending, which made per-brain colors invisible on the
+    // actual balls (the halo carried the only perceptible tint).
+    const coreMat = new THREE.SpriteMaterial({map:CORE_TEX, color:threeColor(hue,72), transparent:true,
       opacity:0.9, blending:THREE.AdditiveBlending, depthWrite:false, fog:true});
     const core = new THREE.Sprite(coreMat);
     core.scale.set(nd.r*2, nd.r*2, 1);
@@ -720,9 +725,46 @@ function updateVisuals(){
     nd._halo.scale.set(rr*6*(1+nd.hl*0.6+hoverBoost*0.4), rr*6*(1+nd.hl*0.6+hoverBoost*0.4), 1);
     nd._halo.material.opacity = Math.min(0.75, 0.28 + pulse*0.2 + nd.hl*0.5 + hoverBoost*0.3);
   }
+  // live centroids: cluster glows, role/repo labels and region wireframes
+  // track where each group's notes ACTUALLY are right now — the force sim
+  // drifts clusters away from the layout's gravity targets, and a label
+  // pinned at rebuild time ends up floating over the wrong notes.
+  const liveCluster = new Map(), liveRepo = new Map();
+  for(const nd of nodes){
+    const ck = clusterKey(nd.repo, nd.role);
+    let s = liveCluster.get(ck); if(!s){ s = {x:0,y:0,z:0,n:0,rad:60}; liveCluster.set(ck, s); }
+    s.x += nd.x; s.y += nd.y; s.z += nd.z; s.n++;
+    let r = liveRepo.get(nd.repo); if(!r){ r = {x:0,y:0,z:0,n:0}; liveRepo.set(nd.repo, r); }
+    r.x += nd.x; r.y += nd.y; r.z += nd.z; r.n++;
+  }
+  for(const s of liveCluster.values()){ s.x/=s.n; s.y/=s.n; s.z/=s.n; }
+  for(const r of liveRepo.values()){ r.x/=r.n; r.y/=r.n; r.z/=r.n; }
+  for(const nd of nodes){
+    const s = liveCluster.get(clusterKey(nd.repo, nd.role));
+    if(s) s.rad = Math.max(s.rad, Math.hypot(nd.x-s.x, nd.y-s.y, nd.z-s.z)+nd.r+16);
+  }
+  liveRepoCenters = liveRepo;   // pickRepoAt() must agree with where the wireframe is drawn
   const now = performance.now();
   for(const child of sceneGroup.children){
-    const l = child.userData && child.userData.kind==="synapse" ? child.userData.link : null;
+    const ud = child.userData || {};
+    if(ud.kind==="roleCluster" || ud.kind==="roleLabel"){
+      const s = liveCluster.get(clusterKey(ud.repo, ud.role));
+      if(s && s.n){
+        if(ud.kind==="roleCluster"){ child.position.set(s.x, s.y, s.z); child.scale.set(s.rad*2.2, s.rad*2.2, 1); }
+        else child.position.set(s.x, s.y+s.rad+14, s.z);
+      }
+      continue;
+    }
+    if(ud.kind==="repoRegion" || ud.kind==="repoLabel"){
+      const r = liveRepo.get(ud.repo);   // empty repos keep their static layout spot
+      if(r && r.n){
+        const rad = repoRadius.get(ud.repo) || MIN_REGION;
+        if(ud.kind==="repoRegion") child.position.set(r.x, r.y, r.z);
+        else child.position.set(r.x, r.y+rad+26, r.z);
+      }
+      continue;
+    }
+    const l = ud.kind==="synapse" ? ud.link : null;
     if(!l) continue;
     const pos = child.geometry.attributes.position;
     pos.setXYZ(0, l.a.x, l.a.y, l.a.z);
@@ -761,6 +803,9 @@ function updateHoverRing(){
   const p = projectToScreen(hoveredNode.x, hoveredNode.y, hoveredNode.z);
   if(!p){ hoverRingEl.style.display = "none"; return; }
   const r = Math.max(9, worldToPixels(hoveredNode.r*1.8, p.depth)) + 3;
+  const hue = comboHue(hoveredNode.repo, hoveredNode.role);   // ring wears the inspected brain's color
+  hoverRingEl.style.borderColor = cssColor(hue, 70, .9);
+  hoverRingEl.style.boxShadow = `0 0 10px ${cssColor(hue,70,.45)}, inset 0 0 6px ${cssColor(hue,70,.25)}`;
   hoverRingEl.style.display = "block";
   hoverRingEl.style.left = (p.x - r).toFixed(1) + "px";
   hoverRingEl.style.top = (p.y - r).toFixed(1) + "px";
@@ -1097,7 +1142,11 @@ function pickSynapseAt(clientX, clientY){
 function pickRepoAt(clientX, clientY){
   if(!webglOK || repoList.length<2) return null;
   for(const repo of repoList){
-    const rc = repoCenters.get(repo); if(!rc) continue;
+    // pick where the region is DRAWN: the live note centroid when the repo
+    // has notes (updateVisuals moves the wireframe there), else the layout spot
+    const live = liveRepoCenters.get(repo);
+    const rc = (live && live.n) ? live : repoCenters.get(repo);
+    if(!rc) continue;
     const rad = repoRadius.get(repo) || MIN_REGION;
     const lp = projectToScreen(rc.x, rc.y+rad+26, rc.z);
     if(lp && Math.hypot(lp.x-clientX, lp.y-clientY) <= 46) return {kind:"repoLabel", repo};
@@ -1336,6 +1385,21 @@ function hoverProbe(){
 // rebuild lags the sim by many frames under headless virtual time and shows
 // a phantom offset that isn't real.
 const PROBE = location.search.includes("hoverprobe");
+
+// ---- dev live-reload (neural-view.py dev) ----
+// /version carries {boot, template, dev}: boot changes on every server
+// process, template on every template edit. Polled ONLY when dev is true —
+// a normal server costs one probe at boot, then silence.
+(async function(){
+  let base; try{ base = await (await fetch("/version")).json(); }catch{ return; }
+  if(!base || !base.dev) return;
+  setInterval(async ()=>{
+    try{
+      const v = await (await fetch("/version")).json();
+      if(v && (v.boot!==base.boot || v.template!==base.template)) location.reload();
+    }catch{}   // server mid-restart — the next tick sees the new boot id
+  }, 1500);
+})();
 
 // ---- boot ----
 (async function(){
