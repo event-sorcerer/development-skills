@@ -19,6 +19,16 @@
     "last": null,
     "weight": 0.5
   },
+  "drive-poll-loops-at-boundary->probe-with-real-repos": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "drive-poll-loops-at-boundary->red-passing-checks-may-pin-later": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "drive-real-helper-adversarially->equality-guards-invite-ordering-probes": {
     "fires": 0,
     "last": null,

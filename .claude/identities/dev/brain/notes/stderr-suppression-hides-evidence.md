@@ -1,12 +1,12 @@
 ---
-tags: [debugging, shell]
-paths: ["plugins/spec-workflow/scripts/**"]
-strength: 1
-source: "#90 retro"
+tags: [debugging, shell, tests]
+paths: ["**"]
+strength: 2
+source: "#98 retro — recurrence (>/dev/null in a test discarded the assertion surface)"
 graduated: false
 created: 2026-07-08
 ---
 
-`2>/dev/null` on a function/command call makes distinct failure classes indistinguishable at the call site — the #90 lookup bug wasn't in detection logic but one layer upstream, in a redirect that looked like defensive cleanup and threw away the only evidence separating "no such issue" from "rate-limited". Grep for `2>/dev/null` FIRST whenever a report says "silently did the wrong thing"; capture stderr and classify, never discard.
+`2>/dev/null` (and `>/dev/null` in TESTS) discards the evidence that distinguishes failure classes — the #98 lie survived untested because the suite's own `stop >/dev/null` threw away the very output nobody ever asserted. Grep for /dev/null redirects FIRST when a report says "silently did the wrong thing"; in tests, redirecting a command's output to /dev/null is a declaration that its message is untested.
 
 Related: [[circular-fixture-detector]] [[trace-state-mutation-not-named-trigger]]

@@ -1,12 +1,12 @@
 ---
 tags: [subprocess, lifecycle, python]
 paths: ["plugins/spec-workflow/scripts/**"]
-strength: 1
-source: "#55 retro"
+strength: 2
+source: "#98 retro — recurrence (stop's poll-for-claimed-effect)"
 graduated: false
 created: 2026-07-08
 ---
 
-os.kill(pid, 0) — the textbook liveness check — LIES about your own direct children: a crashed-but-unreaped child is a zombie that still "exists". Only waitpid-family calls (Popen.poll()) reap and see the true exit status; pid_alive-style checks are for OTHER processes only. Corollary: any "starts and prints RUNNING" command is a health check in disguise — audit whether it verifies the claimed thing or just took the happy-path branch.
+Liveness checks depend on the RELATIONSHIP to the target: your own direct child needs waitpid/Popen.poll() (kill(pid,0) counts zombies as alive); a detached/foreign process has no zombie state, so kill(pid,0) is correct there. Get it backwards and you miss crashes or lie about shutdowns. Any "does X" lifecycle command must POLL for the effect it claims (bounded), never fire-and-print-success — and the negative-path fixture (a target resisting the action) belongs in red from the start.
 
 Related: [[stderr-suppression-hides-evidence]] [[second-order-after-concurrency-fix]]
