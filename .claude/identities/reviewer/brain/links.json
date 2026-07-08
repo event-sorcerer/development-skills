@@ -34,6 +34,16 @@
     "last": null,
     "weight": 0.5
   },
+  "fixture-provenance-check->drive-real-helper-adversarially": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "fixture-provenance-check->json-escaped-check-weakness": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "json-escaped-check-weakness->verify-guard-regex-on-real-artifact": {
     "fires": 0,
     "last": null,

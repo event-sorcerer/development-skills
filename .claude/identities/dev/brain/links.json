@@ -24,6 +24,16 @@
     "last": null,
     "weight": 0.5
   },
+  "circular-fixture-detector->bool-excluded-before-int": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "circular-fixture-detector->unassumed-full-pipeline-repro": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "extraction-tests-must-verify-match->lane-cwd-distrust": {
     "fires": 0,
     "last": null,
