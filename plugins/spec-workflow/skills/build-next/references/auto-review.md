@@ -238,15 +238,21 @@ Rules:
   findings): committer = orchestrator, author = the acting role, Co-authored-by
   = the contributing roles. Get the ready recipe from
   `identity.sh on-behalf <author-role> [--committer <role>] [--co <role>]...` —
-  it prints a `flags:` line (`-c user.name/-c user.email` for the committer plus
-  `--author="Name <email>"`) and a `trailers:` block. Embed both like the
-  squash-merge `--body` below — the `flags:` line is shell context (already
-  escaped by identity.sh) and the raw `trailers:` block goes in the message via a
+  it prints THREE pieces, in paste order: a `flags:` line (`-c user.name/-c
+  user.email` for the committer — a GLOBAL git option, goes BEFORE `commit`),
+  a `commit-flags:` line (`--author="Name <email>"` — a `git commit`-only
+  option, goes AFTER `commit`), and a `trailers:` block. (Pasting `--author`
+  into the `flags:` position — i.e. before `commit` — fails with `unknown
+  option: --author`; that's exactly the bug this two-line split exists to
+  prevent.) Embed all three like the squash-merge `--body` below — the
+  `flags:`/`commit-flags:` lines are shell context (already escaped by
+  identity.sh) and the raw `trailers:` block goes in the message via a
   **single-quoted** heredoc delimiter (`<<'EOF'`), which is what keeps a hostile
   identity's backticks/`$()` in the trailer text inert:
   ```bash
-  # recipe: identity.sh on-behalf dev --co reviewer  ->  <flags line> + <trailers block>
-  git <paste flags line> commit -m "$(cat <<'EOF'
+  # recipe: identity.sh on-behalf dev --co reviewer
+  #      -> <flags line> + <commit-flags line> + <trailers block>
+  git <paste flags line> commit <paste commit-flags line> -m "$(cat <<'EOF'
   <subject line — the fix in one sentence>
 
   <paste the trailers block verbatim, e.g.:>

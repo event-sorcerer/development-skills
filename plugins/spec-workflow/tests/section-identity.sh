@@ -80,3 +80,69 @@ out="$(rob orchestrator 2>&1 || true)"
 check "on-behalf all-OFF errors" "delegation.identities is false" "$out"
 rm -rf "$OB"
 
+echo "== identity: on-behalf recipe — EXECUTED against a scratch repo (not just text-matched) =="
+# A text-only match on the printed recipe is what let SW-65 ship: `flags:`
+# combined a global `-c` option with `--author` (a `git commit`-only option),
+# so the documented `git <paste flags line> commit ...` template failed with
+# "unknown option: --author" the moment anyone actually ran it. These cases
+# build the recipe into a real command line the way the documented template
+# does, then RUN it, so a future paste-order regression fails here again.
+exec_recipe() { # repo-dir  <on-behalf args...>  -- runs the printed recipe as
+    # a real commit in repo-dir; sets EXEC_RC/EXEC_OUT for the caller.
+    local repo="$1"; shift
+    local out flags cflags trailers_block subject script
+    out="$(robx "$@")"
+    flags="$(sed -n 's/^flags: //p' <<<"$out")"
+    cflags="$(sed -n 's/^commit-flags: //p' <<<"$out")"
+    trailers_block="$(sed -n '/^trailers:$/,$p' <<<"$out" | tail -n +2)"
+    [[ "$trailers_block" == "(none)" ]] && trailers_block=""
+    subject="on-behalf test commit"
+    script="$repo/.exec-recipe.sh"
+    {
+        echo "cd \"$repo\" || exit 1"
+        echo "echo x >> file.txt && git add file.txt"
+        # This is the template from auto-review.md §Commit identities (b),
+        # verbatim: `git <flags> commit <commit-flags> -m "$(cat <<'EOF' ...)"`.
+        # shellcheck disable=SC2016  # single-quoted heredoc delimiter is intentional here
+        printf 'git %s commit %s -m "$(cat <<'"'"'EOF'"'"'\n' "$flags" "$cflags"
+        printf '%s\n\n' "$subject"
+        printf '%s\n' "$trailers_block"
+        printf 'EOF\n)"\n'
+    } >"$script"
+    EXEC_OUT="$(GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null bash "$script" 2>&1)"
+    EXEC_RC=$?
+    [[ "$EXEC_RC" -ne 0 ]] && echo "     exec_recipe failed: $EXEC_OUT" >&2
+    rm -f "$script"
+}
+
+OBX="$(mktemp -d)"
+( cd "$OBX" && git init -q . && git config user.name "Test User" && git config user.email "test.user@example.com" )
+mkdir -p "$OBX/.claude"; cp "$FIX/valid.project.yaml" "$OBX/.claude/project.yaml"
+robx() { (cd "$OBX" && GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null bash "$PLUGIN/scripts/identity.sh" on-behalf "$@"); }
+
+exec_recipe "$OBX" dev --co reviewer
+check_rc "executed on-behalf dev --co reviewer: recipe runs cleanly" 0 "$EXEC_RC"
+last="$(cd "$OBX" && git log -1 --format='author=%an <%ae>%ncommitter=%cn <%ce>%n%B')"
+check "executed recipe: author is dev" "author=Dev Agent - Test User <test.user+dev_agent@example.com>" "$last"
+check "executed recipe: committer defaults to orchestrator" "committer=Orchestrator Agent - Test User <test.user+orchestrator_agent@example.com>" "$last"
+check "executed recipe: reviewer co-author trailer lands in the commit" "Co-authored-by: Reviewer Agent - Test User <test.user+reviewer_agent@example.com>" "$last"
+
+exec_recipe "$OBX" dev --co reviewer --committer reviewer
+check_rc "executed on-behalf dev --co reviewer --committer reviewer: recipe runs cleanly" 0 "$EXEC_RC"
+last="$(cd "$OBX" && git log -1 --format='author=%an <%ae>%ncommitter=%cn <%ce>')"
+check "executed recipe: explicit committer applied" "committer=Reviewer Agent - Test User <test.user+reviewer_agent@example.com>" "$last"
+check "executed recipe: author still dev" "author=Dev Agent - Test User <test.user+dev_agent@example.com>" "$last"
+
+# Hostile name (spaces + a double quote) — must survive an actual shell
+# execution of the recipe, not just appear correctly in printed text.
+# project.json takes effect only once project.yaml is out of the way (yaml
+# wins resolution order in config.py).
+rm -f "$OBX/.claude/project.yaml"
+echo '{"delegation":{"identities":{"dev":{"name":"Weird \"Dev\" Name","email":"weird.dev@example.com"}}}}' >"$OBX/.claude/project.json"
+exec_recipe "$OBX" dev --co reviewer
+check_rc "executed on-behalf with a hostile quoted name: recipe runs cleanly" 0 "$EXEC_RC"
+last="$(cd "$OBX" && git log -1 --format='author=%an <%ae>')"
+check 'executed recipe: hostile quoted name lands intact as author' 'author=Weird "Dev" Name <weird.dev@example.com>' "$last"
+rm -f "$OBX/.claude/project.json"
+rm -rf "$OBX"
+

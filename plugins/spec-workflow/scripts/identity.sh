@@ -8,6 +8,10 @@
 #                                # recipe for a commit that credits ALL participating roles:
 #                                #   author = who did the work · committer = who recorded it ·
 #                                #   Co-authored-by trailers = every other contributing role
+#                                # Prints three pieces, in PASTE ORDER: a `flags:`
+#                                # line (global -c options, go BEFORE `commit`), a
+#                                # `commit-flags:` line (--author=, goes AFTER
+#                                # `commit`), and a `trailers:` block (message body).
 # A role maps to ONE identity or an ARRAY of identities (delegation.identities.<role>).
 # Identity fields: name, email (templates), models (allowed model ids), covers (path globs).
 #   {name}   -> git config user.name
@@ -80,8 +84,12 @@ def sq(s):
 
 
 print(f"on-behalf: author={author} committer={committer} co={','.join(co_roles) or '(none)'}")
-print(f"flags: -c user.name={sq(comm['name'])} -c user.email={sq(comm['email'])} "
-      f"--author={sq(auth['name'] + ' <' + auth['email'] + '>')}")
+# Two lines, not one: -c user.name/-c user.email are GLOBAL git options (belong
+# BEFORE the `commit` subcommand); --author is a `git commit` option (belongs
+# AFTER it). Printing them pre-joined once produced a recipe that failed
+# verbatim in its own documented paste position ("unknown option: --author").
+print(f"flags: -c user.name={sq(comm['name'])} -c user.email={sq(comm['email'])}")
+print(f"commit-flags: --author={sq(auth['name'] + ' <' + auth['email'] + '>')}")
 print("trailers:")
 for t in trailers:
     print(t)

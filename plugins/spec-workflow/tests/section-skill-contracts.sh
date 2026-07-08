@@ -46,6 +46,12 @@ check "auto-review.md local-route closes the PR via REST naming the merge SHA" "
 check "auto-review.md local-route detects the hard-block once and never re-attempts the gated call" "never re-attempts the gated call" "$ARBODY"
 check "auto-review.md forbids parking approved work as a standing ask" "never parks approved work as a standing ask" "$ARBODY"
 check "auto-review.md points the merge-route report line at build-next SKILL.md step 6" "SKILL.md step 6" "$ARBODY"
+# On-behalf recipe paste order (SW-065): --author is a `git commit` option,
+# not a global one -- the template must place it AFTER `commit`, never in the
+# `flags:` (pre-`commit`) position, or pasting it verbatim fails at the shell.
+check "auto-review.md on-behalf recipe: flags line goes before commit" "git <paste flags line> commit" "$ARBODY"
+check "auto-review.md on-behalf recipe: commit-flags line goes after commit" "commit <paste commit-flags line> -m" "$ARBODY"
+check_absent "auto-review.md on-behalf recipe: --author never lands in the pre-commit flags position" "flags line> --author" "$ARBODY"
 check "build-next SKILL.md report step states the merge route" "merge route" "$BNBODY"
 check "build-next SKILL.md report step gives the requirements report token" "requirements: <verdict from merge-mode.sh requirements>" "$BNBODY"
 check "build-next SKILL.md report step gives the local-route report token" "route: local-route" "$BNBODY"
