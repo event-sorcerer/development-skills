@@ -1,0 +1,14 @@
+# provenance: real `gh api rate_limit` response shape, LIVE-captured this
+# task (#91), 2026-07-08T11:49Z -- graphql.remaining=1/5000, i.e. genuinely
+# near-exhausted (NOT deliberately triggered by this task -- this session's
+# own read-only probing plus other concurrent activity on this shared
+# account depleted it naturally between the two captures in this corpus;
+# see rate-limit-endpoint-sample.json, captured earlier in the same session
+# at remaining=41). Kept as the "about to trip _graphql_remaining_is_zero"
+# real shape (remaining==1, not yet 0) -- the boundary case one step before
+# board-queue.sh's probe fallback (#90) actually fires.
+# command: gh api rate_limit
+# account: Zugruul (github.com, OAuth/PAT token, per `gh auth status`)
+# source: live `gh api rate_limit` invocation, this task.
+
+{"resources":{"core":{"limit":5000,"used":7,"remaining":4993,"reset":1783513577},"search":{"limit":30,"used":0,"remaining":30,"reset":1783511280},"graphql":{"limit":5000,"used":4999,"remaining":1,"reset":1783512842},"integration_manifest":{"limit":5000,"used":0,"remaining":5000,"reset":1783514820},"source_import":{"limit":100,"used":0,"remaining":100,"reset":1783511280},"code_scanning_autofix":{"limit":10,"used":0,"remaining":10,"reset":1783511280},"actions_runner_registration":{"limit":10000,"used":0,"remaining":10000,"reset":1783514820},"scim":{"limit":15000,"used":0,"remaining":15000,"reset":1783514820},"dependency_snapshots":{"limit":100,"used":0,"remaining":100,"reset":1783511280},"dependency_sbom":{"limit":100,"used":0,"remaining":100,"reset":1783511280},"audit_log":{"limit":1750,"used":0,"remaining":1750,"reset":1783514820},"audit_log_streaming":{"limit":15,"used":0,"remaining":15,"reset":1783514820},"code_search":{"limit":10,"used":0,"remaining":10,"reset":1783511280},"copilot_usage_records":{"limit":1750,"used":0,"remaining":1750,"reset":1783514820}},"rate":{"limit":5000,"used":7,"remaining":4993,"reset":1783513577}}

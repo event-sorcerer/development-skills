@@ -10,20 +10,25 @@
 # errors don't always contain "rate limit" text; e.g. "unknown owner type").
 # Fake gh understands: issue create / project item-add / project item-list /
 # project item-edit / api rate_limit / issue view. Plain rate-limit failures
-# are simulated by writing "API rate limit exceeded for installation ID 123."
-# to stderr and exiting 1 (text-matched fast path). MASKED rate-limit
-# failures are simulated by writing "unknown owner type" to stderr and
-# exiting 1 (no "rate limit" text anywhere) -- board-queue.sh must fall back
-# to probing `gh api rate_limit` and reading .resources.graphql.remaining to
+# are simulated by emitting the honest-rate-limit corpus entry (real "rate
+# limit" wording) to stderr and exiting 1 (text-matched fast path). MASKED
+# rate-limit failures are simulated by emitting the masked-owner-type corpus
+# entry (no "rate limit" text anywhere) -- board-queue.sh must fall back to
+# probing `gh api rate_limit` and reading .resources.graphql.remaining to
 # tell a masked exhaustion from a real error. FAKE_GH_GRAPHQL_REMAINING
 # controls what that probe reports (default 0, so pre-#90 tests that never
 # probe -- because they hit the text-matched fast path -- are unaffected).
+# Both trigger strings are sourced from tests/fixtures/gh-failures/ (issue
+# #91) instead of being inlined here -- see that directory's README for the
+# provenance of each captured/reconstructed string, so this fixture can't
+# silently drift from what real gh actually emits.
 echo "== board.sh rate-limit queue (#77) + adopt (#84): fake gh =="
 
 _qsetup() { # -> sets BQ (fixture repo dir) and FGH (fake-gh dir on PATH)
     BQ="$(mktemp -d)"; mkdir -p "$BQ/.claude"
     cp "$FIX/valid.project.yaml" "$BQ/.claude/project.yaml"
     FGH="$(mktemp -d)"
+    export GH_FAILURES="$FIX/gh-failures"  # sourced by the fake gh script below (issue #91)
     cat >"$FGH/gh" <<'FAKE'
 #!/usr/bin/env bash
 set -uo pipefail
@@ -34,11 +39,11 @@ case "$1 $2" in
         ;;
     "project item-add")
         if [[ "${FAKE_GH_ITEM_ADD_RATE_LIMIT:-0}" == "1" ]]; then
-            echo "API rate limit exceeded for installation ID 123." >&2
+            awk 'f{print} /^$/{f=1}' "$GH_FAILURES/rate-limit-honest-user-id.txt" >&2
             exit 1
         fi
         if [[ "${FAKE_GH_ITEM_ADD_MASKED_RATE_LIMIT:-0}" == "1" ]]; then
-            echo "unknown owner type" >&2
+            awk 'f{print} /^$/{f=1}' "$GH_FAILURES/masked-unknown-owner-type.txt" >&2
             exit 1
         fi
         if [[ -n "${FAKE_GH_ITEM_ADD_MARKER:-}" ]]; then
@@ -49,11 +54,11 @@ case "$1 $2" in
         n=$(( $(cat "$FAKE_GH_LIST_CALLCOUNT" 2>/dev/null || echo 0) + 1 ))
         echo "$n" >"$FAKE_GH_LIST_CALLCOUNT"
         if [[ "${FAKE_GH_ITEM_LIST_RATE_LIMIT:-0}" == "1" ]]; then
-            echo "API rate limit exceeded for installation ID 123." >&2
+            awk 'f{print} /^$/{f=1}' "$GH_FAILURES/rate-limit-honest-user-id.txt" >&2
             exit 1
         fi
         if [[ "${FAKE_GH_ITEM_LIST_MASKED_RATE_LIMIT:-0}" == "1" ]]; then
-            echo "unknown owner type" >&2
+            awk 'f{print} /^$/{f=1}' "$GH_FAILURES/masked-unknown-owner-type.txt" >&2
             exit 1
         fi
         # FAKE_GH_ITEM_ADD_MARKER (if set): the item is invisible until
@@ -71,21 +76,30 @@ case "$1 $2" in
         n=$(( $(cat "$FAKE_GH_EDIT_CALLCOUNT" 2>/dev/null || echo 0) + 1 ))
         echo "$n" >"$FAKE_GH_EDIT_CALLCOUNT"
         if [[ "$n" -ge "${FAKE_GH_EDIT_RATE_LIMIT_FROM:-999}" ]]; then
-            echo "API rate limit exceeded for installation ID 123." >&2
+            awk 'f{print} /^$/{f=1}' "$GH_FAILURES/rate-limit-honest-user-id.txt" >&2
             exit 1
         fi
         if [[ "$n" -ge "${FAKE_GH_EDIT_MASKED_RATE_LIMIT_FROM:-999}" ]]; then
-            echo "unknown owner type" >&2
+            awk 'f{print} /^$/{f=1}' "$GH_FAILURES/masked-unknown-owner-type.txt" >&2
             exit 1
         fi
         echo "edited"
         ;;
     "api rate_limit")
-        echo "{\"resources\":{\"graphql\":{\"limit\":5000,\"remaining\":${FAKE_GH_GRAPHQL_REMAINING:-0},\"reset\":${FAKE_GH_RESET_EPOCH:-1735689600}}},\"rate\":{\"limit\":5000,\"remaining\":${FAKE_GH_GRAPHQL_REMAINING:-0},\"reset\":${FAKE_GH_RESET_EPOCH:-1735689600}}}"
+        # FAKE_GH_RATE_LIMIT_REAL_SAMPLE (issue #91): when set, replay a REAL
+        # `gh api rate_limit` response captured live from tests/fixtures/gh-failures/
+        # instead of the synthetic interpolated shape below -- pins the probe
+        # (_graphql_remaining_is_zero / _rate_limit_reset_human) against genuine
+        # API shapes, not just hand-built JSON.
+        if [[ -n "${FAKE_GH_RATE_LIMIT_REAL_SAMPLE:-}" ]]; then
+            awk 'f{print} /^$/{f=1}' "$GH_FAILURES/$FAKE_GH_RATE_LIMIT_REAL_SAMPLE"
+        else
+            echo "{\"resources\":{\"graphql\":{\"limit\":5000,\"remaining\":${FAKE_GH_GRAPHQL_REMAINING:-0},\"reset\":${FAKE_GH_RESET_EPOCH:-1735689600}}},\"rate\":{\"limit\":5000,\"remaining\":${FAKE_GH_GRAPHQL_REMAINING:-0},\"reset\":${FAKE_GH_RESET_EPOCH:-1735689600}}}"
+        fi
         ;;
     "issue view")
         if [[ "${FAKE_GH_ISSUE_VIEW_RATE_LIMIT:-0}" == "1" ]]; then
-            echo "API rate limit exceeded for installation ID 123." >&2
+            awk 'f{print} /^$/{f=1}' "$GH_FAILURES/rate-limit-honest-user-id.txt" >&2
             exit 1
         fi
         printf '#%s [OPEN] fixture issue\n\nbody\n(no comments)' "${FAKE_GH_ISSUE_NUM:-900}"
@@ -322,6 +336,36 @@ check "(l) list under masked rate limit: RATE-LIMITED fail-fast message with res
 check "(l) list under masked rate limit: exits nonzero" "rc=1" "$out"
 check_absent "(l) list under masked rate limit: no raw masked text leak" "unknown owner type" "$out"
 rm -rf "$BQ" "$FGH" "$LOG" "$LISTCC"
+
+# --- (t)/(u) #91: the probe (_graphql_remaining_is_zero / _rate_limit_reset_human)
+# against REAL captured `gh api rate_limit` shapes, not just synthetic JSON --
+# both real samples in the corpus have remaining>0 (41, and a near-exhausted
+# 1 -- capturing an actual remaining=0 live would have required deliberately
+# exhausting this session's real quota, which this task chose not to do; see
+# tests/fixtures/gh-failures/README.md), so both must be treated as a REAL
+# error, not queued: exercises the exact boundary the classifier depends on
+# against genuine API responses instead of hand-built stand-ins.
+_qsetup
+LOG="$(mktemp)"; EDITCC="$(mktemp)"
+out="$(cd "$BQ" && PATH="$FGH:$PATH" FAKE_GH_LOG="$LOG" FAKE_GH_EDIT_CALLCOUNT="$EDITCC" FAKE_GH_LIST_CALLCOUNT="$(mktemp)" \
+    FAKE_GH_ISSUE_NUM=813 FAKE_GH_ITEM_VISIBLE=1 \
+    FAKE_GH_EDIT_MASKED_RATE_LIMIT_FROM=1 FAKE_GH_RATE_LIMIT_REAL_SAMPLE=rate-limit-endpoint-sample.json \
+    bash "$PLUGIN/scripts/board.sh" move 813 "In progress" 2>&1; echo "rc=$?")"
+check "(t) real rate_limit sample (remaining=41): masked error surfaced verbatim" "unknown owner type" "$out"
+check "(t) real rate_limit sample (remaining=41): exits non-zero" "rc=1" "$out"
+check_absent "(t) real rate_limit sample (remaining=41): not treated as QUEUED" "QUEUED" "$out"
+rm -rf "$BQ" "$FGH" "$LOG" "$EDITCC"
+
+_qsetup
+LOG="$(mktemp)"; EDITCC="$(mktemp)"
+out="$(cd "$BQ" && PATH="$FGH:$PATH" FAKE_GH_LOG="$LOG" FAKE_GH_EDIT_CALLCOUNT="$EDITCC" FAKE_GH_LIST_CALLCOUNT="$(mktemp)" \
+    FAKE_GH_ISSUE_NUM=814 FAKE_GH_ITEM_VISIBLE=1 \
+    FAKE_GH_EDIT_MASKED_RATE_LIMIT_FROM=1 FAKE_GH_RATE_LIMIT_REAL_SAMPLE=rate-limit-endpoint-near-exhausted.json \
+    bash "$PLUGIN/scripts/board.sh" move 814 "In progress" 2>&1; echo "rc=$?")"
+check "(u) real rate_limit sample (remaining=1, near-exhausted boundary): masked error surfaced verbatim" "unknown owner type" "$out"
+check "(u) real rate_limit sample (remaining=1, near-exhausted boundary): exits non-zero" "rc=1" "$out"
+check_absent "(u) real rate_limit sample (remaining=1, near-exhausted boundary): not treated as QUEUED" "QUEUED" "$out"
+rm -rf "$BQ" "$FGH" "$LOG" "$EDITCC"
 
 echo "== board.sh flush concurrency (#92): mutual exclusion, lost-append prevention, stale lock, adopt status =="
 

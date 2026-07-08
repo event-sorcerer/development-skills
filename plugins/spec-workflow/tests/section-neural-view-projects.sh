@@ -13,6 +13,7 @@ cp "$FIX/valid.project.yaml" "$NVP_REPO/.claude/project.yaml"
 NVP_NOBOARD="$(mktemp -d)"   # discovered repo, no .claude/project.yaml at all -> must be omitted
 NVP_GH="$(mktemp -d)"
 _nvpscan_empty="$(mktemp -d)"   # empty scan base -- real ~/Development repos must never leak into these tests
+export GH_FAILURES="$FIX/gh-failures"  # sourced by the fake gh script below (issue #91)
 cat >"$NVP_GH/gh" <<'FAKE'
 #!/usr/bin/env bash
 set -uo pipefail
@@ -24,11 +25,15 @@ case "$1 $2" in
             echo "$n" >"$FAKE_GH_CALLCOUNT"
         fi
         if [[ "${FAKE_GH_FAIL:-0}" == "1" ]]; then
+            # structural placeholder, not a captured gh error: this models "any
+            # plain gh failure" to exercise the classifier's generic
+            # last-meaningful-line fallback, independent of any specific real
+            # gh error string -- there's nothing to source from the corpus.
             echo "fake gh: item-list boom" >&2
             exit 1
         fi
         if [[ "${FAKE_GH_RATELIMIT_FAIL:-0}" == "1" ]]; then
-            printf 'gh: API rate limit exceeded for installation ID 1234.\n' >&2
+            awk 'f{print} /^$/{f=1}' "$GH_FAILURES/rate-limit-honest-user-id.txt" >&2
             exit 1
         fi
         if [[ "${FAKE_GH_HANG:-0}" == "1" ]]; then
@@ -118,6 +123,26 @@ check_absent "projects: plain gh-failure error contains no raw ESC byte" $'\x1b[
 check_absent "projects: plain gh-failure error contains no literal SGR code" '[1;35m' "$body"
 check_absent "projects: plain gh-failure never leaks a JSONDecodeError traceback" 'JSONDecodeError' "$body"
 python3 "$NV" stop >/dev/null
+
+# scenario 3b': regression fixture for the classifier's ANSI-stripping/last-line
+# fallback against a REAL colorized Python 3.13 JSONDecodeError traceback (issue
+# #91) -- the exact bytes board.sh's OLD ungated pipe (pre-#77) used to leak into
+# the HUD (see tests/fixtures/gh-failures/jsondecodeerror-ansi-traceback-py313.txt
+# for full provenance). #77 removed the code path that reproduces this live, so
+# this calls the classifier directly rather than driving it through board.sh --
+# kept as regression insurance for the ANSI-stripping logic itself.
+_gh_failures_corpus="$FIX/gh-failures"
+_classified="$(python3 -c '
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("neural_view", sys.argv[2])
+nv = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(nv)
+raw = open(sys.argv[1]).read()
+payload = raw.split("\n\n", 1)[1]
+print(nv._classify_board_failure(payload))
+' "$_gh_failures_corpus/jsondecodeerror-ansi-traceback-py313.txt" "$NV")"
+check "projects: classifier renders the real py3.13 ANSI JSONDecodeError traceback (no leaked ESC bytes)" 'board unavailable: json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)' "$_classified"
+check_absent "projects: classified real traceback contains no raw ESC byte" $'\x1b[' "$_classified"
 
 # scenario 3c/3d: a rate-limit failure gets board.sh's own "RATE-LIMITED until
 # <reset>" line (board.sh asks `gh api rate_limit` for the authoritative reset

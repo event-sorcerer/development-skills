@@ -114,3 +114,9 @@ an existing area, add a `check ...` line to that area's `section-*.sh`; to add a
 create a new `section-<area>.sh` (with the standard sourced-not-standalone header comment)
 and register it in `run-tests.sh`'s `SECTIONS` array. This split keeps parallel build-loop
 lanes from all appending to one file (a guaranteed rebase conflict on every merge).
+
+Fake-`gh` fixtures that simulate a `gh` failure (masked rate limits, honest rate limits,
+etc.) source their trigger text from `tests/fixtures/gh-failures/` — a corpus of REAL
+captured `gh` outputs with provenance — rather than inlining invented strings beside the
+classifier they test (see that directory's `README.md`). Whenever a masked or odd `gh`
+error is observed live in any session, capture the raw bytes there immediately.

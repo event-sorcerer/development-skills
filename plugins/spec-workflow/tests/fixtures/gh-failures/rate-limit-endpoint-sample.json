@@ -1,0 +1,19 @@
+# provenance: real `gh api rate_limit` response shape, LIVE-captured this
+# task (#91), 2026-07-08T~11:35Z (before this session's own investigation
+# consumed further graphql quota -- see rate-limit-endpoint-near-exhausted.json
+# for a later, near-zero capture from the same session).
+# command: gh api rate_limit
+# account: Zugruul (github.com, OAuth/PAT token, per `gh auth status`)
+# account state: resources.graphql.remaining=41/5000 (not exhausted).
+# note (observed, not a code change -- out of scope for #91): the
+# top-level "rate" key in this real response ALIASES "resources.core"
+# (remaining=4993, matching core, not graphql's 41). board-queue.sh's
+# _rate_limit_reset_human() falls back to top-level "rate" only when
+# "resources.graphql" is absent from the payload -- this real sample always
+# has resources.graphql present, so the fallback path isn't exercised here,
+# but the alias mismatch is worth flagging for whoever next touches that
+# fallback (it would read core's reset/remaining, not graphql's, if it ever
+# fires against a real payload shaped like this one).
+# source: live `gh api rate_limit` invocation, this task.
+
+{"resources":{"core":{"limit":5000,"used":7,"remaining":4993,"reset":1783513577},"search":{"limit":30,"used":0,"remaining":30,"reset":1783510957},"graphql":{"limit":5000,"used":4959,"remaining":41,"reset":1783512842},"integration_manifest":{"limit":5000,"used":0,"remaining":5000,"reset":1783514497},"source_import":{"limit":100,"used":0,"remaining":100,"reset":1783510957},"code_scanning_autofix":{"limit":10,"used":0,"remaining":10,"reset":1783510957},"actions_runner_registration":{"limit":10000,"used":0,"remaining":10000,"reset":1783514497},"scim":{"limit":15000,"used":0,"remaining":15000,"reset":1783514497},"dependency_snapshots":{"limit":100,"used":0,"remaining":100,"reset":1783510957},"dependency_sbom":{"limit":100,"used":0,"remaining":100,"reset":1783510957},"audit_log":{"limit":1750,"used":0,"remaining":1750,"reset":1783514497},"audit_log_streaming":{"limit":15,"used":0,"remaining":15,"reset":1783514497},"code_search":{"limit":10,"used":0,"remaining":10,"reset":1783510957},"copilot_usage_records":{"limit":1750,"used":0,"remaining":1750,"reset":1783514497}},"rate":{"limit":5000,"used":7,"remaining":4993,"reset":1783513577}}

@@ -1,0 +1,23 @@
+# provenance: the HONEST (non-masked) GraphQL rate-limit error text --
+# gh's rate-limit errors DO contain "rate limit" wording when they aren't
+# masked as something else (contrast masked-unknown-owner-type.txt in this
+# same corpus). Requested verbatim shape per the #91 task brief: GraphQL:
+# API rate limit already exceeded for user ID <n>. This exact byte string
+# was not found committed verbatim anywhere in this repo's history (grepped
+# git log -p and .claude/feedbacks/feed.yaml) -- it is RECONSTRUCTED from
+# GitHub's documented GraphQL rate-limit error format (the "user ID <n>"
+# variant applies to OAuth/PAT-authenticated callers, as this session's own
+# `gh auth status` shows: account Zugruul, a personal token, not a GitHub
+# App installation -- the "installation ID <n>" variant the OLD inline
+# fixture strings used applies only to GitHub App installation tokens,
+# which this project's gh calls never use).
+# not live-captured: reproducing it for real requires actually exhausting
+# graphql quota, and this session's real quota was already down to 41
+# remaining (see rate-limit-endpoint-sample.json in this corpus) before any
+# deliberate exhaustion -- burning it further would have risked starving
+# concurrent lanes/agents sharing this account's real GraphQL budget, so
+# this task did not perform the optional deliberate-exhaustion recipe.
+# source: task #91 brief (from issues #74/#77 history); GitHub's documented
+# GraphQL RATE_LIMITED error message format; `gh auth status` (this session).
+
+GraphQL: API rate limit already exceeded for user ID 4837291. (createProjectV2Item)

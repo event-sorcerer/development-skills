@@ -63,6 +63,7 @@ SECTIONS=(
     section-guard-pr-create.sh
     section-board-audit.sh
     section-diff-symbols.sh
+    section-gh-failures-corpus.sh
 )
 
 if [[ ${#SECTIONS[@]} -eq 0 ]]; then

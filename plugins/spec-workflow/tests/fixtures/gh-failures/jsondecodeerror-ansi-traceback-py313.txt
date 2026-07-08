@@ -1,0 +1,42 @@
+# provenance: the colorized Python 3.13 JSONDecodeError traceback tail that
+# leaked into the neural-view HUD before issue #77 -- board.sh's `list`
+# used to pipe gh's stdout straight into `json.load(sys.stdin)` with no
+# gate on gh's own exit code, so ANY gh failure (empty stdout) additionally
+# raised this Python traceback, which CPython colorizes by default (see
+# section-neural-view-projects.sh's original scenario 3b comment, pinned in
+# commit a92f03c "neural-view: boards HUD failures are ANSI-stripped and
+# classified... (#70)"; #77 later gated board.sh on gh's exit code so this
+# no longer reproduces live -- kept here as a regression fixture for the
+# classifier's ANSI-stripping/last-meaningful-line fallback).
+# LIVE-captured this task (#91), 2026-07-08T11:46:11Z, this machine:
+#   printf '' | FORCE_COLOR=1 python3 -c "import json,sys; json.load(sys.stdin)"
+# python3 --version: Python 3.13.7 (Homebrew, /opt/homebrew/Cellar/python@3.13)
+# FORCE_COLOR=1 pins ANSI output the same way the original pinned assertion
+# needed it (real terminals auto-detect color; this fixture forces it so
+# the repro doesn't depend on the invoking shell/TTY).
+# the pinned last line this reproduces byte-for-byte:
+#   'board unavailable: json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)'
+#   (after ANSI-stripping + last-non-blank-line extraction, matching
+#   section-neural-view-projects.sh's original scenario 3b assertion, commit
+#   a92f03c, before #77 removed the code path that produced it live).
+# source: commit a92f03c (original fixture + comments); live python3
+# invocation, this task.
+
+Traceback (most recent call last):
+  File [35m"<string>"[0m, line [35m1[0m, in [35m<module>[0m
+    import json,sys; [31mjson.load[0m[1;31m(sys.stdin)[0m
+                     [31m~~~~~~~~~[0m[1;31m^^^^^^^^^^^[0m
+  File [35m"/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/json/__init__.py"[0m, line [35m293[0m, in [35mload[0m
+    return loads(fp.read(),
+        cls=cls, object_hook=object_hook,
+        parse_float=parse_float, parse_int=parse_int,
+        parse_constant=parse_constant, object_pairs_hook=object_pairs_hook, **kw)
+  File [35m"/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/json/__init__.py"[0m, line [35m346[0m, in [35mloads[0m
+    return [31m_default_decoder.decode[0m[1;31m(s)[0m
+           [31m~~~~~~~~~~~~~~~~~~~~~~~[0m[1;31m^^^[0m
+  File [35m"/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/json/decoder.py"[0m, line [35m345[0m, in [35mdecode[0m
+    obj, end = [31mself.raw_decode[0m[1;31m(s, idx=_w(s, 0).end())[0m
+               [31m~~~~~~~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^^^^^^^^^^[0m
+  File [35m"/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/json/decoder.py"[0m, line [35m363[0m, in [35mraw_decode[0m
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+[1;35mjson.decoder.JSONDecodeError[0m: [35mExpecting value: line 1 column 1 (char 0)[0m
