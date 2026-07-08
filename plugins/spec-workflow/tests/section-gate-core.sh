@@ -10,8 +10,8 @@ T3="$(mktemp -d)"
 mkdir -p "$T3/.claude"
 python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); c["commands"]["gate"]="true"; json.dump(c,open(sys.argv[2],"w"))' \
     "$FIX/valid.project.json" "$T3/.claude/project.json"
-hookjson() { printf '{"tool_input":{"command":"%s"}}' "$1"; }
-hookjsonpy() { python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":sys.argv[1]}}))' "$1"; }
+# hookjson/hookjsonpy are shared guard-hook stdin builders defined in _lib.sh
+# (always sourced) so a single-section --section run still has them in scope.
 out="$(hookjson 'bash board.sh move 7 \"In review\"' | (cd "$T3" && bash "$PLUGIN/scripts/guard-board-move.sh" 2>&1); echo "rc=$?")"
 check "move blocked without pass" "BLOCKED: no recorded gate pass" "$out"
 check "block exit code 2" "rc=2" "$out"

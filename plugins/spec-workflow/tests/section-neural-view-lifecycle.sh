@@ -130,9 +130,12 @@ python3 "$NV" stop >/dev/null
 unset NEURAL_VIEW_STATE NEURAL_VIEW_PORT NEURAL_VIEW_SCAN
 # _hubtmp: cross-section dependency -- created in section-ui-hub.sh (which
 # must run before this file; SECTIONS order in run-tests.sh preserves that)
-# and cleaned up here, exactly as in the pre-split monolith.
+# and cleaned up here, exactly as in the pre-split monolith. Under a
+# single-section --section run (dev#96) ui-hub may not have run, so _hubtmp
+# is unset -- ${_hubtmp:-} keeps that a harmless no-op rather than a set -u
+# crash (rm of the empty string is a no-op).
 # shellcheck disable=SC2154
-rm -rf "$_nvroot" "$_nvstate" "$_nvev" "$_nvempty" "$_nvscan_empty" "$_hubtmp"
+rm -rf "$_nvroot" "$_nvstate" "$_nvev" "$_nvempty" "$_nvscan_empty" "${_hubtmp:-}"
 
 echo "== neural-view (multi-repo aggregation via .claude/.neural-network marker) =="
 _scanbase="$(mktemp -d)"

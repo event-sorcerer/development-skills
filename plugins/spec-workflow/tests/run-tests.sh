@@ -23,6 +23,57 @@ flaky=0
 # shellcheck source=plugins/spec-workflow/tests/_lib.sh
 source "$HERE/_lib.sh"
 
+# --- section filter (dev#96) ---------------------------------------------
+# `--section <name>` restricts the run to sections whose base-name (the file
+# name minus the `section-` prefix and `.sh` suffix) CONTAINS <name> as a
+# substring. Repeatable and comma-separated: `--section board-queue`,
+# `--section a,b`, and `--section a --section b` all work; the union runs in
+# the registered SECTIONS order below (so the load-bearing ui-hub ->
+# neural-view-lifecycle teardown pairing is preserved whenever both halves
+# are selected — filtering to only ONE half is allowed but then that pair's
+# create/teardown is a harmless no-op, not a failure). The SPEC_TESTS_SECTION
+# env var is an equivalent filter source (comma-separated); it exists so
+# gate.sh can DETECT a filtered invocation and refuse to record a pass for it
+# — the recorded gate pass must always be a full-suite run (see gate.sh).
+# With no filter at all, the run is byte-for-byte identical to before. An
+# explicit filter that resolves to no non-empty terms (e.g. `--section=`)
+# falls through to the no-match error below, never a crash.
+_filters=()
+_filter_requested=0
+# _add_filters SPLITS $1 on commas and appends each NON-EMPTY term to
+# _filters. Empty terms are ignored (an empty substring would match every
+# section); skipping them here — rather than expanding a possibly-empty array
+# with `"${arr[@]}"` — also sidesteps bash 3.2's set -u "unbound variable"
+# error on an empty array. `set -f` around the split keeps a stray `*` in a
+# term from glob-expanding against the cwd.
+_add_filters() {
+    local _t IFS=','
+    set -f
+    for _t in $1; do [[ -n "$_t" ]] && _filters+=("$_t"); done
+    set +f
+}
+if [[ -n "${SPEC_TESTS_SECTION:-}" ]]; then
+    _add_filters "$SPEC_TESTS_SECTION"; _filter_requested=1
+fi
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --section)
+            shift
+            [[ $# -gt 0 ]] || { echo "run-tests.sh: --section requires a value" >&2; exit 2; }
+            _add_filters "$1"; _filter_requested=1; shift ;;
+        --section=*)
+            _add_filters "${1#--section=}"; _filter_requested=1; shift ;;
+        -h|--help)
+            echo "usage: run-tests.sh [--section <name>[,<name>...]]..."
+            echo "  --section <name>  run only sections whose base-name contains <name>"
+            echo "                    (repeatable and/or comma-separated; substring match)"
+            echo "  no --section      run the full suite (also honors \$SPEC_TESTS_SECTION)"
+            exit 0 ;;
+        *)
+            echo "run-tests.sh: unknown argument: $1 (try --help)" >&2; exit 2 ;;
+    esac
+done
+
 # Sections are mostly independent (each mints/tears down its own temp dirs
 # and ports), EXCEPT one documented pair: section-ui-hub.sh creates the
 # _hubtmp temp dir and section-neural-view-lifecycle.sh tears it down (see
@@ -65,6 +116,7 @@ SECTIONS=(
     section-board-labels.sh
     section-diff-symbols.sh
     section-gh-failures-corpus.sh
+    section-runner-filter.sh
 )
 
 if [[ ${#SECTIONS[@]} -eq 0 ]]; then
@@ -72,7 +124,33 @@ if [[ ${#SECTIONS[@]} -eq 0 ]]; then
     exit 1
 fi
 
-for s in "${SECTIONS[@]}"; do
+# Apply the --section filter (dev#96). No filter requested -> run every
+# section, in the registered order, exactly as before. A requested filter
+# that resolves to no non-empty terms (e.g. `--section=`) matches nothing and
+# lands in the no-match error below rather than silently running the suite.
+if [[ "$_filter_requested" -eq 0 ]]; then
+    SELECTED=("${SECTIONS[@]}")
+else
+    SELECTED=()
+    if [[ ${#_filters[@]} -gt 0 ]]; then
+        for s in "${SECTIONS[@]}"; do
+            _name="${s#section-}"; _name="${_name%.sh}"
+            for term in "${_filters[@]}"; do
+                case "$_name" in
+                    *"$term"*) SELECTED+=("$s"); break ;;
+                esac
+            done
+        done
+    fi
+    if [[ ${#SELECTED[@]} -eq 0 ]]; then
+        echo "run-tests.sh: no section matched: ${_filters[*]-}" >&2
+        echo "available sections:" >&2
+        for s in "${SECTIONS[@]}"; do _n="${s#section-}"; echo "  ${_n%.sh}" >&2; done
+        exit 2
+    fi
+fi
+
+for s in "${SELECTED[@]}"; do
     f="$HERE/$s"
     if [[ ! -f "$f" ]]; then
         echo "FATAL: missing section file: $s (registered in run-tests.sh but not found on disk)" >&2

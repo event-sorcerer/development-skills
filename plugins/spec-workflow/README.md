@@ -120,3 +120,14 @@ etc.) source their trigger text from `tests/fixtures/gh-failures/` — a corpus 
 captured `gh` outputs with provenance — rather than inlining invented strings beside the
 classifier they test (see that directory's `README.md`). Whenever a masked or odd `gh`
 error is observed live in any session, capture the raw bytes there immediately.
+
+To verify a single-area change without paying the whole suite's minutes, filter with
+`--section`: `bash tests/run-tests.sh --section board-queue` runs only sections whose
+base-name (file name minus the `section-` prefix and `.sh` suffix) contains the argument as
+a **substring** — so `--section board` runs every `board-*` section. The flag is repeatable
+and comma-separated (`--section a,b`, `--section a --section b`), the union runs in the
+registered order (preserving the ui-hub → neural-view-lifecycle pairing when both are
+selected), and an argument matching nothing errors with the list of available sections. The
+`SPEC_TESTS_SECTION` env var is an equivalent filter source. **Filtering is for local
+iteration only**: the recorded gate pass must always be a full-suite run, so `gate.sh`
+refuses to run at all when `SPEC_TESTS_SECTION` is set.

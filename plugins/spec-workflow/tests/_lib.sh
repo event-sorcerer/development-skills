@@ -35,6 +35,18 @@ check_absent() { # name  forbidden-substring  actual-output
     fi
 }
 
+# --- PreToolUse(Bash) hook stdin builders -------------------------------
+# Wrap a command string as the {"tool_input":{"command":...}} JSON the
+# guard-board-move / guard-pr-create hooks read on stdin. Defined here in
+# _lib.sh (always sourced) rather than in one section file so that filtering
+# the suite to a single guard section (dev#96 --section) still has them in
+# scope -- otherwise the hook gets empty stdin and default-allows, turning
+# real assertions into spurious passes/FAILs. hookjson() is the fast printf
+# form (callers pre-escape any embedded quotes); hookjsonpy() routes through
+# python's json so a command string with arbitrary quoting is encoded safely.
+hookjson() { printf '{"tool_input":{"command":"%s"}}' "$1"; }
+hookjsonpy() { python3 -c 'import json,sys; print(json.dumps({"tool_input":{"command":sys.argv[1]}}))' "$1"; }
+
 # --- server-lifecycle helpers (SPEC 7.5) ---------------------------------
 # Server-lifecycle sections (neural-view, ui-hub) bind a real TCP port. Under
 # concurrent build-loop lanes, two runs picking the same fixed port race and

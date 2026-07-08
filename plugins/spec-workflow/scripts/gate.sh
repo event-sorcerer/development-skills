@@ -4,6 +4,14 @@
 # the guard-board-move hook refuses 'move ... "In review"' unless a matching
 # pass exists, so a red/unrun gate cannot be bypassed by prose.
 set -uo pipefail
+# dev#96: the recorded gate pass MUST be a full-suite run. run-tests.sh honors
+# SPEC_TESTS_SECTION as a section filter, so if it is set here a gate run would
+# record a pass covering only a subset of the suite. Refuse up front — before
+# reading config or running anything — so a filtered pass can never be recorded.
+if [[ -n "${SPEC_TESTS_SECTION:-}" ]]; then
+    echo "gate.sh: refusing to run with SPEC_TESTS_SECTION set (=${SPEC_TESTS_SECTION}) — the recorded gate pass must be a full-suite run, never a filtered subset. Unset SPEC_TESTS_SECTION and re-run." >&2
+    exit 2
+fi
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
