@@ -99,6 +99,11 @@
     "last": null,
     "weight": 0.5
   },
+  "session-close-protocol->orchestrator-cd-prefix-own-commands": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "shared-checkout-hazard->post-hoc-review-over-rewrite": {
     "fires": 0,
     "last": null,

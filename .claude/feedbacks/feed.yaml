@@ -1198,3 +1198,60 @@ items:
     in the error, like the runner's no-match message does).
   routing:
     action: note
+---
+schemaVersion: 1
+kind: session-feedback
+ts: '2026-07-08T13:40:00Z'
+iteration:
+  task: session
+  outcome: closed
+  reviewRounds: 0
+source:
+  role: orchestrator
+  model: claude-fable-5
+items:
+- category: worked-well
+  area: process
+  severity: low
+  summary: LOCAL delivery mode + task-close sync carried 4 merges (#91, #50, #96,
+    #101-dev-complete) through two full rate-limit exhaustions without blocking any
+    agent; adversarial round-2 reviews (#96) caught contract-breaking defects the
+    green gate missed
+  generalized: The local-mode pipeline (lane worktree -> independent reviewer ->
+    /tmp detached squash-merge -> queued board sync) is now routine; keep it.
+- category: incident
+  area: process
+  severity: medium
+  summary: Reviewers repeatedly went idle without delivering their verdict to the
+    orchestrator (3 of 4 reviews this session needed a nudge message before reporting)
+  detail: reviewer-sw091 and reviewer-sw096 both required an explicit "send your
+    verdict" follow-up; only reviewer-sw050 and reviewer-sw101 were instructed with
+    "your LAST action must be SendMessage to main" and the earlier two were not.
+  generalized: Agent prompts must state that the final act is DELIVERY (SendMessage
+    to main), not just task completion — an agent that finishes its analysis but
+    not its report has not finished. Bake the line into every reviewer/dev spawn
+    template.
+  routing:
+    action: brain-note
+    ref: orchestrator/last-action-is-delivery
+- category: friction
+  area: process
+  severity: medium
+  summary: Session close-out initially skipped the feedback loop; the user had to
+    demand it (and liked the close-out format enough to make it the default)
+  generalized: Session end is an iteration boundary like any task close — it gets
+    its own feedback document and a resumable close-out report. Protocol + format
+    now codified in .claude/identities/orchestrator/ROLE.md and user memory.
+  routing:
+    action: brain-note
+    ref: orchestrator/session-close-protocol
+- category: recommendation
+  area: board
+  severity: high
+  summary: Queue durability and lock liveness remain the top mechanical risk after
+    the 13:14Z flush-crash lost the whole mutation queue
+  generalized: Prioritize development-skills#104 (P1) next session; until fixed,
+    reconcile the board manually after every rate-limit reset window.
+  routing:
+    action: backlog
+    ref: 'development-skills#104'
