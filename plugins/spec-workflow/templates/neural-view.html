@@ -692,6 +692,7 @@ function frame(){
     updateFly();
     updateCameraPosition();   // theta/phi/target/radius may have changed since last frame (orbit/pan/zoom/fit)
     renderer.render(scene, camera);
+    if(PROBE && tick%20===0) hoverProbe();   // same-frame overlay: sim, camera and rings agree
   }
 }
 requestAnimationFrame(frame);
@@ -967,70 +968,106 @@ function tooltipHtml(ud){
   }
   return "";
 }
+// ---- screen-space picking (hover, click, dblclick) ----
+// EVERYTHING is picked by projecting world positions to CSS pixels and
+// measuring pixel distances — never by three.js raycasting. Raycasting the
+// scene objects (sprite quads, Line threshold) repeatedly produced hits that
+// disagreed with the rendered pixels (tooltips over empty space, visible
+// balls that never hovered); projection is, by construction, the same math
+// the renderer used to place things on screen, so pick == pixels.
+const _pickV = webglOK ? new THREE.Vector3() : null;
+function projectToScreen(x, y, z){
+  // -> {x, y, depth} in CSS px, or null when behind the camera/past far.
+  _pickV.set(x, y, z);
+  const depth = _pickV.distanceTo(camera.position);
+  _pickV.project(camera);
+  if(_pickV.z < -1 || _pickV.z > 1) return null;
+  return {x: (_pickV.x+1)*0.5*W, y: (1-_pickV.y)*0.5*H, depth};
+}
+function worldToPixels(worldSize, depth){ return worldSize * (H/2) / (Math.tan(FOV/2)*depth); }
+function distToSegment(px, py, ax, ay, bx, by){
+  const dx = bx-ax, dy = by-ay, l2 = dx*dx + dy*dy;
+  let t = l2 ? ((px-ax)*dx + (py-ay)*dy)/l2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px-(ax+dx*t), py-(ay+dy*t));
+}
+// nearest note whose drawn ball (+ small minimum grab radius for tiny far
+// dots) covers the cursor.
+function pickNoteAt(clientX, clientY){
+  if(!webglOK) return null;
+  let best = null, bestD = Infinity;
+  for(const nd of nodes){
+    const p = projectToScreen(nd.x, nd.y, nd.z);
+    if(!p) continue;
+    const d = Math.hypot(p.x-clientX, p.y-clientY);
+    const rPix = worldToPixels(nd.r*1.8, p.depth);   // ≈ the ball + its visible glow
+    if(d <= Math.max(8, rPix) && d < bestD){ best = nd; bestD = d; }
+  }
+  return best;
+}
+// nearest synapse whose projected line segment passes within a few px of the
+// cursor (the drifting pulse dot rides the same segment, so it needs no
+// separate pick target).
+function pickSynapseAt(clientX, clientY){
+  if(!webglOK) return null;
+  let best = null, bestD = Infinity;
+  for(const l of links){
+    const a = projectToScreen(l.a.x, l.a.y, l.a.z), b = projectToScreen(l.b.x, l.b.y, l.b.z);
+    if(!a || !b) continue;
+    const d = distToSegment(clientX, clientY, a.x, a.y, b.x, b.y);
+    if(d <= 6 && d < bestD){ best = l; bestD = d; }
+  }
+  return best;
+}
+// repo hover: near the projected label text, or in a thin band around the
+// projected region-sphere rim (the wireframe boundary) — never the sphere's
+// interior, which reads as empty space (#72).
+function pickRepoAt(clientX, clientY){
+  if(!webglOK || repoList.length<2) return null;
+  for(const repo of repoList){
+    const rc = repoCenters.get(repo); if(!rc) continue;
+    const rad = repoRadius.get(repo) || MIN_REGION;
+    const lp = projectToScreen(rc.x, rc.y+rad+26, rc.z);
+    if(lp && Math.hypot(lp.x-clientX, lp.y-clientY) <= 46) return {kind:"repoLabel", repo};
+    const cp = projectToScreen(rc.x, rc.y, rc.z);
+    if(cp){
+      const rPix = worldToPixels(rad, cp.depth);
+      if(Math.abs(Math.hypot(cp.x-clientX, cp.y-clientY) - rPix) <= 12) return {kind:"repoRegion", repo};
+    }
+  }
+  return null;
+}
 function hoverTest(clientX, clientY){
   if(!webglOK || !sceneGroup){ hideTooltip(); return; }
-  // priority: note > synapse/pulse > repo label > repo region. Notes are
-  // picked in SCREEN space (pickNoteAt) so hover agrees with the drawn ball
-  // by construction; the sprite-quad raycast used before hit the halo quads'
-  // invisible margins, tooltipping empty space while missing visible balls.
+  // priority: note > synapse > repo label/region.
   const nd = pickNoteAt(clientX, clientY);
   if(nd){
     hoveredNode = nd; hoveredLink = null;
     showTooltip(clientX, clientY, tooltipHtml({kind:"note", node:nd}));
     return;
   }
-  const ndc = new THREE.Vector2((clientX/W)*2-1, -(clientY/H)*2+1);
-  raycaster.setFromCamera(ndc, camera);
-  raycaster.params.Line = {threshold: 4};
-  const synapseTargets = [], labelTargets = [], regionTargets = [];
-  for(const child of sceneGroup.children){
-    const k = child.userData && child.userData.kind;
-    if(k==="synapse" || k==="synapsePulse") synapseTargets.push(child);
-    else if(k==="repoLabel") labelTargets.push(child);
-    else if(k==="repoRegion") regionTargets.push(child);
+  const l = pickSynapseAt(clientX, clientY);
+  if(l){
+    hoveredNode = null; hoveredLink = l;
+    showTooltip(clientX, clientY, tooltipHtml({kind:"synapse", link:l}));
+    return;
   }
-  let ud = null;
-  for(const group of [synapseTargets, labelTargets, regionTargets]){
-    if(!group.length) continue;
-    const hits = raycaster.intersectObjects(group, false);
-    if(hits.length){ ud = hits[0].object.userData || {}; break; }
+  const repoHit = pickRepoAt(clientX, clientY);
+  if(repoHit){
+    hoveredNode = null; hoveredLink = null;
+    showTooltip(clientX, clientY, tooltipHtml(repoHit));
+    return;
   }
-  if(!ud){ hideTooltip(); return; }
-  hoveredNode = null;
-  hoveredLink = (ud.kind==="synapse" || ud.kind==="synapsePulse") ? ud.link : null;
-  showTooltip(clientX, clientY, tooltipHtml(ud));
+  hideTooltip();
 }
 
 // ---- orbit / pan / zoom / click-to-inspect (Pointer Events: unifies mouse
 // drag + single-finger touch orbit; two active pointers pinch-zoom; wheel
 // zooms toward the target; right-click-drag or shift-drag pans) ----
-const raycaster = webglOK ? new THREE.Raycaster() : null;
 function hitTest(clientX, clientY){
   if(!webglOK) return;
   const nd = pickNoteAt(clientX, clientY);
   if(nd) openNote(nd);   // external viewing goes through the panel's "View in ..." button
-}
-// Screen-space note picking, shared by hover, click and dblclick: project
-// every note's center to CSS pixels and take the nearest one whose drawn
-// ball covers the cursor (with a small minimum grab radius for far/tiny
-// dots). This matches the rendered pixels by construction — unlike a
-// sprite-quad raycast, it cannot hit an invisible margin or miss a ball.
-const _pickV = webglOK ? new THREE.Vector3() : null;
-function pickNoteAt(clientX, clientY){
-  if(!webglOK) return null;
-  const halfH = H/2, tanF = Math.tan(FOV/2);
-  let best = null, bestD = Infinity;
-  for(const nd of nodes){
-    _pickV.set(nd.x, nd.y, nd.z);
-    const depth = _pickV.distanceTo(camera.position);
-    _pickV.project(camera);
-    if(_pickV.z < -1 || _pickV.z > 1) continue;   // behind the camera / past the far plane
-    const sx = (_pickV.x+1)*0.5*W, sy = (1-_pickV.y)*0.5*H;
-    const d = Math.hypot(sx-clientX, sy-clientY);
-    const rPix = (nd.r*1.8) * halfH / (tanF*depth);   // ≈ the ball + its visible glow, in px
-    if(d <= Math.max(8, rPix) && d < bestD){ best = nd; bestD = d; }
-  }
-  return best;
 }
 // Fire-and-forget: the server opens the note in the best local viewer
 // (Obsidian → VS Code → terminal cat) and reports which one it used.
@@ -1162,6 +1199,49 @@ async function openNote(nd){
   });
   panel.classList.add("open"); panel.setAttribute("aria-hidden","false"); panel.removeAttribute("inert");
 }
+
+// ---- picking self-check (?hoverprobe) ----
+// Overlays a DOM ring at projectToScreen() of every node + every synapse
+// midpoint: the rings must sit exactly on the rendered balls/lines. If they
+// do, picking and rendering agree; if they're offset, the pick math (not the
+// scene) is wrong. Purely diagnostic, DOM-only, never intercepts pointers.
+function hoverProbe(){
+  // strip everything but note cores + synapse lines so each rendered dot can
+  // be compared 1:1 against its projected ring, with no halos/pulses/glows
+  // confusing the eye.
+  if(sceneGroup) for(const child of sceneGroup.children){
+    const k = child.userData && child.userData.kind;
+    if(k==="synapsePulse" || k==="roleCluster") child.visible = false;
+  }
+  for(const nd of nodes) if(nd._halo) nd._halo.visible = false;
+  const old = document.getElementById("hoverprobe"); if(old) old.remove();
+  const wrap = document.createElement("div");
+  wrap.id = "hoverprobe";
+  wrap.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:99";
+  for(const nd of nodes){
+    const p = projectToScreen(nd.x, nd.y, nd.z);
+    if(!p) continue;
+    const r = Math.max(4, worldToPixels(nd.r, p.depth));
+    const dot = document.createElement("div");
+    dot.style.cssText = `position:absolute;left:${(p.x-r).toFixed(1)}px;top:${(p.y-r).toFixed(1)}px;`+
+      `width:${(r*2).toFixed(1)}px;height:${(r*2).toFixed(1)}px;border:1px solid rgba(255,64,96,.9);border-radius:50%`;
+    wrap.appendChild(dot);
+  }
+  for(const l of links){
+    const a = projectToScreen(l.a.x, l.a.y, l.a.z), b = projectToScreen(l.b.x, l.b.y, l.b.z);
+    if(!a || !b) continue;
+    const mx = (a.x+b.x)/2, my = (a.y+b.y)/2;
+    const tick = document.createElement("div");
+    tick.style.cssText = `position:absolute;left:${(mx-2).toFixed(1)}px;top:${(my-2).toFixed(1)}px;`+
+      `width:4px;height:4px;background:rgba(255,179,71,.9)`;
+    wrap.appendChild(tick);
+  }
+  document.body.appendChild(wrap);
+}
+// rebuilt in lockstep with the render loop (see frame()) — a timer-driven
+// rebuild lags the sim by many frames under headless virtual time and shows
+// a phantom offset that isn't real.
+const PROBE = location.search.includes("hoverprobe");
 
 // ---- boot ----
 (async function(){
