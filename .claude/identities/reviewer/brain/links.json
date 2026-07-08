@@ -1,4 +1,14 @@
 {
+  "diff-against-merge-base->explicit-cd-every-command": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "diff-against-merge-base->red-commit-worktree-verify": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "diff-invariant-artifact-on-refactor->prove-flakiness-fix-on-baseline": {
     "fires": 0,
     "last": null,
@@ -55,6 +65,11 @@
     "weight": 0.5
   },
   "prove-flakiness-fix-on-baseline->reproduce-on-deployment-floor": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "read-beyond-the-diff->outcome-language-marks-unverified-seams": {
     "fires": 0,
     "last": null,
     "weight": 0.5
