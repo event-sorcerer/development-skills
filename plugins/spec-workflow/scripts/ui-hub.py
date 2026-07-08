@@ -211,13 +211,34 @@ def main():
             return
         port = arg_port(args)
         log = open(S / "server.log", "ab")
-        subprocess.Popen([sys.executable, os.path.abspath(__file__), "serve", "--port", str(port)],
-                         stdout=log, stderr=log, start_new_session=True, env=os.environ)
+        child = subprocess.Popen([sys.executable, os.path.abspath(__file__), "serve", "--port", str(port)],
+                                  stdout=log, stderr=log, start_new_session=True, env=os.environ)
+        # child.poll() -- not pid_alive() -- is the correct liveness check
+        # here: a crashed child (e.g. server_bind() failing because two
+        # concurrent callers both probed the same free port and picked it
+        # before either bound -- #55) becomes a zombie until WE reap it,
+        # and os.kill(pid, 0) reports zombies as alive. child.poll() calls
+        # waitpid() on our own direct child and sees the real exit status.
         for _ in range(20):
             time.sleep(0.15)
+            if child.poll() is not None:
+                break  # crashed -- fall through to FAILED below
             if pid_alive():
+                # It's reached serve_forever() and written its pidfile.
+                # bind() failure surfaces within microseconds of that, so
+                # one more short beat is enough to catch a fast crash
+                # without waiting out the full timeout on the happy path.
+                time.sleep(0.15)
+                if child.poll() is None:
+                    print(f"RUNNING http://127.0.0.1:{port}")
+                    return
                 break
-        print(f"RUNNING http://127.0.0.1:{port}")
+        # The child exited (or never came up). Report failure instead of
+        # lying RUNNING, so a caller keeps talking to its OWN server (or
+        # retries on a fresh port) rather than silently falling through
+        # to whichever process actually holds this port.
+        print(f"FAILED to start on port {port} -- see {S / 'server.log'}")
+        sys.exit(1)
 
     elif cmd == "status":
         pid = pid_alive()

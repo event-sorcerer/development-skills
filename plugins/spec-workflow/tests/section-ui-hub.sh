@@ -18,6 +18,21 @@ out="$(curl -sf -X POST "http://127.0.0.1:$UI_HUB_PORT/api/answer" -H 'Content-T
 check "hub answer accepted" '"ok": true' "$out"
 out="$(python3 "$HUB" answers --consume)";            check "hub answer collected" "Use: Option A" "$out"
 out="$(python3 "$HUB" answers)";                      check_absent "hub consume archived it" "d1" "$out"
+
+# #55: start must FAIL loudly when the port it's asked to bind is already
+# held by someone else -- otherwise a caller whose own server never came
+# up keeps reporting RUNNING and its clients silently talk to whichever
+# process DID bind that port (see _rand_port's check-then-bind window:
+# two concurrent callers can both probe the same free port microseconds
+# apart and both pick it), so answers/consumes land in the wrong state
+# dir instead of failing visibly. Force the collision directly -- this
+# suite's own hub above is still bound to $UI_HUB_PORT -- rather than
+# rely on timing luck to hit the same race.
+_collide_dir="$(mktemp -d)/hub"
+out="$(UI_HUB_STATE="$_collide_dir" python3 "$HUB" start --port "$UI_HUB_PORT" 2>&1)"
+check_rc "hub start reports failure on an already-bound port" 1 "$?"
+rm -rf "$(dirname "$_collide_dir")"
+
 python3 "$HUB" stop >/dev/null
 unset UI_HUB_STATE UI_HUB_PORT
 
