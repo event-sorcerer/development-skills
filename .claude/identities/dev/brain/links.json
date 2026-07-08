@@ -1,4 +1,14 @@
 {
+  "anonymous-listener-slice-eval->template-extract-anchor-check": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "anonymous-listener-slice-eval->trace-state-mutation-not-named-trigger": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "bash32-empty-array-set-u->budget-count-join-separators": {
     "fires": 1,
     "last": "2026-07-07",
@@ -10,6 +20,11 @@
     "weight": 0.5
   },
   "extraction-tests-must-verify-match->lane-cwd-distrust": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "heredoc-commit-messages->bash32-empty-array-set-u": {
     "fires": 0,
     "last": null,
     "weight": 0.5
@@ -54,6 +69,11 @@
     "last": null,
     "weight": 0.5
   },
+  "raycast-dispatch-by-class->anonymous-listener-slice-eval": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "red-static-vs-wiring-checks->vendored-split-build-import-guard": {
     "fires": 0,
     "last": null,
@@ -65,6 +85,26 @@
     "weight": 0.5
   },
   "template-extract-anchor-check->hermetic-tmpdir-per-guard-case": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "trace-state-mutation-not-named-trigger->anonymous-listener-slice-eval": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "trace-state-mutation-not-named-trigger->raf-rearm-first": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "unassumed-full-pipeline-repro->hermetic-tmpdir-per-guard-case": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "unassumed-full-pipeline-repro->trace-state-mutation-not-named-trigger": {
     "fires": 0,
     "last": null,
     "weight": 0.5

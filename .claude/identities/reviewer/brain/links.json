@@ -9,6 +9,26 @@
     "last": null,
     "weight": 0.5
   },
+  "drive-real-helper-adversarially->json-escaped-check-weakness": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "drive-real-helper-adversarially->verify-with-library-own-classes": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "explicit-cd-every-command->red-commit-worktree-verify": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "json-escaped-check-weakness->verify-guard-regex-on-real-artifact": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "ordering-words-are-contract->named-attack-class-briefs": {
     "fires": 0,
     "last": null,
@@ -55,6 +75,16 @@
     "weight": 0.5
   },
   "verify-guard-regex-on-real-artifact->red-commit-worktree-verify": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "verify-with-library-own-classes->recompute-hashes-never-eyeball": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "verify-with-library-own-classes->verify-guard-regex-on-real-artifact": {
     "fires": 0,
     "last": null,
     "weight": 0.5
