@@ -191,5 +191,78 @@ NODEJS
     xss_out="$(node "$_nvxss" "$NVHTML" 2>&1)"
     check "escapeHtml() neutralizes a double-quote-breakout XSS payload (attribute context)" "ESCAPEHTML_XSS_OK" "$xss_out"
     rm -f "$_nvxss"
+
+    # #68 regression: on boot, requestAnimationFrame(frame) fires before the
+    # first /graph fetch resolves, so sceneGroup is still null when frame() ->
+    # updateVisuals() runs. updateVisuals() iterated sceneGroup.children
+    # unconditionally, throwing "Cannot read properties of null (reading
+    # 'children')" -- and because the exception was uncaught, it killed
+    # frame() before its tail requestAnimationFrame(frame) call re-armed the
+    # loop, so the render loop died permanently on frame 1 (black screen even
+    # after the graph later loaded). Two independent guards, pinned
+    # separately: (1) updateVisuals() must no-op when sceneGroup is null, (2)
+    # frame() must always re-arm requestAnimationFrame(frame) even when its
+    # body throws, so no future per-frame exception can ever repeat this.
+    check "updateVisuals() guards against sceneGroup still being null (pre-first-/graph-build) before touching it" "if(!webglOK || !sceneGroup) return;" "$(cat "$NVHTML")"
+
+    _nvscenegroup="$(mktemp).cjs"
+    cat >"$_nvscenegroup" <<'NODEJS'
+const fs = require("fs");
+const html = fs.readFileSync(process.argv[2], "utf8");
+function extract(name) {
+    const re = new RegExp("function " + name + "\\([^)]*\\)\\{[\\s\\S]*?\\n\\}\\n");
+    const m = html.match(re);
+    if (!m) throw new Error("could not find function " + name + "() in template");
+    return m[0];
+}
+
+// updateVisuals() behavioral check: must not throw when sceneGroup is null
+// (the exact pre-graph-load state), independent of the guard's exact wording
+// -- this survives a future refactor of the guard as long as the behavior
+// (no-throw) holds.
+let webglOK = true, sceneGroup = null, nodes = [], tick = 0, REDUCED = true;
+let hoveredNode = null, hoveredLink = null;
+const performance = { now: () => 0 };
+function updateAnims() {}
+eval(extract("updateVisuals"));
+updateVisuals();
+console.log("UPDATEVISUALS_NULL_SCENEGROUP_OK");
+NODEJS
+    scenegroup_out="$(node "$_nvscenegroup" "$NVHTML" 2>&1)"
+    check "updateVisuals() does not throw when sceneGroup is still null (pre-graph-load state)" "UPDATEVISUALS_NULL_SCENEGROUP_OK" "$scenegroup_out"
+    rm -f "$_nvscenegroup"
+
+    _nvframe="$(mktemp).cjs"
+    cat >"$_nvframe" <<'NODEJS'
+const fs = require("fs");
+const html = fs.readFileSync(process.argv[2], "utf8");
+function extract(name) {
+    const re = new RegExp("function " + name + "\\([^)]*\\)\\{[\\s\\S]*?\\n\\}\\n");
+    const m = html.match(re);
+    if (!m) throw new Error("could not find function " + name + "() in template");
+    return m[0];
+}
+
+// frame() behavioral check: requestAnimationFrame(frame) must re-arm the
+// loop even when the frame body throws (step() is stubbed to throw here,
+// simulating any future per-frame exception) -- this is what prevents the
+// render loop from dying permanently on a single bad frame, regardless of
+// where in frame() the throw originates or how the guard above is worded.
+let tick = 0, webglOK = true;
+function step() { throw new Error("simulated per-frame exception"); }
+function updateVisuals() {}
+function updateCameraPosition() {}
+const renderer = { render: () => {} };
+const scene = {}, camera = {};
+let rafCalls = 0;
+function requestAnimationFrame(fn) { rafCalls++; }
+eval(extract("frame"));
+try { frame(); } catch (e) { /* expected: step() throws by design */ }
+if (rafCalls !== 1) throw new Error("requestAnimationFrame(frame) was not re-armed when frame()'s body threw: rafCalls=" + rafCalls);
+console.log("FRAME_REARM_ON_THROW_OK");
+NODEJS
+    frame_out="$(node "$_nvframe" "$NVHTML" 2>&1)"
+    check "frame() re-arms requestAnimationFrame(frame) even when its body throws" "FRAME_REARM_ON_THROW_OK" "$frame_out"
+    rm -f "$_nvframe"
 fi
 
