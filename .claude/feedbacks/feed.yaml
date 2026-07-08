@@ -1159,3 +1159,42 @@ items:
   routing:
     action: backlog
     ref: 'development-skills#102'
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-08T13:25:00Z'
+iteration:
+  task: '96'
+  outcome: merged
+  reviewRounds: 2
+source:
+  role: orchestrator
+  model: claude-fable-5
+items:
+- category: incident
+  area: board
+  severity: high
+  summary: A crashed auto-flush at the rate-limit reset orphaned the lockdir and
+    lost the entire mutation queue (no queue file, no aside file, mutations unapplied)
+  detail: Lock mtime 13:14:18Z, no live flush process, board still showed closed
+    tasks as In progress. Orchestrator verified no holder, rmdir'd the lock, and
+    re-issued every mutation from session memory. Filed as development-skills#104
+    with the durability invariant (bytes on disk until mutation confirmed) and a
+    pid-liveness lock probe.
+  generalized: A durable queue is only durable if entries outlive a crash at EVERY
+    point of the flush lifecycle; apply-then-delete per entry, and locks should
+    carry holder liveness (pid) so a dead holder is broken immediately instead of
+    stalling all flushes until a TTL.
+  routing:
+    action: backlog
+    ref: 'development-skills#104'
+- category: friction
+  area: board
+  severity: low
+  summary: Replay script guessed P3 for a new issue but the board's priority field
+    only offers P0/P1/P2 — two failed calls before trying P2
+  generalized: Scripts that set single-select fields should validate the option
+    name against the field's actual options (board.sh could print the valid list
+    in the error, like the runner's no-match message does).
+  routing:
+    action: note
