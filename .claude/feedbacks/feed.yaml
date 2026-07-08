@@ -913,8 +913,8 @@ items:
     target: skills/build-next/references/auto-review.md
     change: Add the verdict-delivery instruction line to the reviewer brief template.
   routing:
-    action: upstream
-    ref: surfaced in iteration report; auto-review.md template change offered to human
+    action: backlog
+    ref: '#66'
 - category: friction
   area: board
   component: plugins/spec-workflow/scripts/guard-board-move.sh
