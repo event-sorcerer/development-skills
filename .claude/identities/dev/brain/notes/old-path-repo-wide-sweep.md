@@ -1,12 +1,12 @@
 ---
-tags: [config, migration, docs, spec-delta]
-paths: ["plugins/spec-workflow/**", "SPEC.md", "docs/**"]
-strength: 1
-source: "PR#64 (#62) retro"
+tags: [config, migration, debugging]
+paths: ["**"]
+strength: 2
+source: "#88 retro — recurrence (buggy-pattern sweep)"
 graduated: false
 created: 2026-07-07
 ---
 
-When a config default (path, name, id) changes, grep the WHOLE repo for the old literal string before writing the delta — code, SPEC, READMEs, skill docs, test fixtures. Missing one silently reintroduces the old default in docs even when the code is fixed; the same grep enumerates exactly what the spec delta must cover.
+When a value/pattern changes (config default, error-message shape, a buggy raycast target), grep the WHOLE repo for the old literal before writing tests — the second bug instance (dblclick guard's copy of the same line) only surfaced via a deliberate sweep. Pin with a check_absent on the OLD pattern (catches all instances at once), not just a check for the new one.
 
-Related: [[hermetic-tmpdir-per-guard-case]] [[surgical-yaml-edits]]
+Related: [[hermetic-tmpdir-per-guard-case]] [[enumerate-state-writers]]

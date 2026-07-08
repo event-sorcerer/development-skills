@@ -1,4 +1,9 @@
 {
+  "anonymous-listener-slice-eval->duplicate-with-agreement-pin": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "anonymous-listener-slice-eval->template-extract-anchor-check": {
     "fires": 0,
     "last": null,
@@ -155,6 +160,11 @@
     "weight": 0.5
   },
   "normalize-after-load-identity-fields->rehearse-migration-on-real-copy": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "old-path-repo-wide-sweep->enumerate-state-writers": {
     "fires": 0,
     "last": null,
     "weight": 0.5

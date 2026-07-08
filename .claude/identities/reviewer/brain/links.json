@@ -114,6 +114,11 @@
     "last": null,
     "weight": 0.5
   },
+  "read-beyond-the-diff->equality-guards-invite-ordering-probes": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "read-beyond-the-diff->outcome-language-marks-unverified-seams": {
     "fires": 0,
     "last": null,
