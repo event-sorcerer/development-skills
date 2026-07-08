@@ -20,6 +20,7 @@
 #   board.sh fields                   # discover field + option ids (used by setup-project)
 #   board.sh config                   # validate the config and print a summary
 #   board.sh metrics                  # telemetry.py cycle time / gate / rework / estimate report
+#   board.sh audit                    # reconcile board reality: PR refs, branch<->In-progress drift, local-mode commit refs (#76)
 #
 # Rate-limit resilience (issue #77): move/prio/est/add's item-add step, when they hit a
 # GitHub rate limit, queue instead of failing -- see board-queue.sh. Queue file:
@@ -353,8 +354,38 @@ for f in json.load(sys.stdin)["fields"]:
     metrics)
         exec python3 "$HERE/telemetry.py" "$ROOT" metrics
         ;;
+    audit)
+        # Reconciles board reality (#76): open PRs missing a board-issue
+        # reference, branches vs In-progress items (both directions), and
+        # (work.type: local only) merged main commits missing a #N
+        # reference. See audit.py for the full contract. Exit 1 on any
+        # discrepancy.
+        _flush_queue
+        _errf="$(mktemp)"
+        _items="$(gh_project_items_json "$PN" "$OWNER" 2>"$_errf")"; _rc=$?
+        if [[ $_rc -ne 0 ]]; then
+            _errtext="$(cat "$_errf")"; rm -f "$_errf"
+            if _rate_limited "$_errtext"; then
+                echo "RATE-LIMITED until $(_rate_limit_reset_human) — work continues; mutations queue; retry reads after reset." >&2
+            else
+                echo "$_errtext" >&2
+            fi
+            exit 1
+        fi
+        [[ -s "$_errf" ]] && cat "$_errf" >&2
+        rm -f "$_errf"
+        _prs_file="$(mktemp)"
+        if ! gh pr list -R "$REPO" --state open --json number,body >"$_prs_file" 2>/dev/null; then
+            echo "[]" >"$_prs_file"
+        fi
+        WORK_TYPE="$(bash "$HERE/work-mode.sh" type)"
+        printf '%s' "$_items" | python3 "$HERE/audit.py" "$CONFIG" "${BOARD:-}" "$ROOT" "$WORK_TYPE" "$_prs_file"
+        rc=$?
+        rm -f "$_prs_file"
+        exit "$rc"
+        ;;
     *)
-        echo "usage: board.sh {next|show|move|prio|est|add|bug|adopt|flush|ensure-labels|list|issues|comment|edit-body|fields|config|metrics} ..." >&2
+        echo "usage: board.sh {next|show|move|prio|est|add|bug|adopt|flush|ensure-labels|list|issues|comment|edit-body|fields|config|metrics|audit} ..." >&2
         exit 1
         ;;
 esac

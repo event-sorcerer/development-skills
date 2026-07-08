@@ -58,6 +58,8 @@ SECTIONS=(
     section-pagination.sh
     section-skill-contracts.sh
     section-sync-configs.sh
+    section-guard-pr-create.sh
+    section-board-audit.sh
 )
 
 if [[ ${#SECTIONS[@]} -eq 0 ]]; then

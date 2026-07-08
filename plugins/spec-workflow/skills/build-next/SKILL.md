@@ -47,7 +47,7 @@ work.sync governs WHEN board mutations happen — NOT whether they happen — an
 - a human-only blocker (auth, secrets, credentials, decisions) — also post it as a `board.sh comment` on the task.
 
 ## Non-negotiables
-Board reflects reality at every step · ≤ `methodology.maxInProgress` task(s) In progress · test first, always · gate green before In review · human comments read and answered · small focused PRs.
+Board reflects reality at every step (verify with `board.sh audit`, #76 — it reconciles PRs/branches/board-items and, under `work.type: local`, merged-commit references; a clean run is expected before closing a session) · ≤ `methodology.maxInProgress` task(s) In progress · test first, always · gate green before In review · human comments read and answered · small focused PRs.
 
 ## Operating rules — follow literally, they prevent the classic failure modes
 1. **Scripts decide; you obey.** `PICK` / `RESUME` / `BLOCKED` / `PREFLIGHT FAIL` lines are decisions already made, not suggestions. Never override them with your own reasoning.
