@@ -9,4 +9,5 @@ evals/results/
 .claude/lessons.jsonl
 .claude/neural-view/
 .claude/board-queue.jsonl
+.claude/board-cache.json
 .claude/merge-requirements.json

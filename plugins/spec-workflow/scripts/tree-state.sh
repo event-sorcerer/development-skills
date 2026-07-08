@@ -42,15 +42,23 @@ h.update(head.stdout if head.returncode == 0 else b"no-head")
 # gate run, so in a repo that doesn't happen to gitignore it, a routine gate
 # re-run would touch this shared file and invalidate a still-current,
 # unrelated gate pass.
+#
+# .claude/board-cache.json (issue #78) gets the same treatment for the same
+# reason: board.sh's move/prio/est/add/adopt/next/list/audit all write it as
+# a side effect of the item-id cache, so in a repo that doesn't happen to
+# gitignore it, a routine board mutation (for any task, by any concurrent
+# lane) would otherwise touch this shared file and invalidate a still-
+# current, unrelated gate pass.
 h.update(run([
     "git", "status", "--porcelain", "--", ".",
     ":(exclude).claude/gate-pass", ":(exclude).claude/telemetry.jsonl",
-    ":(exclude).claude/lessons.jsonl",
+    ":(exclude).claude/lessons.jsonl", ":(exclude).claude/board-cache.json",
 ]))
 h.update(run(["git", "diff", "HEAD"]))
 
 listing = run(["git", "ls-files", "-z", "--others", "--exclude-standard"])
-_EXCLUDED = (b".claude/gate-pass", b".claude/telemetry.jsonl", b".claude/lessons.jsonl")
+_EXCLUDED = (b".claude/gate-pass", b".claude/telemetry.jsonl", b".claude/lessons.jsonl",
+             b".claude/board-cache.json")
 paths = sorted(p for p in listing.split(b"\0") if p and p not in _EXCLUDED)
 for p in paths:
     h.update(b"\0PATH\0")

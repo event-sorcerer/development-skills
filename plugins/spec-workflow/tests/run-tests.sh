@@ -49,6 +49,7 @@ SECTIONS=(
     section-session-init.sh
     section-board-bug-add.sh
     section-board-queue.sh
+    section-board-cache.sh
     section-identity.sh
     section-merge-mode.sh
     section-concurrency.sh

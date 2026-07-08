@@ -51,16 +51,17 @@ check "bug verb: default priority is first option (P0)" "filed bug #501 [P0]" "$
 check "bug verb: origin-issue link in body" "Originating task: #42." "$(cat "$LOG1")"
 check "bug verb: item-add invoked with the created issue's URL" "project item-add 1 --owner fixture-owner --url https://github.com/fixture-owner/fixture-project/issues/501" "$(cat "$LOG1")"
 
-# scenario 2: eventual consistency -- item-list only shows the new item from the 3rd call onward
-# (the visibility-poll cap is 3, not 10 -- SPEC #77: a stuck poll loop was itself burning quota)
+# scenario 2: eventual consistency -- item-list only shows the new item from the 2nd call onward
+# (the visibility-poll cap is 2, not 3 (#77) or 10 -- issue #78: each attempt is cache-aware, but
+# a miss still costs one full-board call, so the cap stays small)
 LOG2="$(mktemp)"; CC2="$(mktemp)"
-out="$(cd "$BG" && PATH="$FGH:$PATH" FAKE_GH_LOG="$LOG2" FAKE_GH_CALLCOUNT="$CC2" FAKE_GH_ISSUE_NUM=502 FAKE_GH_VISIBLE_AFTER=3 \
+out="$(cd "$BG" && PATH="$FGH:$PATH" FAKE_GH_LOG="$LOG2" FAKE_GH_CALLCOUNT="$CC2" FAKE_GH_ISSUE_NUM=502 FAKE_GH_VISIBLE_AFTER=2 \
     bash "$PLUGIN/scripts/board.sh" bug "flaky spinner" P1 2>&1; echo "rc=$?")"
 check "bug verb: eventual consistency -- retries until item-list shows the item, then succeeds" "filed bug #502 [P1]" "$out"
 check "bug verb: eventual consistency exits 0" "rc=0" "$out"
 n2="$(cat "$CC2")"
-if [[ "$n2" -ge 3 ]]; then echo "ok   bug verb: item-list was polled multiple times before succeeding"
-else echo "FAIL bug verb: expected >=3 item-list polls, got $n2"; fails=$((fails + 1)); fi
+if [[ "$n2" -ge 2 ]]; then echo "ok   bug verb: item-list was polled multiple times before succeeding"
+else echo "FAIL bug verb: expected >=2 item-list polls, got $n2"; fails=$((fails + 1)); fi
 
 # scenario 3 (SPEC #77): the item never becomes visible within the poll cap -- queues the
 # add-finish instead of erroring (the pre-#77 behavior burned quota back to zero retrying)

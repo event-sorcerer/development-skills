@@ -217,7 +217,7 @@ else
 fi
 rm -rf "$BQ" "$FGH" "$LOG" "$LISTCC" "$EDITCC"
 
-# --- (g) add: visibility-retry cap (3, not 10) + queue fallback instead of erroring ---
+# --- (g) add: visibility-retry cap (2, not 3 (#77) or 10) + queue fallback instead of erroring ---
 _qsetup
 LOG="$(mktemp)"; LISTCC="$(mktemp)"
 out="$(cd "$BQ" && PATH="$FGH:$PATH" FAKE_GH_LOG="$LOG" FAKE_GH_LIST_CALLCOUNT="$LISTCC" \
@@ -228,10 +228,10 @@ check "(g) add: QUEUED message names the issue" "item-add #807" "$out"
 check "(g) add: exits 0 (no more false ERROR after a bounded retry)" "rc=0" "$out"
 check_absent "(g) add: no false 'filed' success line" "filed feature" "$out"
 n="$(cat "$LISTCC")"
-if [[ "$n" -eq 3 ]]; then
-    echo "ok   (g) add: visibility poll capped at exactly 3 attempts (was 10 pre-#77)"
+if [[ "$n" -eq 2 ]]; then
+    echo "ok   (g) add: visibility poll capped at exactly 2 attempts (issue #78, down from 3 (#77) / 10 pre-#77)"
 else
-    echo "FAIL (g) add: expected exactly 3 item-list polls, got $n"
+    echo "FAIL (g) add: expected exactly 2 item-list polls, got $n"
     fails=$((fails + 1))
 fi
 qf="$BQ/.claude/board-queue.jsonl"

@@ -69,23 +69,112 @@ print(next((v for k, v in opts.items() if k.lower() == q), ""))
 PY
 }
 
-item_id() { # issue number -> project item id (searches every page; SPEC 7.4)
-    gh_project_items_json "$PN" "$OWNER" 2>/dev/null | python3 -c '
+# Local item-id cache (issue #78): issue# -> {itemId, lastKnownStatus}, gitignored.
+# Mutating/lookup commands resolve from here first; on a miss the ONE gh call
+# that would have happened anyway (a full item-list) refreshes the WHOLE
+# cache as a side effect, so every subsequent lookup this session is free.
+# Never used for `next`/`list`/`audit` (those already need the whole board;
+# they refresh the cache themselves rather than reading it).
+CACHE_FILE="${BOARD_CACHE_FILE:-$ROOT/.claude/board-cache.json}"
+
+_cache_get() { # issue# -> "itemId<TAB>status" on stdout, rc 0, iff cached
+    python3 -c '
 import json, sys
 try:
-    n = int(sys.argv[1])
-    data = json.load(sys.stdin)
+    with open(sys.argv[1]) as f:
+        data = json.load(f)
 except Exception:
-    sys.exit(0)
-for it in data.get("items", []):
-    if (it.get("content") or {}).get("number") == n:
-        print(it["id"])
-        break
-' "$1"
+    sys.exit(1)
+entry = data.get(sys.argv[2])
+if not entry or not entry.get("itemId"):
+    sys.exit(1)
+print(entry.get("itemId") + "\t" + entry.get("status", ""))
+' "$CACHE_FILE" "$1"
+}
+
+# Cache writes are best-effort (same philosophy as telemetry.py's
+# transition/gate records, see gate.sh/board-queue.sh's own comments): a
+# read-only .claude/, a full disk, etc. must never fail the caller's real
+# work (the move/prio/est/item-add already succeeded against GitHub) or leak
+# a Python traceback. Every write path below catches OSError around the
+# actual write and exits 0 regardless.
+
+_cache_put() { # issue# itemId [status]  (omitted/empty status leaves the cached status untouched)
+    python3 -c '
+import json, os, sys
+path, num, item_id, status = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+try:
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+    entry = data.get(num, {})
+    entry["itemId"] = item_id
+    if status:
+        entry["status"] = status
+    data[num] = entry
+    d = os.path.dirname(path) or "."
+    os.makedirs(d, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
+except OSError:
+    pass
+' "$CACHE_FILE" "$1" "$2" "${3:-}" || true
+}
+
+_cache_drop() { # issue# -> removes the cached entry, if any (SPEC #78: mutation rejected because remote state changed)
+    python3 -c '
+import json, os, sys
+path, num = sys.argv[1], sys.argv[2]
+try:
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except Exception:
+        sys.exit(0)
+    if num in data:
+        del data[num]
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+except OSError:
+    pass
+' "$CACHE_FILE" "$1" || true
+}
+
+# _cache_refresh_from_items: reads a full {"items":[...]} blob on stdin (the
+# shape gh_project_items_json returns) and REPLACES the whole cache with it —
+# the side effect that makes a cache miss (or a genuinely whole-board command)
+# pay for itself for every issue on the board, not just the one being looked up.
+_cache_refresh_from_items() {
+    python3 -c '
+import json, os, sys
+path = sys.argv[1]
+data_in = json.load(sys.stdin)
+cache = {}
+for it in data_in.get("items", []):
+    n = (it.get("content") or {}).get("number")
+    if n is None:
+        continue
+    cache[str(n)] = {"itemId": it["id"], "status": it.get("status") or ""}
+try:
+    d = os.path.dirname(path) or "."
+    os.makedirs(d, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(cache, f)
+    os.replace(tmp, path)
+except OSError:
+    pass
+' "$CACHE_FILE" || true
 }
 
 # shellcheck source=plugins/spec-workflow/scripts/board-queue.sh
-source "$HERE/board-queue.sh"  # rate-limit queue/flush/adopt (SPEC #77/#84); needs item_id/opt_id above
+source "$HERE/board-queue.sh"  # rate-limit queue/flush/adopt (SPEC #77/#84/#78); needs opt_id + the _cache_* helpers above
 
 _ensure_label() { # name color description -> create iff missing (uses $_EXISTING_LABELS, set by the ensure-labels verb)
     local name="$1" color="$2" desc="$3"
@@ -102,7 +191,7 @@ _ensure_label() { # name color description -> create iff missing (uses $_EXISTIN
 }
 
 _board_add() { # type title [prio] [origin-issue#] -> creates + boards one issue; shared by add/bug
-    local type="$1" title="$2" prio="${3:-}" link="${4:-}" label issue_title body num id add_out add_rc
+    local type="$1" title="$2" prio="${3:-}" link="${4:-}" label issue_title body num id add_out add_rc rc
     [[ -z "$title" ]] && { echo "ERROR: add requires a title" >&2; return 1; }
     [[ -z "$prio" ]] && prio="$(python3 -c 'import sys; import config as C; c=C.load_config(path=sys.argv[1], warn=False); b=c["boards"][0]; print(list(b["fields"]["priority"]["options"])[0])' "$CONFIG")"
     case "$type" in
@@ -138,18 +227,16 @@ _board_add() { # type title [prio] [origin-issue#] -> creates + boards one issue
         echo "ERROR: issue #$num was created but gh project item-add failed — it is not on the board" >&2
         return 1
     fi
-    # item-add is eventually consistent: poll item-list until the new item is visible
-    # before touching it, instead of a blind sleep that flakes under load. Capped at 3
-    # attempts (not 10, the pre-#77 value): a stuck poll loop was itself burning quota
-    # back to zero (issue #77's root cause) -- past the cap we queue the finish (issue
-    # already exists; item-add/move/prio still need to happen) instead of erroring.
-    id=""
-    for ((_i = 0; _i < 3; _i++)); do
-        id="$(item_id "$num")"
-        [[ -n "$id" ]] && break
-        sleep 0.3
-    done
-    if [[ -z "$id" ]]; then
+    # item-add is eventually consistent: poll for the new item before touching it,
+    # instead of a blind sleep that flakes under load. Capped at 2 attempts with
+    # backoff (not 3, and not the pre-#77 value of 10): issue #78 -- a stuck poll
+    # loop was itself burning quota back to zero, and each blind re-list cost a
+    # full-board pagination. _poll_visible uses the cache-aware lookup (a hit costs
+    # zero gh calls; a miss costs exactly one, refreshing the whole cache) -- past
+    # the cap we defer to the #77 queue (issue already exists; item-add/move/prio
+    # still need to happen) instead of erroring.
+    id="$(_poll_visible "$num")"; rc=$?
+    if [[ $rc -ne 0 ]]; then
         # shellcheck disable=SC2153  # FIRST_STATUS is the global set by the eval block above, not a typo of first_status
         queue_append add-finish issue="$num" url="$url" first_status="$FIRST_STATUS" prio="$prio"
         echo "QUEUED (rate-limited until $(_rate_limit_reset_human)): item-add #$num"
@@ -171,6 +258,7 @@ case "${1:-}" in
             # stderr on the success path is a non-fatal warning (e.g. paginate.sh's
             # hard-cap notice) -- forward it instead of silently swallowing it.
             [[ -s "$_errf" ]] && cat "$_errf" >&2
+            _cache_refresh_from_items <"$_tmp"  # whole-board command (#78): refresh the cache as a side effect
             python3 "$HERE/next.py" "$CONFIG" "${BOARD:-}" "$_tmp" "${2:-}"
         else
             _errtext="$(cat "$_errf")"
@@ -292,6 +380,7 @@ case "${1:-}" in
         fi
         [[ -s "$_errf" ]] && cat "$_errf" >&2
         rm -f "$_errf"
+        printf '%s' "$_out" | _cache_refresh_from_items  # whole-board command (#78): refresh the cache as a side effect
         printf '%s' "$_out" | python3 -c '
 import json, sys
 status_filter = sys.argv[1]
@@ -374,6 +463,7 @@ for f in json.load(sys.stdin)["fields"]:
         fi
         [[ -s "$_errf" ]] && cat "$_errf" >&2
         rm -f "$_errf"
+        printf '%s' "$_items" | _cache_refresh_from_items  # whole-board command (#78): refresh the cache as a side effect
         _prs_file="$(mktemp)"
         if ! gh pr list -R "$REPO" --state open --json number,body >"$_prs_file" 2>/dev/null; then
             echo "[]" >"$_prs_file"

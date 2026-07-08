@@ -134,14 +134,20 @@ _flush_sync() {
 }
 
 # _item_id_rl <issue#> -> prints the project item id to stdout if found.
-# Unlike item_id() (board.sh), this does NOT swallow the underlying gh
-# error — it distinguishes "no such item" from "the lookup itself failed
-# rate-limited (incl. masked, #90)" so callers can queue instead of
-# misreporting a masked rate limit as "bad issue# or status" (#90).
+# Cache-first (issue #78, .claude/board-cache.json, see board.sh): a cache
+# HIT costs zero gh calls. A cache MISS costs exactly one gh call -- a full
+# item-list, whose result refreshes the WHOLE cache as a side effect, so
+# every other issue's lookup this session is then free too -- instead of a
+# blind full re-list per lookup. Unlike item_id() (board.sh) this does NOT
+# swallow the underlying gh error on a miss's fetch — it distinguishes "no
+# such item" from "the lookup itself failed rate-limited (incl. masked,
+# #90)" so callers can queue instead of misreporting a masked rate limit as
+# "bad issue# or status" (#90).
 # Return: 0 = found (id on stdout), 1 = real miss (gh call succeeded, no
 # such item/issue), 2 = the gh call failed and looks rate-limited.
 _item_id_rl() {
-    local num="$1" out err rc id
+    local num="$1" hit out err rc id
+    hit="$(_cache_get "$num")" && { cut -f1 <<<"$hit"; return 0; }
     err="$(mktemp)"
     out="$(gh_project_items_json "$PN" "$OWNER" 2>"$err")"; rc=$?
     if [[ $rc -ne 0 ]]; then
@@ -153,6 +159,11 @@ _item_id_rl() {
         return 1
     fi
     rm -f "$err"
+    # The cache refresh below is a pure side effect (best-effort write, see
+    # board.sh) -- THIS call's correctness is decided by parsing $out
+    # directly, so a write failure (e.g. read-only .claude/) can never turn a
+    # real hit into a false miss.
+    printf '%s' "$out" | _cache_refresh_from_items
     id="$(python3 -c '
 import json, sys
 try:
@@ -172,8 +183,40 @@ for it in data.get("items", []):
     return 1
 }
 
+# _poll_visible <issue#> -> prints the item id on stdout if it becomes
+# visible within the cap. Cap: 2 attempts with backoff (0.3s, 0.6s) -- issue
+# #78, down from the pre-#77 value of 10 and #77's own value of 3: each
+# attempt is a cache-aware lookup (_item_id_rl), so a hit is free and even a
+# miss costs one full-board call, not a blind re-list. Return: 0 = found (id
+# on stdout), 1 = still not visible after the cap (caller defers to the
+# queue), 2 = a lookup attempt looked rate-limited (caller defers to the
+# queue too -- further polling would just burn quota for nothing).
+_poll_visible() {
+    local num="$1" delays=(0.3 0.6) i id rc
+    for i in 0 1; do
+        id="$(_item_id_rl "$num")"; rc=$?
+        if [[ $rc -eq 2 ]]; then return 2; fi
+        if [[ -n "$id" ]]; then printf '%s' "$id"; return 0; fi
+        sleep "${delays[$i]}"
+    done
+    return 1
+}
+
+# _current_status: DELIBERATELY NOT cache-first, unlike _item_id_rl. This is
+# flush's stale-move-regression guard (#92): it must see the TRUE remote
+# status, because the whole reason a move is sitting in the queue is that it
+# never actually applied -- the cache can only reflect mutations THIS script
+# applied, never an out-of-band remote change (or a still-pending queued
+# one), so trusting it here would silently defeat the guard. It still
+# refreshes the whole cache as a side effect (the fetch happens either way),
+# so _item_id_rl calls made right after this one are free.
 _current_status() { # issue# -> status string ("" if not found / lookup failed)
-    gh_project_items_json "$PN" "$OWNER" 2>/dev/null | python3 -c '
+    local num="$1" out
+    out="$(gh_project_items_json "$PN" "$OWNER" 2>/dev/null)" || { printf ''; return 0; }
+    # Side-effect cache refresh (best-effort write, see board.sh); THIS call's
+    # answer is parsed straight from $out, same reasoning as _item_id_rl.
+    printf '%s' "$out" | _cache_refresh_from_items
+    python3 -c '
 import json, sys
 try:
     n = int(sys.argv[1])
@@ -184,7 +227,51 @@ for it in data.get("items", []):
     if (it.get("content") or {}).get("number") == n:
         print(it.get("status") or "")
         break
-' "$1"
+' "$num" <<<"$out"
+}
+
+# _mutate_field <issue#> <field-id> <edit-flag> <value> <new-status-or-empty>
+# -> shared by _do_move/_do_prio/_do_est: resolves the item id (cache-first),
+# applies the edit, and on success updates the cache (issue #78 acceptance
+# criterion 5 -- "every mutation updates the cached entry"). <new-status> is
+# the status to cache iff this edit changes Status (move); empty leaves the
+# cached status untouched (prio/est don't change it).
+# If the edit itself fails for a reason that ISN'T a rate limit, the cached
+# id may simply be stale (the item was removed from the board, the cache
+# predates a board change, etc.) -- drop it and re-resolve ONCE (a fresh
+# full-board lookup, bypassing the now-empty cache slot) before giving up,
+# per criterion 5 ("a mutation rejected because remote state changed drops
+# the entry and re-resolves once").
+# Return: 0 = applied, 1 = real failure (message already printed), 2 =
+# rate-limited, 3 = no such item (caller prints the specific message).
+_mutate_field() {
+    local num="$1" field="$2" flag="$3" value="$4" new_status="$5" id out rc id2
+    id="$(_item_id_rl "$num")"; rc=$?
+    [[ $rc -eq 2 ]] && return 2
+    [[ -z "$id" ]] && return 3
+    out="$(gh project item-edit --id "$id" --project-id "$PID" --field-id "$field" "$flag" "$value" 2>&1)"; rc=$?
+    if [[ $rc -eq 0 ]]; then
+        _cache_put "$num" "$id" "$new_status"
+        return 0
+    fi
+    if _rate_limited "$out"; then
+        return 2
+    fi
+    _cache_drop "$num"
+    id2="$(_item_id_rl "$num")"; rc=$?
+    if [[ $rc -eq 2 ]]; then return 2; fi
+    if [[ -z "$id2" || "$id2" == "$id" ]]; then
+        echo "$out" >&2
+        return 1
+    fi
+    out="$(gh project item-edit --id "$id2" --project-id "$PID" --field-id "$field" "$flag" "$value" 2>&1)"; rc=$?
+    if [[ $rc -eq 0 ]]; then
+        _cache_put "$num" "$id2" "$new_status"
+        return 0
+    fi
+    if _rate_limited "$out"; then return 2; fi
+    echo "$out" >&2
+    return 1
 }
 
 # _do_move/_do_prio/_do_est: same effect as the move/prio/est case branches,
@@ -192,62 +279,56 @@ for it in data.get("items", []):
 # implementation. Return 0 = applied, 1 = real (non-rate-limit) failure,
 # 2 = rate-limited (caller decides: queue live, or re-queue-and-stop in flush).
 _do_move() {
-    local num="$1" status="$2" id opt out rc
-    id="$(_item_id_rl "$num")"; rc=$?
-    [[ $rc -eq 2 ]] && return 2
+    local num="$1" status="$2" opt rc
     opt="$(opt_id status "$status")"
-    if [[ -z "$id" || -z "$opt" ]]; then
+    if [[ -z "$opt" ]]; then
         echo "ERROR: bad issue# or status '$status' (must match statusFlow)" >&2
         return 1
     fi
-    out="$(gh project item-edit --id "$id" --project-id "$PID" --field-id "$STATUS_FIELD" --single-select-option-id "$opt" 2>&1)"; rc=$?
-    if [[ $rc -eq 0 ]]; then
-        echo "moved #$num -> $status"
-        python3 "$HERE/telemetry.py" "$ROOT" record \
-            "{\"kind\":\"transition\",\"task\":\"$num\",\"from\":\"\",\"to\":\"$status\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
-            >/dev/null 2>&1 || true
-        return 0
-    fi
-    _rate_limited "$out" && return 2
-    echo "$out" >&2
-    return 1
+    _mutate_field "$num" "$STATUS_FIELD" --single-select-option-id "$opt" "$status"; rc=$?
+    case "$rc" in
+        0)
+            echo "moved #$num -> $status"
+            python3 "$HERE/telemetry.py" "$ROOT" record \
+                "{\"kind\":\"transition\",\"task\":\"$num\",\"from\":\"\",\"to\":\"$status\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" \
+                >/dev/null 2>&1 || true
+            return 0
+            ;;
+        2) return 2 ;;
+        3) echo "ERROR: bad issue# or status '$status' (must match statusFlow)" >&2; return 1 ;;
+        *) return 1 ;;
+    esac
 }
 
 _do_prio() {
-    local num="$1" prio="$2" id opt out rc
-    id="$(_item_id_rl "$num")"; rc=$?
-    [[ $rc -eq 2 ]] && return 2
+    local num="$1" prio="$2" opt rc
     opt="$(opt_id priority "$prio")"
-    if [[ -z "$id" || -z "$opt" ]]; then
+    if [[ -z "$opt" ]]; then
         echo "ERROR: bad issue# or priority '$prio'" >&2
         return 1
     fi
-    out="$(gh project item-edit --id "$id" --project-id "$PID" --field-id "$PRIO_FIELD" --single-select-option-id "$opt" 2>&1)"; rc=$?
-    if [[ $rc -eq 0 ]]; then
-        echo "prio #$num -> $prio"
-        return 0
-    fi
-    _rate_limited "$out" && return 2
-    echo "$out" >&2
-    return 1
+    _mutate_field "$num" "$PRIO_FIELD" --single-select-option-id "$opt" ""; rc=$?
+    case "$rc" in
+        0) echo "prio #$num -> $prio"; return 0 ;;
+        2) return 2 ;;
+        3) echo "ERROR: bad issue# or priority '$prio'" >&2; return 1 ;;
+        *) return 1 ;;
+    esac
 }
 
 _do_est() {
-    local num="$1" points="$2" id out rc
+    local num="$1" points="$2" rc
     if [[ -z "$EST_FIELD" ]]; then
         echo "ERROR: no estimate field configured" >&2
         return 1
     fi
-    id="$(_item_id_rl "$num")"; rc=$?
-    [[ $rc -eq 2 ]] && return 2
-    out="$(gh project item-edit --id "$id" --project-id "$PID" --field-id "$EST_FIELD" --number "$points" 2>&1)"; rc=$?
-    if [[ $rc -eq 0 ]]; then
-        echo "est #$num -> $points"
-        return 0
-    fi
-    _rate_limited "$out" && return 2
-    echo "$out" >&2
-    return 1
+    _mutate_field "$num" "$EST_FIELD" --number "$points" ""; rc=$?
+    case "$rc" in
+        0) echo "est #$num -> $points"; return 0 ;;
+        2) return 2 ;;
+        3) echo "ERROR: bad issue# '$num'" >&2; return 1 ;;
+        *) return 1 ;;
+    esac
 }
 
 # _do_add_finish: the remainder of `add`'s work after the issue itself
@@ -256,7 +337,7 @@ _do_est() {
 # replaying a queued add-finish op. Idempotent: skips item-add / move when
 # the item is already visible / already at the target status.
 _do_add_finish() {
-    local num="$1" url="$2" first_status="$3" prio="$4" id out rc cur i
+    local num="$1" url="$2" first_status="$3" prio="$4" id out rc cur
     id="$(_item_id_rl "$num")"; rc=$?
     [[ $rc -eq 2 ]] && return 2
     if [[ -z "$id" ]]; then
@@ -266,12 +347,8 @@ _do_add_finish() {
             echo "ERROR: add-finish #$num: gh project item-add failed: $out" >&2
             return 1
         fi
-        for ((i = 0; i < 3; i++)); do
-            id="$(item_id "$num")"
-            [[ -n "$id" ]] && break
-            sleep 0.3
-        done
-        [[ -z "$id" ]] && return 2  # still not visible -- re-queue, try again later
+        id="$(_poll_visible "$num")"
+        [[ -z "$id" ]] && return 2  # still not visible (or rate-limited) within the cap -- re-queue, try again later
     fi
     cur="$(_current_status "$num")"
     if [[ "$cur" != "$first_status" ]]; then
@@ -287,13 +364,14 @@ _do_add_finish() {
 # _do_adopt: add an EXISTING issue to the board (issue #84). Idempotent —
 # a no-op (with a message) if the issue is already a board item. #92: a
 # freshly-added item has no Status set by item-add itself (it landed with
-# '-' on the board) -- poll briefly for visibility (same 3x/0.3s cap as
-# _do_add_finish) and set FIRST_STATUS, matching `add`'s behavior. If the
-# item never becomes visible in that window the adopt still succeeds (the
-# issue IS on the board); if setting the status itself rate-limits, queue a
-# follow-up move instead of failing the whole adopt.
+# '-' on the board) -- poll briefly for visibility (same cache-aware,
+# 2-attempt/backoff cap as _do_add_finish -- issue #78 -- via _poll_visible)
+# and set FIRST_STATUS, matching `add`'s behavior. If the item never
+# becomes visible in that window the adopt still succeeds (the issue IS on
+# the board); if setting the status itself rate-limits, queue a follow-up
+# move instead of failing the whole adopt.
 _do_adopt() {
-    local num="$1" id url out rc cur i
+    local num="$1" id url out rc cur
     id="$(_item_id_rl "$num")"; rc=$?
     [[ $rc -eq 2 ]] && return 2
     if [[ -n "$id" ]]; then
@@ -307,13 +385,8 @@ _do_adopt() {
         echo "ERROR: adopt #$num: gh project item-add failed: $out" >&2
         return 1
     fi
-    id=""
-    for ((i = 0; i < 3; i++)); do
-        id="$(_item_id_rl "$num")"; rc=$?
-        [[ $rc -eq 2 ]] && { echo "adopted #$num"; return 0; }
-        [[ -n "$id" ]] && break
-        sleep 0.3
-    done
+    id="$(_poll_visible "$num")"; rc=$?
+    if [[ $rc -eq 2 ]]; then echo "adopted #$num"; return 0; fi
     if [[ -n "$id" ]]; then
         cur="$(_current_status "$num")"
         # shellcheck disable=SC2153  # FIRST_STATUS is the global set by board.sh's
