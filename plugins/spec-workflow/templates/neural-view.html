@@ -551,7 +551,7 @@ function step(){
 }
 
 function updateVisuals(){
-  if(!webglOK) return;
+  if(!webglOK || !sceneGroup) return;
   for(const nd of nodes){
     if(!nd._core) continue;
     nd._core.position.set(nd.x, nd.y, nd.z);
@@ -586,6 +586,7 @@ function updateVisuals(){
 }
 
 function frame(){
+  requestAnimationFrame(frame);   // re-arm first: any exception below must never permanently kill the render loop
   tick++;
   step();
   if(webglOK){
@@ -593,7 +594,6 @@ function frame(){
     updateCameraPosition();   // theta/phi/target/radius may have changed since last frame (orbit/pan/zoom/fit)
     renderer.render(scene, camera);
   }
-  requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
