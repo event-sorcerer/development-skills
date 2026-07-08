@@ -11,9 +11,20 @@ Repos are laid out as "constellations": each repo is a labeled region on the
 canvas containing its own role-clusters (dev/reviewer/orchestrator/...).
 
   neural-view.py start [--port N] [--dir ROOT] [--scan BASE]   # start (idempotent)
-  neural-view.py status                                         # RUNNING <url> notes=N brains=N repos=N | STOPPED
-  neural-view.py stop
+  neural-view.py status                # RUNNING <url> notes=N brains=N repos=N | STOPPED | STALE: ...
+  neural-view.py stop [--force]        # --force also kills a zombie holding the port (see below)
   neural-view.py serve [--port N] [--dir ROOT] [--scan BASE]   # run in the foreground (internal)
+
+Stale-server detection: if the pidfile is missing/stale but the configured
+port is still occupied, `status` reports STALE (never a bare STOPPED) and
+`start` refuses to claim RUNNING (never a bare "never bound to port") —
+both name the PID/command holding the port when discoverable (via `lsof`,
+used only as optional enrichment; the free-vs-held check itself is a plain
+stdlib bind attempt, no external tool required). `stop --force` kills the
+pidfile-tracked server if any, AND kills a detected zombie holding the
+configured port — but only when that process's own command line contains
+"neural-view.py"; otherwise it reports the PID/command and refuses, since
+this is the only remotely destructive path in an otherwise read-only tool.
 
 Repo discovery (both apply; results are deduped and sorted by repo name):
   - --dir / $NEURAL_VIEW_DIR: that root is ALWAYS included, marker or not.
@@ -63,7 +74,9 @@ import base64
 import json
 import os
 import re
+import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -719,6 +732,91 @@ def pid_alive():
         return None
 
 
+SCRIPT_NAME = "neural-view.py"  # matched against a candidate's cmdline before it is ever killed
+
+
+def configured_port():
+    """The port a fresh `status`/`stop` call should check: whatever the last
+    `serve` actually bound (PORTFILE), else the process's own default/env
+    port. (`start`/`serve` use the port they were just asked to bind instead —
+    see arg_port() — since PORTFILE may still hold a stale prior value.)"""
+    if PORTFILE.is_file():
+        try:
+            return int(PORTFILE.read_text().strip())
+        except Exception:  # noqa: BLE001
+            pass
+    return DEFAULT_PORT
+
+
+def _port_is_free(port):
+    """Stdlib-only free-vs-held check: attempt the same bind the real server
+    would do (with SO_REUSEADDR, matching http.server's own socket options),
+    and see whether it succeeds. No external tool required."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        s.bind(("127.0.0.1", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+def _pid_holding_port(port):
+    """Best-effort PID of whatever is LISTENing on `port`, via `lsof` when
+    present — optional enrichment only; the free-vs-held decision above never
+    depends on it. Returns None (still a valid "held, but PID unknown" state)
+    if lsof is absent or its output can't be parsed."""
+    lsof = shutil.which("lsof")
+    if not lsof:
+        return None
+    try:
+        proc = subprocess.run(
+            [lsof, "-t", "-n", "-P", f"-iTCP:{port}", "-sTCP:LISTEN"],
+            capture_output=True, text=True, timeout=3,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    for tok in proc.stdout.split():
+        if tok.strip().isdigit():
+            return int(tok)
+    return None
+
+
+def _pid_cmdline(pid):
+    """Full command line for `pid` via `ps` (portable, stdlib-subprocess —
+    not lsof, not psutil): needed to see the script-path argument, since a
+    truncated/short command name would never show "neural-view.py". None if
+    `ps` can't find/read it (already exited, wrong permissions, etc.)."""
+    try:
+        proc = subprocess.run(["ps", "-p", str(pid), "-o", "command="],
+                               capture_output=True, text=True, timeout=3)
+    except Exception:  # noqa: BLE001
+        return None
+    line = proc.stdout.strip()
+    return line or None
+
+
+def port_zombie(port):
+    """None if `port` is free; else (pid_or_None, cmdline_or_None) for
+    whatever holds it."""
+    if _port_is_free(port):
+        return None
+    pid = _pid_holding_port(port)
+    return pid, (_pid_cmdline(pid) if pid is not None else None)
+
+
+def zombie_diagnosis(port, zombie):
+    """Human-readable "port <p> held by ..." fragment — no leading verb/verdict
+    (callers prepend "STALE:"/"FAILED to start:" as fits their context)."""
+    pid, cmd = zombie
+    if pid is None:
+        return f"port {port} held by another process (PID unknown — install lsof for details)"
+    who = f"PID {pid}" + (f" ({cmd})" if cmd else "")
+    return f"port {port} held by {who}"
+
+
 def arg_val(args, flag, default):
     return args[args.index(flag) + 1] if flag in args and args.index(flag) + 1 < len(args) else default
 
@@ -838,7 +936,13 @@ def main():
         if came_up:
             print(f"RUNNING http://127.0.0.1:{port}")
         else:
-            print(f"FAILED to start (never bound to port {port}) — see {S / 'server.log'}", file=sys.stderr)
+            zombie = port_zombie(port)
+            if zombie is not None:
+                print(f"FAILED to start: {zombie_diagnosis(port, zombie)}, but no pidfile — "
+                      f"likely a zombie {SCRIPT_NAME}; run '{SCRIPT_NAME} stop --force' or kill it "
+                      f"yourself — see {S / 'server.log'} for details", file=sys.stderr)
+            else:
+                print(f"FAILED to start (never bound to port {port}) — see {S / 'server.log'}", file=sys.stderr)
             sys.exit(1)
 
     elif cmd == "status":
@@ -847,7 +951,13 @@ def main():
             notes, brains = counts(repos)
             print(f"RUNNING http://127.0.0.1:{PORTFILE.read_text().strip()} notes={notes} brains={brains} repos={len(repos)}")
         else:
-            print("STOPPED")
+            port = configured_port()
+            zombie = port_zombie(port)
+            if zombie is not None:
+                print(f"STALE: {zombie_diagnosis(port, zombie)} but no pidfile — likely a zombie "
+                      f"{SCRIPT_NAME}; run '{SCRIPT_NAME} stop --force' or kill it yourself")
+            else:
+                print("STOPPED")
             sys.exit(1)
 
     elif cmd == "stop":
@@ -857,6 +967,23 @@ def main():
             print("stopped")
         else:
             print("not running")
+        if "--force" in args:
+            port = configured_port()
+            zombie = None
+            for _ in range(20):    # brief grace period for the kill above to release the port
+                zombie = port_zombie(port)
+                if zombie is None:
+                    break
+                time.sleep(0.1)
+            if zombie is not None:
+                zpid, zcmd = zombie
+                if zpid is not None and zcmd and SCRIPT_NAME in zcmd:
+                    os.kill(zpid, signal.SIGTERM)
+                    print(f"killed zombie PID {zpid} holding port {port}")
+                else:
+                    print(f"refusing to kill {zombie_diagnosis(port, zombie)} — its command line does "
+                          f"not look like {SCRIPT_NAME}; kill it yourself if that's intended")
+                    sys.exit(1)
 
     else:
         print(__doc__)

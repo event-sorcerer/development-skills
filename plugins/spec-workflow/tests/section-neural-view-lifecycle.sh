@@ -233,3 +233,68 @@ wait "$_blocker" 2>/dev/null || true
 unset NEURAL_VIEW_STATE NEURAL_VIEW_PORT
 rm -rf "$_bindstate"
 
+echo "== neural-view (stale/zombie port lifecycle, sw-067) =="
+# (a) an UNRELATED process (not neural-view.py) holds the port; no pidfile
+# was ever written into this state dir. status must say STALE (never a bare
+# STOPPED) and name the real PID; start must refuse to claim success and
+# explain the same diagnosis; stop --force must REFUSE to kill it because
+# its cmdline doesn't look like neural-view.py.
+_zstate="$(mktemp -d)"
+_zport="$(_rand_port)"
+NVBIND_PORT="$_zport" python3 - <<'PY' &
+import os, socket, time
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", int(os.environ["NVBIND_PORT"])))
+s.listen(1)
+time.sleep(8)
+PY
+_zblocker=$!
+sleep 0.3
+export NEURAL_VIEW_STATE="$_zstate" NEURAL_VIEW_PORT="$_zport"
+out="$(python3 "$NV" status)"; rc=$?
+check_absent "unrelated port-holder: status is never a bare STOPPED" "STOPPED" "$out"
+check "unrelated port-holder: status reports STALE" "STALE" "$out"
+check "unrelated port-holder: status names the real PID" "$_zblocker" "$out"
+check_rc "unrelated port-holder: status exits non-zero" 1 "$rc"
+out="$(python3 "$NV" start 2>&1)"; rc=$?
+check_absent "unrelated port-holder: start does not claim RUNNING" "RUNNING" "$out"
+check "unrelated port-holder: start's diagnosis names the real PID" "$_zblocker" "$out"
+check "unrelated port-holder: start still points at server.log" "server.log" "$out"
+check_rc "unrelated port-holder: start exits non-zero" 1 "$rc"
+out="$(python3 "$NV" stop --force 2>&1)"
+check "unrelated port-holder: stop --force refuses to kill it" "refus" "$out"
+if kill -0 "$_zblocker" 2>/dev/null; then echo "ok   unrelated port-holder: stop --force left the foreign process alive"
+else echo "FAIL unrelated port-holder: stop --force left the foreign process alive — it got killed"; fails=$((fails + 1)); fi
+kill "$_zblocker" 2>/dev/null || true
+wait "$_zblocker" 2>/dev/null || true
+unset NEURAL_VIEW_STATE NEURAL_VIEW_PORT
+rm -rf "$_zstate"
+
+# (b) a REAL neural-view is running, then its pidfile is deleted (the actual
+# incident: a lost pidfile makes a live server look STOPPED). status must
+# name the same PID as STALE; stop --force must kill it and free the port.
+_zroot2="$(mktemp -d)"
+_zstate2="$(mktemp -d)"
+export NEURAL_VIEW_STATE="$_zstate2"
+lifecycle_start "lost-pidfile: neural-view starts" NEURAL_VIEW_PORT 'python3 "$NV" start --dir "$_zroot2"'
+_zrealpid="$(cat "$_zstate2/pid")"
+rm -f "$_zstate2/pid"                      # simulate the lost/stale pidfile
+out="$(python3 "$NV" status)"; rc="$?"
+check_absent "lost-pidfile: status is never a bare STOPPED" "STOPPED" "$out"
+check "lost-pidfile: status reports STALE" "STALE" "$out"
+check "lost-pidfile: status names the real server's PID" "$_zrealpid" "$out"
+check_rc "lost-pidfile: status exits non-zero" 1 "$rc"
+python3 "$NV" stop --force >/dev/null 2>&1
+_freed=0
+for _ in $(seq 1 30); do
+    if ! (exec 3<>"/dev/tcp/127.0.0.1/$NEURAL_VIEW_PORT") 2>/dev/null; then _freed=1; break; fi
+    sleep 0.1
+done
+if [[ "$_freed" -eq 1 ]]; then echo "ok   lost-pidfile: stop --force kills the zombie and frees the port"
+else echo "FAIL lost-pidfile: stop --force kills the zombie and frees the port — port still held"; fails=$((fails + 1)); fi
+if kill -0 "$_zrealpid" 2>/dev/null; then echo "FAIL lost-pidfile: zombie process still alive after stop --force"; fails=$((fails + 1))
+else echo "ok   lost-pidfile: zombie process no longer alive after stop --force"; fi
+unset NEURAL_VIEW_STATE NEURAL_VIEW_PORT
+rm -rf "$_zroot2" "$_zstate2"
+

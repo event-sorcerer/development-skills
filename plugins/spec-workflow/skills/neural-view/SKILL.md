@@ -14,9 +14,15 @@ Run the action the user asked for (`status` if unspecified):
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/neural-view.py" start    # background server (idempotent)
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/neural-view.py" status   # RUNNING <url> notes=N brains=N repos=N | STOPPED
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/neural-view.py" stop
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/neural-view.py" status   # RUNNING <url> notes=N brains=N repos=N | STOPPED | STALE: ...
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/neural-view.py" stop [--force]
 ```
+
+If `status`/`start` report **STALE** instead of STOPPED, a lost/stale pidfile is
+hiding a process that still holds the port — the message names the PID/command
+when discoverable and points at `stop --force`, which kills the pidfile-tracked
+server (if any) and, only when its command line contains `neural-view.py`, the
+zombie holding the port too; an unrelated process is reported, never killed.
 
 Report the script's output verbatim. On **start**/**status**, give the user the URL and
 add: *open it and leave it open — recalls light up live as the identities read their
