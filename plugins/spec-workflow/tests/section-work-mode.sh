@@ -88,35 +88,10 @@ rm -rf "$VUS"
 out="$(python3 "$PLUGIN/scripts/validate-config.py" "$PLUGIN/../../.claude/project.yaml" 2>&1 || true)"
 check "this repo's own project.yaml (work: local/task-close) validates" "VALID: " "$out"
 
-echo "== schema: work object is hover-complete (description + enumDescriptions) =="
-schema_check="$(python3 -c '
-import json, sys
-with open(sys.argv[1]) as f:
-    s = json.load(f)
-work = s["properties"].get("work")
-problems = []
-if not work or "description" not in work:
-    problems.append("work: missing description")
-t = (work or {}).get("properties", {}).get("type", {})
-if "description" not in t:
-    problems.append("work.type: missing description")
-if t.get("enum") and len(t.get("enumDescriptions", [])) != len(t["enum"]):
-    problems.append("work.type: enumDescriptions length must match enum")
-sync = (work or {}).get("properties", {}).get("sync", {})
-if "description" not in sync:
-    problems.append("work.sync: missing description")
-mode = sync.get("properties", {}).get("mode", {})
-if "description" not in mode:
-    problems.append("work.sync.mode: missing description")
-if mode.get("enum") and len(mode.get("enumDescriptions", [])) != len(mode["enum"]):
-    problems.append("work.sync.mode: enumDescriptions length must match enum")
-if mode.get("default") != "realtime":
-    problems.append("work.sync.mode: default must be realtime")
-if t.get("default") != "pr":
-    problems.append("work.type: default must be pr")
-print("OK" if not problems else "PROBLEMS: " + "; ".join(problems))
-' "$PLUGIN/schemas/project-config.schema.json")"
-check "schema work.* keys carry description + enumDescriptions + defaults" "OK" "$schema_check"
+# Schema hover-completeness (description/enumDescriptions/defaults) for the
+# WHOLE schema -- including work.* -- is asserted once, generally, by
+# section-schema-lint.sh's schema-lint.py walk. Keeping a second, work.*-only
+# copy of that check here would just be a duplicate canonical checker (#80).
 
 echo "== work-mode.sh: type / sync-mode =="
 WM="$(mktemp -d)"; mkdir -p "$WM/.claude"

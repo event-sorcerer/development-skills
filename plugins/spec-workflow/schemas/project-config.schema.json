@@ -5,14 +5,18 @@
     "type": "object",
     "required": ["schemaVersion", "project", "boards", "specs", "commands"],
     "properties": {
-        "schemaVersion": { "const": 2 },
+        "schemaVersion": {
+            "const": 2,
+            "description": "Config format version. Always 2 for this file. A legacy schemaVersion 1 .claude/project.json (old delegation.devModel/reviewModel/prReviewModel keys) is still read and normalized on load, with a deprecation warning; init-config.sh converts it to this v2 project.yaml shape."
+        },
         "project": {
             "type": "object",
             "required": ["name", "mainBranch", "branchPattern"],
+            "description": "Identity of the repo this config governs: its name, main branch, and branch-naming convention.",
             "properties": {
-                "name": { "type": "string" },
-                "description": { "type": "string" },
-                "mainBranch": { "type": "string" },
+                "name": { "type": "string", "description": "Project name. Used to qualify feedback-feed refs across a multi-project archive (<project.name>#N) and shown in status/summary output." },
+                "description": { "type": "string", "description": "Free-text one-line summary of the project, shown in setup/status output. Optional." },
+                "mainBranch": { "type": "string", "description": "The branch tasks merge into (e.g. main, master). Used by gate.sh, board.sh, and the merge/sync protocols as the diff/merge base." },
                 "branchPattern": {
                     "type": "string",
                     "description": "Branch name template. Placeholders: <prefix> (spec taskPrefix, lowercased), <id> (task number, zero-padded as issued), <slug> (kebab-case title)."
@@ -22,19 +26,21 @@
         "boards": {
             "type": "array",
             "minItems": 1,
+            "description": "GitHub Projects this config drives (usually one; a monorepo may declare several). specs[].board and delegation route to a board by its `id`. The first entry is the default board.",
             "items": {
                 "type": "object",
                 "required": ["id", "provider", "owner", "repo", "projectNumber", "projectId", "fields", "statusFlow"],
                 "properties": {
                     "id": { "type": "string", "description": "Local identifier; specs reference boards by this id. First board is the default." },
-                    "provider": { "const": "github-project" },
+                    "provider": { "const": "github-project", "description": "Board backend. Only 'github-project' (a GitHub Projects v2 board, driven via `gh project`/`gh api` through board.sh) is supported today." },
                     "owner": { "type": "string", "description": "GitHub user/org owning the Project." },
                     "repo": { "type": "string", "description": "owner/name of the repo where issues live." },
-                    "projectNumber": { "type": "integer" },
+                    "projectNumber": { "type": "integer", "description": "The Project's number as shown in its GitHub URL (…/projects/<N>)." },
                     "projectId": { "type": "string", "description": "GraphQL node id (PVT_...). Discover with: board.sh fields" },
                     "fields": {
                         "type": "object",
                         "required": ["status", "priority"],
+                        "description": "GraphQL field/option ids for this board's single-select fields, so board.sh can mutate items without re-discovering ids on every call. Discover with `board.sh fields`.",
                         "properties": {
                             "status": { "$ref": "#/definitions/singleSelectField" },
                             "priority": {
@@ -44,7 +50,8 @@
                             "estimate": {
                                 "type": "object",
                                 "required": ["fieldId"],
-                                "properties": { "fieldId": { "type": "string" } }
+                                "description": "Optional numeric estimate field (e.g. story points/hours), used by telemetry.py's estimate-vs-actual report.",
+                                "properties": { "fieldId": { "type": "string", "description": "GraphQL node id of the estimate number field." } }
                             }
                         }
                     },
@@ -55,10 +62,11 @@
                     },
                     "labels": {
                         "type": "object",
+                        "description": "Repo labels applied by `board.sh add`/`bug`. `board.sh ensure-labels` idempotently creates any of these missing on the repo (also run by setup-project / seed-board.sh).",
                         "properties": {
-                            "bug": { "type": "string", "default": "type:bug" },
-                            "feature": { "type": "string", "default": "type:feature" },
-                            "inbound": { "type": "string", "default": "inbound" }
+                            "bug": { "type": "string", "default": "type:bug", "description": "Label applied by `board.sh bug` (alias of `add --type bug`). Default: type:bug." },
+                            "feature": { "type": "string", "default": "type:feature", "description": "Label applied by `board.sh add --type feature`. Default: type:feature." },
+                            "inbound": { "type": "string", "default": "inbound", "description": "Label applied by `board.sh add --type inbound` (ad-hoc captures via create-inbound). Default: inbound." }
                         }
                     }
                 }
@@ -67,12 +75,13 @@
         "specs": {
             "type": "array",
             "minItems": 1,
+            "description": "The spec document(s) this project's board tasks are drawn from. Usually one; a monorepo may run several specs against the same or different boards.",
             "items": {
                 "type": "object",
                 "required": ["id", "board", "specPath", "taskPrefix", "epics"],
                 "properties": {
-                    "id": { "type": "string" },
-                    "title": { "type": "string" },
+                    "id": { "type": "string", "description": "Local identifier for this spec." },
+                    "title": { "type": "string", "description": "Human-readable spec title, shown in status/summary output." },
                     "board": { "type": "string", "description": "boards[].id this spec's tasks live on." },
                     "specPath": { "type": "string", "description": "Repo-relative path to the spec document." },
                     "backlogPath": { "type": "string", "description": "Repo-relative path to the backlog doc with per-task acceptance criteria." },
@@ -87,8 +96,8 @@
                             "type": "object",
                             "required": ["id", "taskRanges"],
                             "properties": {
-                                "id": { "type": "string" },
-                                "title": { "type": "string" },
+                                "id": { "type": "string", "description": "Epic identifier, referenced by other epics' blockedBy[].epic." },
+                                "title": { "type": "string", "description": "Human-readable epic title." },
                                 "taskRanges": {
                                     "type": "array",
                                     "items": {
@@ -101,6 +110,7 @@
                                 },
                                 "blockedBy": {
                                     "type": "array",
+                                    "description": "Epic-level dependency guards: this epic's tasks are not picked by next.py until every named epic reaches its untilStatus.",
                                     "items": {
                                         "type": "object",
                                         "required": ["epic", "untilStatus"],
@@ -179,11 +189,12 @@
         "commands": {
             "type": "object",
             "required": ["gate"],
+            "description": "Project-specific shell commands the workflow's scripts shell out to (gate.sh, dev-up skill, etc).",
             "properties": {
                 "gate": { "type": "string", "description": "Single command that must be green before a task advances to review." },
                 "gateFast": { "type": "string", "description": "Optional fast inner-loop test command template." },
                 "devUp": { "type": "string", "description": "Command that brings up the full local dev stack." },
-                "test": { "type": "string" }
+                "test": { "type": "string", "description": "Optional standalone test command, when it differs from commands.gate (e.g. gate also lints/typechecks). Not read by any script today; documents intent for humans and future tooling." }
             }
         },
         "delegation": {
@@ -200,6 +211,7 @@
                         { "const": false },
                         {
                             "type": "object",
+                            "description": "Per-role identity overrides. Any key beyond dev/reviewer/orchestrator (additionalProperties) is a custom role name, resolved the same way (identity.sh <role>).",
                             "properties": {
                                 "dev": { "$ref": "#/definitions/roleIdentity" },
                                 "reviewer": { "$ref": "#/definitions/roleIdentity" },
@@ -213,9 +225,10 @@
         },
         "paths": {
             "type": "object",
+            "description": "Repo-relative locations the workflow's skills/scripts read or write, all optional with sane defaults.",
             "properties": {
-                "handoffDir": { "type": "string", "default": "docs/handoffs" },
-                "checkpointFile": { "type": "string", "default": ".claude/CHECKPOINT" },
+                "handoffDir": { "type": "string", "default": "docs/handoffs", "description": "Where the handoff skill writes <YYYY-MM-DD-HHMM>.md session handoffs. Default: docs/handoffs." },
+                "checkpointFile": { "type": "string", "default": ".claude/CHECKPOINT", "description": "Flag file the build loop checks at the start of every iteration; if present, the loop writes a handoff and stops instead of starting new work. Default: .claude/CHECKPOINT." },
                 "designDir": { "type": "string", "default": "docs/design", "description": "Per-epic design docs (<spec-id>-<epic-id>.md) that dev briefs ground on." },
                 "specDeltaDir": { "type": "string", "default": "docs/spec-deltas", "description": "Per-task spec-delta files, folded into the canonical spec when the task's PR merges; applied/ holds history." },
                 "devDoc": { "type": "string", "description": "Repo-relative doc with project-specific dev-stack details (ports, profiles, isolation)." }
@@ -223,8 +236,9 @@
         },
         "methodology": {
             "type": "object",
+            "description": "Process knobs governing how the build loop works: TDD strictness, concurrency, graduation, UI delegation, and merge/feedback policy.",
             "properties": {
-                "tdd": { "type": "boolean", "default": true },
+                "tdd": { "type": "boolean", "default": true, "description": "When true (default), every task is implemented red-first: a failing test commit precedes the implementation commit. Enforced by process/review, not a script gate." },
                 "isolationSuite": { "type": "string", "description": "Test path glob for the merge-gating isolation suite, if any (e.g. tests/isolation/**)." },
                 "maxInProgress": {
                     "type": "integer",
@@ -252,7 +266,12 @@
                     "type": "string",
                     "enum": ["squash", "merge", "rebase"],
                     "default": "squash",
-                    "description": "gh pr merge strategy used by auto-merge — a per-repo decision made at setup. squash (default): linear history; per-role attribution carried as Co-authored-by trailers in the squash body + the PR's own commits. merge: preserves individual role-attributed commits on main. rebase: replays them."
+                    "description": "gh pr merge strategy used by auto-merge — a per-repo decision made at setup. squash (default): linear history; per-role attribution carried as Co-authored-by trailers in the squash body + the PR's own commits. merge: preserves individual role-attributed commits on main. rebase: replays them.",
+                    "enumDescriptions": [
+                        "Linear history; per-role attribution carried as Co-authored-by trailers in the squash commit body plus the PR link (default).",
+                        "Keeps the individual role-attributed commits on main as-is.",
+                        "Replays the branch's commits onto main, preserving them without a merge commit."
+                    ]
                 },
                 "feedback": {
                     "description": "Structured per-iteration process feedback about the WORKFLOW (not the project being built), routed at retro time into backlog/brain-note/graduate/upstream/ignore. `true` is shorthand for the defaults shown below. Absent = disabled. Protocol: feedback skill; mechanics: scripts/feedback.py.",
@@ -262,8 +281,8 @@
                             "type": "object",
                             "additionalProperties": false,
                             "properties": {
-                                "enabled": { "type": "boolean", "default": true },
-                                "feed": { "type": "string", "default": ".claude/feedback/feed.yaml", "description": "Repo-relative path to the yaml feed file (sequence of --- separated loop-feedback records)." },
+                                "enabled": { "type": "boolean", "default": true, "description": "Whether feedback collection is on. Redundant with the `true` shorthand — set false here (inside the expanded form) to disable while keeping feed/roles/autoTriage overrides on file for later." },
+                                "feed": { "type": "string", "default": ".claude/feedbacks/feed.yaml", "description": "Repo-relative path to the yaml feed file (sequence of --- separated loop-feedback records). Default: .claude/feedbacks/feed.yaml — a tracked, orchestrator-mediated archive (committed alongside code, never read/written by dev/reviewer subagents). The legacy, gitignored .claude/feedback/feed.yaml (singular) path is detected and blocks with a migration message when this default is in effect; an explicit override here is trusted as-is." },
                                 "roles": { "type": "array", "items": { "type": "string" }, "default": ["orchestrator"], "description": "Which identities are expected to emit feedback." },
                                 "autoTriage": { "type": "boolean", "default": false, "description": "When true, triage routes items (e.g. backlog) without a human check-in — mirrors autoMerge's explicit-consent pattern." }
                             }
@@ -275,6 +294,7 @@
     },
     "definitions": {
         "roleIdentity": {
+            "description": "How ONE role (dev/reviewer/orchestrator/custom) commits: null (opt out — commits as the human), a single identity, or an array of identities routed by `covers` globs for monorepo per-package agents.",
             "oneOf": [
                 { "type": "null", "description": "Opt this role out — it commits as the human." },
                 { "$ref": "#/definitions/identity" },
@@ -288,6 +308,7 @@
         },
         "identity": {
             "type": "object",
+            "description": "One git-author identity for a role: name/email templates plus its allowed models and (optionally) which paths route to it.",
             "properties": {
                 "name": { "type": "string", "description": "Template or literal; {name} = git config user.name. Omit to keep the role's default." },
                 "email": { "type": "string", "description": "Template or literal; {local}/{domain} = git config user.email parts. Omit to keep the role's default." },
@@ -306,8 +327,9 @@
         "singleSelectField": {
             "type": "object",
             "required": ["fieldId", "options"],
+            "description": "A GitHub Projects v2 single-select field: its GraphQL field id plus its option name -> option id map. Used for boards[].fields.status/priority.",
             "properties": {
-                "fieldId": { "type": "string" },
+                "fieldId": { "type": "string", "description": "GraphQL node id of the single-select field (PVTSSF_...). Discover with: board.sh fields" },
                 "options": {
                     "type": "object",
                     "additionalProperties": { "type": "string" },
