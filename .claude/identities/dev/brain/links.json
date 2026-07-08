@@ -64,6 +64,16 @@
     "last": null,
     "weight": 0.5
   },
+  "pair-every-side-effect-with-undo->behavioral-guard-is-spec-worthy": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "pair-every-side-effect-with-undo->old-path-repo-wide-sweep": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "raf-rearm-first->red-static-vs-wiring-checks": {
     "fires": 0,
     "last": null,

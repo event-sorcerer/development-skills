@@ -29,7 +29,22 @@
     "last": null,
     "weight": 0.5
   },
+  "monkeypatch-to-reach-real-branch->outcome-language-marks-unverified-seams": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "ordering-words-are-contract->named-attack-class-briefs": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "outcome-language-marks-unverified-seams->drive-real-helper-adversarially": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "outcome-language-marks-unverified-seams->monkeypatch-to-reach-real-branch": {
     "fires": 0,
     "last": null,
     "weight": 0.5
