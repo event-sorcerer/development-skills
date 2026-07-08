@@ -62,6 +62,7 @@ SECTIONS=(
     section-sync-configs.sh
     section-guard-pr-create.sh
     section-board-audit.sh
+    section-board-labels.sh
     section-diff-symbols.sh
     section-gh-failures-corpus.sh
 )

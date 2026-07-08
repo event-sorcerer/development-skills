@@ -337,7 +337,15 @@ case "${1:-}" in
         exit "$rc"
         ;;
     ensure-labels)
-        _EXISTING_LABELS="$(gh label list -R "$REPO" --json name -q '.[].name' 2>/dev/null || true)"
+        # Read the existing labels ONCE; a failed read (rate limit, auth, 404)
+        # must fail the step, not be swallowed -- an empty $_EXISTING_LABELS
+        # would otherwise masquerade as "repo has no labels" and drive blind
+        # create attempts. Let gh's own stderr through (like _ensure_label's
+        # create path does) and add an ERROR naming the step. (#50)
+        if ! _EXISTING_LABELS="$(gh label list -R "$REPO" --json name -q '.[].name')"; then
+            echo "ERROR: could not list existing labels for '$REPO' (gh label list failed)" >&2
+            exit 1
+        fi
         rc=0
         _ensure_label "$BUG_LABEL" "D73A4A" "Bug found in previously released work" || rc=1
         _ensure_label "$FEATURE_LABEL" "0E8A16" "New feature or enhancement" || rc=1
