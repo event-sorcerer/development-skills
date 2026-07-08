@@ -1,12 +1,7 @@
 {
   "bash32-empty-array-set-u->budget-count-join-separators": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "budget-count-join-separators->stdout-newline-false-positive": {
-    "fires": 0,
-    "last": null,
+    "fires": 1,
+    "last": "2026-07-07",
     "weight": 0.5
   },
   "extraction-tests-must-verify-match->lane-cwd-distrust": {
@@ -34,7 +29,17 @@
     "last": null,
     "weight": 0.5
   },
+  "red-static-vs-wiring-checks->vendored-split-build-import-guard": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "surgical-yaml-edits->budget-count-join-separators": {
+    "fires": 1,
+    "last": "2026-07-07",
+    "weight": 0.5
+  },
+  "vendored-split-build-import-guard->red-static-vs-wiring-checks": {
     "fires": 0,
     "last": null,
     "weight": 0.5

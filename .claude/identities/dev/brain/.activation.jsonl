@@ -1,0 +1,9 @@
+{"event": "seed", "note": "bash32-empty-array-set-u", "activation": 1.1, "ts": "2026-07-07T22:57:22+00:00", "role": "dev"}
+{"event": "seed", "note": "budget-count-join-separators", "activation": 1.1, "ts": "2026-07-07T22:57:22+00:00", "role": "dev"}
+{"event": "seed", "note": "surgical-yaml-edits", "activation": 1.1, "ts": "2026-07-07T22:57:22+00:00", "role": "dev"}
+{"event": "hop", "note": "budget-count-join-separators", "activation": 0.275, "link": "bash32-empty-array-set-u->budget-count-join-separators", "ts": "2026-07-07T22:57:22+00:00", "role": "dev"}
+{"event": "hop", "note": "stdout-newline-false-positive", "activation": 0.275, "link": "budget-count-join-separators->stdout-newline-false-positive", "ts": "2026-07-07T22:57:22+00:00", "role": "dev"}
+{"event": "hop", "note": "budget-count-join-separators", "activation": 0.275, "link": "surgical-yaml-edits->budget-count-join-separators", "ts": "2026-07-07T22:57:22+00:00", "role": "dev"}
+{"event": "inject", "note": "bash32-empty-array-set-u", "activation": 1.1, "ts": "2026-07-07T22:57:22+00:00", "role": "dev"}
+{"event": "inject", "note": "budget-count-join-separators", "activation": 1.1, "ts": "2026-07-07T22:57:22+00:00", "role": "dev"}
+{"event": "inject", "note": "surgical-yaml-edits", "activation": 1.1, "ts": "2026-07-07T22:57:22+00:00", "role": "dev"}

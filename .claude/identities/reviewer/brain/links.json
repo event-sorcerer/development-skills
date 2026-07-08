@@ -4,17 +4,7 @@
     "last": null,
     "weight": 0.5
   },
-  "diff-invariant-artifact-on-refactor->reproduce-findings-two-pass": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
   "diff-invariant-artifact-on-refactor->reproduce-on-deployment-floor": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "named-attack-class-briefs->reproduce-findings-two-pass": {
     "fires": 0,
     "last": null,
     "weight": 0.5
@@ -29,12 +19,12 @@
     "last": null,
     "weight": 0.5
   },
-  "prove-flakiness-fix-on-baseline->reproduce-findings-two-pass": {
+  "prove-flakiness-fix-on-baseline->reproduce-on-deployment-floor": {
     "fires": 0,
     "last": null,
     "weight": 0.5
   },
-  "prove-flakiness-fix-on-baseline->reproduce-on-deployment-floor": {
+  "recompute-hashes-never-eyeball->verify-guard-regex-on-real-artifact": {
     "fires": 0,
     "last": null,
     "weight": 0.5
@@ -44,17 +34,12 @@
     "last": null,
     "weight": 0.5
   },
-  "reproduce-on-deployment-floor->reproduce-findings-two-pass": {
+  "verify-guard-regex-on-real-artifact->diff-invariant-artifact-on-refactor": {
     "fires": 0,
     "last": null,
     "weight": 0.5
   },
-  "reviewer-verify-own-plumbing->reproduce-findings-two-pass": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "template-cfg-in-examples->surgical-yaml-edits": {
+  "verify-guard-regex-on-real-artifact->recompute-hashes-never-eyeball": {
     "fires": 0,
     "last": null,
     "weight": 0.5

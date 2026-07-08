@@ -1,9 +1,4 @@
 {
-  "board-out-of-compound-commands->lane-cwd-distrust": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
   "decide-oqs-before-brief->frozen-contracts-parallel-prs": {
     "fires": 0,
     "last": null,
@@ -30,6 +25,11 @@
     "weight": 0.5
   },
   "preassign-shared-monotonic-in-lanes->frozen-contracts-parallel-prs": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "preauth-ok-classifier-can-still-deny->board-out-of-compound-commands": {
     "fires": 0,
     "last": null,
     "weight": 0.5
