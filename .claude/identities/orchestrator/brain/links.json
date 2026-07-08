@@ -29,6 +29,16 @@
     "last": null,
     "weight": 0.5
   },
+  "orchestrator-cd-prefix-own-commands->board-comment-bodies-via-file": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "orchestrator-cd-prefix-own-commands->pre-diagnose-before-brief": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "permission-nondeterminism->shared-checkout-hazard": {
     "fires": 0,
     "last": null,
