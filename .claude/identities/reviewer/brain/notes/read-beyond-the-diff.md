@@ -1,12 +1,12 @@
 ---
 tags: [review, scope]
 paths: ["**"]
-strength: 1
-source: "#67 review retro"
+strength: 2
+source: "#89 review retro — recurrence (semantic rightness)"
 graduated: false
 created: 2026-07-08
 ---
 
-Classifying a finding as "new in this diff" vs "pre-existing property the diff inherits" requires reading code paths OUTSIDE the diff (where the state is written, who else consumes it). The diff alone either lets the issue slide as in-scope or over-flags it as a regression — expand context before assigning blame.
+The diff shows WHAT changed, never whether it's RIGHT: classifying pre-existing vs new requires reading code outside the diff; judging a text transformation (e.g. ref qualification) requires checking the record's own context (whose ref was it?). Establishing a negative ("no foreign refs were mangled") requires a full-file scan, not a sample.
 
 Related: [[outcome-language-marks-unverified-seams]]

@@ -34,6 +34,11 @@
     "last": null,
     "weight": 0.5
   },
+  "extend-may-mean-prove-and-legible->circular-fixture-detector": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "extraction-tests-must-verify-match->lane-cwd-distrust": {
     "fires": 0,
     "last": null,
@@ -110,6 +115,16 @@
     "weight": 0.5
   },
   "red-static-vs-wiring-checks->vendored-split-build-import-guard": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "rehearse-migration-on-real-copy->single-cause-fixtures": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "rehearse-migration-on-real-copy->surgical-yaml-edits": {
     "fires": 0,
     "last": null,
     "weight": 0.5
