@@ -49,6 +49,16 @@
     "last": null,
     "weight": 0.5
   },
+  "hotfix-repro-incident-sequence->stderr-suppression-hides-evidence": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "hotfix-repro-incident-sequence->unassumed-full-pipeline-repro": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "lane-cwd-distrust->bash32-empty-array-set-u": {
     "fires": 0,
     "last": null,
@@ -110,6 +120,16 @@
     "weight": 0.5
   },
   "single-cause-fixtures->hermetic-tmpdir-per-guard-case": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "stderr-suppression-hides-evidence->circular-fixture-detector": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "stderr-suppression-hides-evidence->trace-state-mutation-not-named-trigger": {
     "fires": 0,
     "last": null,
     "weight": 0.5

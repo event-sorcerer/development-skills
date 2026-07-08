@@ -94,6 +94,16 @@
     "last": null,
     "weight": 0.5
   },
+  "red-passing-checks-may-pin-later->fixture-provenance-check": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "red-passing-checks-may-pin-later->red-commit-worktree-verify": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "reproduce-on-deployment-floor->named-attack-class-briefs": {
     "fires": 0,
     "last": null,
