@@ -477,6 +477,37 @@ def _repo_config_path(root):
     return None
 
 
+_ANSI_RE = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+_RATE_LIMIT_RE = re.compile(r'API rate limit|rate limit already exceeded', re.IGNORECASE)
+_RESET_TIME_RE = re.compile(
+    r'[0-9]{4}-[0-9]{2}-[0-9]{2}T([0-9]{2}:[0-9]{2})(?::[0-9]{2})?Z?'
+    r'|reset[a-z]*\D{0,10}([0-9]{1,2}:[0-9]{2})',
+    re.IGNORECASE,
+)
+
+
+def _classify_board_failure(raw):
+    """Turn board.sh's raw stderr/stdout into a human-readable, ANSI-free
+    error. board.sh's `list` pipes gh's output straight into a `json.load`
+    with no exit-code gate, so ANY gh failure additionally raises a Python
+    traceback -- one that this Python colorizes by default, which is exactly
+    what leaked ANSI-garbled tracebacks into the boards HUD. A rate-limit
+    failure (detected anywhere in the text, since the real signal is often
+    buried before that trailing traceback) gets a friendly, specific message
+    with the reset time when the text carries one; anything else falls back
+    to the last non-blank, ANSI-stripped line."""
+    clean = _ANSI_RE.sub('', raw)
+    if _RATE_LIMIT_RE.search(clean):
+        m = _RESET_TIME_RE.search(clean)
+        when = (m.group(1) or m.group(2)) if m else "soon"
+        return f"board unavailable: GitHub API rate limit (resets {when})"
+    for line in reversed(clean.strip().splitlines()):
+        line = line.strip()
+        if line:
+            return f"board unavailable: {line}"
+    return "board unavailable: board.sh list failed"
+
+
 def _run_board_list(root):
     """Invoke THIS plugin's board.sh (never `gh project` directly) with
     cwd=root, so it resolves and reads THAT repo's own .claude/project.yaml —
@@ -489,8 +520,8 @@ def _run_board_list(root):
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"board.sh invocation failed: {e}"}
     if proc.returncode != 0:
-        lines = (proc.stderr or proc.stdout or "board.sh list failed").strip().splitlines()
-        return {"ok": False, "error": (lines[-1] if lines else "board.sh list failed")[:300]}
+        raw = proc.stderr or proc.stdout or "board.sh list failed"
+        return {"ok": False, "error": _classify_board_failure(raw)[:300]}
     status_counts, in_progress, in_review = {}, [], []
     for line in proc.stdout.splitlines():
         parts = line.split("\t")

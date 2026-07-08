@@ -27,6 +27,13 @@ case "$1 $2" in
             echo "fake gh: item-list boom" >&2
             exit 1
         fi
+        if [[ "${FAKE_GH_RATELIMIT_FAIL:-0}" == "1" ]]; then
+            printf 'gh: API rate limit exceeded for installation ID 1234.\n' >&2
+            if [[ "${FAKE_GH_RATELIMIT_NORESET:-0}" != "1" ]]; then
+                printf 'rate limit already exceeded until %s\n' "${FAKE_GH_RATELIMIT_RESET:-2026-07-08T04:11:00Z}" >&2
+            fi
+            exit 1
+        fi
         if [[ "${FAKE_GH_HANG:-0}" == "1" ]]; then
             sleep "${FAKE_GH_HANG_SECS:-3}"
         fi
@@ -88,6 +95,45 @@ check "projects: gh failure reported as ok:false" '"ok": false' "$body"
 check "projects: gh failure carries an error message" '"error"' "$body"
 python3 "$NV" stop >/dev/null
 
+# scenario 3b: real evidence -- board.sh's `list` pipes gh's stdout straight into a
+# `json.load(sys.stdin)` with no exit-code gate, so ANY gh failure (empty stdout)
+# additionally raises a Python traceback. This Python colorizes that traceback by
+# default (forced here via FORCE_COLOR so the assertion doesn't depend on the
+# ambient shell's color detection) -- the ANSI-garbled last line of that traceback
+# is exactly what leaked into the live HUD. It must reach the client ANSI-stripped
+# and phrased as "board unavailable: <last meaningful line>" (requirement c).
+LOG3B="$(mktemp)"; CC3B="$(mktemp)"
+lifecycle_start "neural-view starts (ANSI-traceback failure scenario)" NEURAL_VIEW_PORT 'PATH="$NVP_GH:$PATH" FAKE_GH_LOG="$LOG3B" FAKE_GH_CALLCOUNT="$CC3B" FAKE_GH_FAIL=1 FORCE_COLOR=1 python3 "$NV" start --dir "$NVP_REPO"'
+body="$(curl -sf "http://127.0.0.1:$NEURAL_VIEW_PORT/projects")"
+check "projects: ANSI-traceback failure reported as ok:false" '"ok": false' "$body"
+check "projects: ANSI-traceback failure is stripped of color, keeping the last meaningful line" 'board unavailable: json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)' "$body"
+check_absent "projects: ANSI-traceback failure error contains no raw ESC byte" $'\x1b[' "$body"
+check_absent "projects: ANSI-traceback failure error contains no literal SGR code" '[1;35m' "$body"
+python3 "$NV" stop >/dev/null
+
+# scenario 3c/3d: a rate-limit-shaped failure gets a friendly, specific error instead
+# of the raw gh/traceback text. The same trailing JSONDecodeError traceback from
+# scenario 3b follows the rate-limit text here too (board.sh's own bug fires on ANY
+# gh failure) -- proving the classifier looks at the whole captured text for the
+# rate-limit signal, not just the (traceback-polluted) last line.
+LOG3C="$(mktemp)"; CC3C="$(mktemp)"
+lifecycle_start "neural-view starts (rate-limit scenario, with reset time)" NEURAL_VIEW_PORT 'PATH="$NVP_GH:$PATH" FAKE_GH_LOG="$LOG3C" FAKE_GH_CALLCOUNT="$CC3C" FAKE_GH_RATELIMIT_FAIL=1 FAKE_GH_RATELIMIT_RESET="2026-07-08T04:11:00Z" FORCE_COLOR=1 python3 "$NV" start --dir "$NVP_REPO"'
+body="$(curl -sf "http://127.0.0.1:$NEURAL_VIEW_PORT/projects")"
+check "projects: rate-limit failure reported as ok:false" '"ok": false' "$body"
+check "projects: rate-limit failure names GitHub API rate limit" 'board unavailable: GitHub API rate limit' "$body"
+check "projects: rate-limit failure includes the reset time" '04:11' "$body"
+check_absent "projects: rate-limit failure does not leak the trailing traceback" 'JSONDecodeError' "$body"
+python3 "$NV" stop >/dev/null
+
+# scenario 3d: a rate-limit failure with no reset time in the text still gets
+# the friendly message, with a graceful fallback instead of a missing/blank time.
+LOG3D="$(mktemp)"; CC3D="$(mktemp)"
+lifecycle_start "neural-view starts (rate-limit scenario, no reset time)" NEURAL_VIEW_PORT 'PATH="$NVP_GH:$PATH" FAKE_GH_LOG="$LOG3D" FAKE_GH_CALLCOUNT="$CC3D" FAKE_GH_RATELIMIT_FAIL=1 FAKE_GH_RATELIMIT_NORESET=1 FORCE_COLOR=1 python3 "$NV" start --dir "$NVP_REPO"'
+body="$(curl -sf "http://127.0.0.1:$NEURAL_VIEW_PORT/projects")"
+check "projects: rate-limit failure (no reset time) reported as ok:false" '"ok": false' "$body"
+check "projects: rate-limit failure (no reset time) falls back gracefully" 'board unavailable: GitHub API rate limit (resets soon)' "$body"
+python3 "$NV" stop >/dev/null
+
 # scenario 4: a discovered repo with no .claude/project.yaml is omitted entirely
 lifecycle_start "neural-view starts (no-board repo)" NEURAL_VIEW_PORT 'python3 "$NV" start --dir "$NVP_NOBOARD"'
 body="$(curl -sf "http://127.0.0.1:$NEURAL_VIEW_PORT/projects")"
@@ -124,5 +170,5 @@ wait "$_hangpid" 2>/dev/null || true
 rm -f /tmp/nv-hang-out.$$
 python3 "$NV" stop >/dev/null
 unset NEURAL_VIEW_STATE NEURAL_VIEW_PORT NEURAL_VIEW_SCAN
-rm -rf "$NVP_REPO" "$NVP_NOBOARD" "$NVP_GH" "$_nvpstate" "$_nvpscan_empty" "$LOG1" "$CC1" "$LOG2" "$CC2" "$LOG3" "$CC3" "$LOG5" "$CC5" "$LOG5B" "$CC5B"
+rm -rf "$NVP_REPO" "$NVP_NOBOARD" "$NVP_GH" "$_nvpstate" "$_nvpscan_empty" "$LOG1" "$CC1" "$LOG2" "$CC2" "$LOG3" "$CC3" "$LOG3B" "$CC3B" "$LOG3C" "$CC3C" "$LOG3D" "$CC3D" "$LOG5" "$CC5" "$LOG5B" "$CC5B"
 
