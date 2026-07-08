@@ -76,6 +76,7 @@ _sc_mkrepo() {
     _sc_base_yaml "$feedback" > "$dir/work/.claude/project.yaml"
     if [[ "$schemadup" == "yes" ]]; then
         # insert a literal top-level $schema: line right after the comment header
+        # shellcheck disable=SC2016  # single-quoted sed script: literal $schema, not shell expansion
         sed -i.bak '1a\
 $schema: https://raw.githubusercontent.com/event-sorcerer/development-skills/main/plugins/spec-workflow/schemas/project-config.schema.json
 ' "$dir/work/.claude/project.yaml"
@@ -90,7 +91,7 @@ _sc_head() { git -C "$1" rev-parse HEAD; }
 _sc_origin_project_yaml() { # dir -> project.yaml content as pushed to origin's main
     local tmp
     tmp="$(mktemp -d)"
-    git clone -q "$1/origin.git" "$tmp/clone" >/dev/null 2>&1
+    git clone -q --branch main "$1/origin.git" "$tmp/clone" >/dev/null 2>&1
     cat "$tmp/clone/.claude/project.yaml" 2>/dev/null
     rm -rf "$tmp"
 }
@@ -108,6 +109,7 @@ check "case a: post-validate ran" "validate post: VALID" "$out"
 check "case a: reports a commit sha" "commit:" "$out"
 check "case a: reports push ok" "push: ok" "$out"
 origin_yaml="$(_sc_origin_project_yaml "$SCA/r")"
+# shellcheck disable=SC2016  # single quotes are intentional: literal grep pattern, not shell expansion
 check_absent "case a: origin's main no longer has \$schema data key" '$schema:' "$origin_yaml"
 check "case a: origin's main now has feedback: true" "feedback: true" "$origin_yaml"
 after_head="$(_sc_head "$SCA/r/work")"
@@ -131,6 +133,7 @@ after_head="$(_sc_head "$SCB/r/work")"
 check_rc "case b: live worktree HEAD untouched" 0 "$([[ "$before_head" == "$after_head" ]] && echo 0 || echo 1)"
 check "case b: dirty scratch file still present" "unrelated scratch" "$(cat "$SCB/r/work/scratch.txt" 2>/dev/null)"
 origin_yaml="$(_sc_origin_project_yaml "$SCB/r")"
+# shellcheck disable=SC2016  # single quotes are intentional: literal grep pattern, not shell expansion
 check_absent "case b: origin main no longer has \$schema data key" '$schema:' "$origin_yaml"
 check "case b: origin main now has feedback: true" "feedback: true" "$origin_yaml"
 rm -rf "$SCB"
