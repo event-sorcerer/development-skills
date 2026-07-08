@@ -69,27 +69,22 @@ print(next((v for k, v in opts.items() if k.lower() == q), ""))
 PY
 }
 
-# Local item-id cache (issue #78): issue# -> {itemId, lastKnownStatus}, gitignored.
-# Mutating/lookup commands resolve from here first; on a miss the ONE gh call
-# that would have happened anyway (a full item-list) refreshes the WHOLE
-# cache as a side effect, so every subsequent lookup this session is free.
-# Never used for `next`/`list`/`audit` (those already need the whole board;
-# they refresh the cache themselves rather than reading it).
-CACHE_FILE="${BOARD_CACHE_FILE:-$ROOT/.claude/board-cache.json}"
-
-_cache_get() { # issue# -> "itemId<TAB>status" on stdout, rc 0, iff cached
+item_id() { # issue number -> project item id (searches every page; SPEC 7.4)
+    # capture-then-parse, never a straight pipe: a gh failure (rate limit,
+    # auth, gh's "unknown owner type" masking either) must surface as a clean
+    # ERROR, not a JSONDecodeError traceback from parsing empty stdin.
+    local out
+    out="$(gh_project_items_json "$PN" "$OWNER")" ||
+        { echo "ERROR: gh project item-list failed — if gh said 'unknown owner type', the GraphQL rate limit is usually exhausted (check: gh api rate_limit)" >&2; return 1; }
     python3 -c '
 import json, sys
-try:
-    with open(sys.argv[1]) as f:
-        data = json.load(f)
-except Exception:
-    sys.exit(1)
-entry = data.get(sys.argv[2])
-if not entry or not entry.get("itemId"):
-    sys.exit(1)
-print(entry.get("itemId") + "\t" + entry.get("status", ""))
-' "$CACHE_FILE" "$1"
+n = int(sys.argv[1])
+data = json.load(sys.stdin)
+for it in data.get("items", []):
+    if (it.get("content") or {}).get("number") == n:
+        print(it["id"])
+        break
+' "$1" <<<"$out"
 }
 
 # Cache writes are best-effort (same philosophy as telemetry.py's
@@ -368,28 +363,12 @@ case "${1:-}" in
         _board_add bug "${2:-}" "${3:-}" "${4:-}" || exit 1
         ;;
     list)
-        _flush_queue
-        # Gated on gh's own exit code (not piped ungated into python3): a rate-limited
-        # or otherwise-failed gh call must never reach the JSON parser and produce a
-        # raw JSONDecodeError traceback -- fail fast with an honest message instead.
-        # stdout/stderr are captured SEPARATELY (not 2>&1) so a non-fatal warning on
-        # the success path (e.g. paginate.sh's hard-cap notice) reaches real stderr
-        # instead of corrupting the JSON that's about to be piped into python3.
-        _errf="$(mktemp)"
-        _out="$(gh_project_items_json "$PN" "$OWNER" 2>"$_errf")"; _rc=$?
-        if [[ $_rc -ne 0 ]]; then
-            _errtext="$(cat "$_errf")"; rm -f "$_errf"
-            if _rate_limited "$_errtext"; then
-                echo "RATE-LIMITED until $(_rate_limit_reset_human) — work continues; mutations queue; retry reads after reset." >&2
-            else
-                echo "$_errtext" >&2
-            fi
-            exit 1
-        fi
-        [[ -s "$_errf" ]] && cat "$_errf" >&2
-        rm -f "$_errf"
-        printf '%s' "$_out" | _cache_refresh_from_items  # whole-board command (#78): refresh the cache as a side effect
-        printf '%s' "$_out" | python3 -c '
+        # capture-then-parse (see item_id): an empty/failed gh read must not
+        # reach json.load — that traceback is what leaked into the neural-view
+        # boards HUD whenever the GraphQL rate limit was exhausted.
+        out="$(gh_project_items_json "$PN" "$OWNER")" ||
+            { echo "ERROR: gh project item-list failed — if gh said 'unknown owner type', the GraphQL rate limit is usually exhausted (check: gh api rate_limit)" >&2; exit 1; }
+        python3 -c '
 import json, sys
 status_filter = sys.argv[1]
 data = json.load(sys.stdin)
@@ -402,7 +381,7 @@ for it in data.get("items", []):
     num = content.get("number", "")
     title = it.get("title") or content.get("title", "")
     print(f"{status}\t{priority}\t#{num}\t{title}")
-' "${2:-}"
+' "${2:-}" <<<"$out"
         ;;
     issues)
         # Read-only dump for the dedup pipeline (similar.py). This is the ONLY gh call
@@ -438,12 +417,14 @@ print(json.dumps({"issues": issues}))
         gh issue edit "$2" -R "$REPO" --body-file "$3" && echo "updated body of #$2"
         ;;
     fields)
-        gh project field-list "$PN" --owner "$OWNER" --format json |
-            python3 -c '
+        # capture-then-parse (see item_id).
+        out="$(gh project field-list "$PN" --owner "$OWNER" --format json)" ||
+            { echo "ERROR: gh project field-list failed" >&2; exit 1; }
+        python3 -c '
 import json, sys
 for f in json.load(sys.stdin)["fields"]:
     print(f'"'"'{f["id"]}  {f["name"]}  ({f["type"]})'"'"')
-    for o in f.get("options", []): print(f'"'"'    {o["id"]}  {o["name"]}'"'"')'
+    for o in f.get("options", []): print(f'"'"'    {o["id"]}  {o["name"]}'"'"')' <<<"$out"
         ;;
     config)
         exec python3 "$HERE/validate-config.py" "$CONFIG"
