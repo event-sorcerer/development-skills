@@ -5,7 +5,7 @@ A [Claude Code plugin marketplace](https://docs.claude.com/en/docs/claude-code/p
 ## Install
 
 ```bash
-claude plugin marketplace add event-sorcerer/development-skills
+claude plugin marketplace add Zugruul/development-skills
 claude plugin install spec-workflow@development-skills
 ```
 
@@ -15,7 +15,7 @@ Or per-repo (shared with everyone opening the repo) via `.claude/settings.json`:
 {
     "extraKnownMarketplaces": {
         "development-skills": {
-            "source": { "source": "github", "repo": "event-sorcerer/development-skills" }
+            "source": { "source": "github", "repo": "Zugruul/development-skills" }
         }
     },
     "enabledPlugins": { "spec-workflow@development-skills": true }

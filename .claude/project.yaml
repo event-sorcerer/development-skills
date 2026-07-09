@@ -1,4 +1,7 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/event-sorcerer/development-skills/main/plugins/spec-workflow/schemas/project-config.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Zugruul/development-skills/main/plugins/spec-workflow/schemas/project-config.schema.json
+# Synced 2026-07-08: repo transferred event-sorcerer/development-skills ->
+# Zugruul/development-skills; board migrated org-project #1 -> user-project #5
+# (Priority/Estimate fields + full Status flow re-created there to match).
 schemaVersion: 2
 project:
     name: development-skills
@@ -8,28 +11,28 @@ project:
 boards:
 -   id: main
     provider: github-project
-    owner: event-sorcerer
-    repo: event-sorcerer/development-skills
-    projectNumber: 1
-    projectId: PVT_kwDODPbkJc4Bcroj
+    owner: Zugruul
+    repo: Zugruul/development-skills
+    projectNumber: 5
+    projectId: PVT_kwHOAL1A3M4Bc3ai
     fields:
         status:
-            fieldId: PVTSSF_lADODPbkJc4BcrojzhXSnfk
+            fieldId: PVTSSF_lAHOAL1A3M4Bc3aizhXdGkQ
             options:
-                Backlog: 02f7a074
-                In progress: 025995fe
-                In review: 22fde8a1
-                QA: 5b50235c
-                Ready: 232646c9
-                Deployed: '24850724'
+                Backlog: f75ad846
+                In progress: 47fc9ee4
+                In review: 8c531254
+                QA: bb088b91
+                Ready: 1d114d70
+                Deployed: '98236657'
         priority:
-            fieldId: PVTSSF_lADODPbkJc4BcrojzhXSnjs
+            fieldId: PVTSSF_lAHOAL1A3M4Bc3aizhXdJCI
             options:
-                P0: c5791e7b
-                P1: b2083587
-                P2: fd67d765
+                P0: 5b64f2a0
+                P1: 0bbfb00e
+                P2: 0d537efa
         estimate:
-            fieldId: PVTF_lADODPbkJc4BcrojzhXSnkE
+            fieldId: PVTF_lAHOAL1A3M4Bc3aizhXdJCM
     statusFlow:
     - Backlog
     - In progress
