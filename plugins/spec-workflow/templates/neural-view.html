@@ -118,36 +118,46 @@ canvas.grabbing{cursor:grabbing}
   padding:.55rem .4rem;cursor:pointer;color:var(--muted);font-family:var(--mono);font-size:.8rem}
 #gauges-tab:hover{color:var(--cyan)}
 .repo-brains{margin:0}
-.repo-brains-h{font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;color:var(--cyan);
-  margin:.6rem 0 .1rem;border-top:1px solid rgba(90,190,255,.18);padding-top:.5rem;
-  background:none;border-left:0;border-right:0;border-bottom:0;display:block;width:100%;
-  text-align:left;cursor:pointer;font-family:var(--mono)}
+.repo-brains-hrow{display:flex;align-items:center;gap:.3rem;
+  margin:.6rem 0 .1rem;border-top:1px solid rgba(90,190,255,.18);padding-top:.5rem}
+.repo-brains:first-of-type .repo-brains-hrow{border-top:0;margin-top:0;padding-top:0}
+.repo-brains-h{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;color:var(--cyan);
+  background:none;border:0;text-align:left;cursor:pointer;font-family:var(--mono);padding:0}
 .repo-brains-h:hover{color:var(--fg)}
 .repo-brains-h::before{content:"▾";margin-right:.4rem;color:var(--cyan-dim)}
 .repo-brains-h[aria-expanded="false"]::before{content:"▸"}
-.repo-brains:first-of-type .repo-brains-h{border-top:0;margin-top:0;padding-top:0}
+.repo-talk-btn{flex:none;background:none;border:0;color:var(--muted);cursor:pointer;
+  font-size:.62rem;padding:.1rem .25rem;line-height:1;font-family:var(--mono)}
+.repo-talk-btn:hover{color:var(--cyan)}
 .repo-brains-rows.collapsed{display:none}
-.brainrow{cursor:pointer;position:relative;display:flex;align-items:center;gap:.4rem;
-  padding:.3rem 1.15rem .3rem 0;border-top:1px solid rgba(90,190,255,.12)}
+.brainrow{cursor:pointer;position:relative;display:flex;align-items:center;gap:.5rem;
+  padding:.3rem 2.35rem .3rem 0;border-top:1px solid rgba(90,190,255,.12)}
 .brainrow:hover,.brainrow:focus-visible{background:rgba(90,190,255,.08);outline:none}
 .repo-brains .brainrow:first-of-type{border-top:0}
-.brainrow .rname{flex:1;font-size:.6rem;letter-spacing:.08em;text-transform:uppercase}
-/* stat cells sized to always fit the panel on one line — the default .label
-   letter-spacing (.28em) wrapped/clipped STR/SYN on long role names. The
-   eyebtn is deliberately NOT a flex sibling here (it used to squeeze this
-   row past its budget on long values like "SYN 739") — it's absolutely
-   positioned in the row's reserved right padding instead, so it never
-   competes with str/syn for width. */
+/* rname is capped, not flex:1 — flex:1 let it claim all leftover space (even
+   though its own text is short), shoving str/syn flush against the far
+   edge with a big dead gap after the name. A fixed max-width + ellipsis
+   packs name/str/syn together and leaves the row's own right-padding strip
+   (not flex space) for the action icons. */
+.brainrow .rname{flex:0 1 auto;max-width:7.2rem;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;font-size:.6rem;letter-spacing:.08em;text-transform:uppercase}
+.brainrow .stats{display:flex;gap:.5rem;flex:none}
 .brainrow .label{font-size:.56rem;letter-spacing:.06em;white-space:nowrap}
 .brainrow-empty{opacity:.4}
 .brainrow-hidden{opacity:.35}
 .brainrow-hidden .rname{text-decoration:line-through;text-decoration-color:var(--cyan-dim)}
 .arc{width:28px;height:28px;flex:none}
-.eyebtn{position:absolute;right:0;top:50%;transform:translateY(-50%);background:none;border:0;
-  color:var(--muted);cursor:pointer;font-size:.66rem;padding:.1rem .25rem;line-height:1;
-  opacity:0;transition:opacity .12s ease}
-.brainrow:hover .eyebtn,.brainrow:focus-within .eyebtn,.brainrow-hidden .eyebtn{opacity:1}
-.eyebtn:hover{color:var(--cyan)}
+/* action icons live in the row's own right-padding strip (2.35rem), stacked
+   side by side — never flex siblings of name/str/syn, so they can't squeeze
+   those out regardless of how long a value gets. */
+.brainrow-actions{position:absolute;right:.1rem;top:50%;transform:translateY(-50%);
+  display:flex;gap:.05rem;opacity:0;transition:opacity .12s ease}
+.brainrow:hover .brainrow-actions,.brainrow:focus-within .brainrow-actions,
+.brainrow-hidden .brainrow-actions{opacity:1}
+.brainrow-actions button{background:none;border:0;color:var(--muted);cursor:pointer;
+  font-size:.64rem;padding:.1rem .2rem;line-height:1}
+.brainrow-actions button:hover{color:var(--cyan)}
 .brainrow-hidden .eyebtn{color:var(--amber)}
 /* loop-active badge (best-effort — see loopSessionsFor()) on repo labels/tooltips */
 .tt-loop{color:var(--amber)}
@@ -257,10 +267,7 @@ canvas.grabbing{cursor:grabbing}
 <div class="hud" id="gauges">
   <div id="gauges-head">
     <button class="secthead" id="sect-brains" aria-expanded="true">Brains</button>
-    <div style="display:flex;gap:.3rem">
-      <button class="iconbtn" id="talk-btn" title="Talk — open a new session via deep link" aria-label="Talk" aria-haspopup="true">✎ talk</button>
-      <button class="iconbtn" id="gauges-collapse" title="Hide panel" aria-label="Hide panel">⟨</button>
-    </div>
+    <button class="iconbtn" id="gauges-collapse" title="Hide panel" aria-label="Hide panel">⟨</button>
   </div>
   <div id="gauge-list"></div>
   <div id="boards-head" hidden>
@@ -279,14 +286,17 @@ canvas.grabbing{cursor:grabbing}
   <label class="tlabel">Repo
     <select id="talk-repo"></select>
   </label>
+  <label class="tlabel">Identity
+    <select id="talk-identity"></select>
+  </label>
   <label class="tlabel">Session name
     <div class="talk-name-row">
       <input id="talk-project" placeholder="project" spellcheck="false">
       <input id="talk-slug" placeholder="slug, e.g. build-loop" spellcheck="false">
     </div>
   </label>
-  <label class="tlabel">Prompt
-    <textarea id="talk-prompt" rows="5" placeholder="What should the new session do?"></textarea>
+  <label class="tlabel">Question / prompt
+    <textarea id="talk-prompt" rows="5" placeholder="What do you want to ask?"></textarea>
   </label>
   <div class="talk-preview" id="talk-preview"></div>
   <div class="talk-count" id="talk-count"></div>
@@ -295,8 +305,10 @@ canvas.grabbing{cursor:grabbing}
     <button class="iconbtn primary" id="talk-send" title="Open claude-cli://open with this prompt">Send ↗</button>
   </div>
   <div class="hint">Opens a <code>claude-cli://open</code> deep link — a new terminal session starts
-    in the chosen repo with the text above pre-filled, prefixed by a <code>/rename</code> so it gets
-    a short, greppable name. Nothing is sent to Claude until you press Enter in that session.</div>
+    in the chosen repo, named by <code>/rename</code>, and asks the question via
+    <code>/ask-identity</code> (one role) or <code>/ask-brain</code> (whole repo, when Identity is
+    "whole brain") — both are read-only consults of that brain, see the <code>ask-identity</code>/
+    <code>ask-brain</code> skills. Nothing is sent to Claude until you press Enter in that session.</div>
 </div>
 
 <div class="hud" id="rightbar">
@@ -1114,12 +1126,21 @@ function renderGauges(){
   for(const repo of repoList){
     const section=document.createElement("div"); section.className="repo-brains";
     const collapsed = !!uiState.repoCollapse[repo];
+    const hrow=document.createElement("div"); hrow.className="repo-brains-hrow";
     const head=document.createElement("button");
     head.className="repo-brains-h"; head.setAttribute("aria-expanded", collapsed?"false":"true");
     head.setAttribute("aria-label", `Toggle ${repo} brains`);
     head.textContent = dispName(repo);
     head.onclick = ()=>{ uiState.repoCollapse[repo] = !uiState.repoCollapse[repo]; saveUiState(); renderGauges(); };
-    section.appendChild(head);
+    hrow.appendChild(head);
+    const repoTalk=document.createElement("button");
+    repoTalk.className="repo-talk-btn"; repoTalk.type="button";
+    repoTalk.title = `Ask ${dispName(repo)}'s whole brain`;
+    repoTalk.setAttribute("aria-label", repoTalk.title);
+    repoTalk.textContent = "✎";
+    repoTalk.onclick = ev=>{ ev.stopPropagation(); openTalkPanel(repo, WHOLE_BRAIN, repoTalk); };
+    hrow.appendChild(repoTalk);
+    section.appendChild(hrow);
     const rows=document.createElement("div"); rows.className = "repo-brains-rows" + (collapsed?" collapsed":"");
     for(const role of orderedRoles(repo)){
       const k=clusterKey(repo,role); const s=perCombo.get(k);
@@ -1136,11 +1157,22 @@ function renderGauges(){
       const rawN = (window.__brainRawCounts||{})[k] || 0;
       row.innerHTML =
         arc(n/maxN, hue, n) +
-        `<div class="rname" style="color:${cssColor(hue,72,.95)}">${escapeHtml(role)}</div>` +
+        `<div class="rname" style="color:${cssColor(hue,72,.95)}" title="${escapeHtml(role)}">${escapeHtml(role)}</div>` +
         (hidden
-          ? `<div class="label" title="${rawN} note(s), excluded from totals">hidden</div>`
-          : `<div class="label" title="avg strength">str <span class="val">${avg.toFixed(1)}</span></div>` +
-            `<div class="label" title="synapses">syn <span class="val">${lk}</span></div>`);
+          ? `<div class="stats"><div class="label" title="${rawN} note(s), excluded from totals">hidden</div></div>`
+          : `<div class="stats">`+
+              `<div class="label" title="avg strength">str <span class="val">${avg.toFixed(1)}</span></div>` +
+              `<div class="label" title="synapses">syn <span class="val">${lk}</span></div>`+
+            `</div>`);
+      const actions=document.createElement("div"); actions.className="brainrow-actions";
+      const talk=document.createElement("button");
+      talk.className="talkrowbtn"; talk.type="button";
+      talk.title = `Ask ${role} in ${repo}`;
+      talk.setAttribute("aria-label", talk.title);
+      talk.textContent = "✎";
+      talk.onclick = ev=>{ ev.stopPropagation(); openTalkPanel(repo, role, talk); };
+      talk.onkeydown = ev=>ev.stopPropagation();
+      actions.appendChild(talk);
       const eye=document.createElement("button");
       eye.className = "eyebtn"; eye.type = "button";
       eye.title = hidden ? `Show ${role} in totals/scene again` : `Hide ${role} from totals/scene`;
@@ -1148,7 +1180,8 @@ function renderGauges(){
       eye.textContent = hidden ? "◌" : "●";
       eye.onclick = ev=>{ ev.stopPropagation(); toggleBrainHidden(repo, role); };
       eye.onkeydown = ev=>ev.stopPropagation();
-      row.appendChild(eye);
+      actions.appendChild(eye);
+      row.appendChild(actions);
       rows.appendChild(row);
     }
     section.appendChild(rows);
@@ -1580,19 +1613,26 @@ boardsRefreshBtn.onclick = (ev)=>{
 // ---- Talk panel: compose a claude-cli://open deep link to launch a new
 // Claude Code session in a chosen repo with a pre-filled prompt. See
 // https://code.claude.com/docs/en/deep-links — the link only fills the
-// prompt box, it never auto-sends. We prefix the prompt with `/rename
+// prompt box, it never auto-sends. The prompt is two lines: a `/rename
 // <project> <slug>` so the new session gets a short, greppable name instead
-// of an auto-generated one; the composed text is shown verbatim in the
-// preview box so you can check it (and edit the fields) before sending. ----
+// of an auto-generated one, then either `/ask-identity <role> <question>`
+// (one brain) or `/ask-brain <question>` (whole repo, "whole brain" picked)
+// — both are read-only brain consults, see the ask-identity/ask-brain
+// skills. There is deliberately no free-form "just open a session" mode
+// here: Talk is scoped to a brain or an identity, never a bare repo. The
+// composed text is shown verbatim in the preview box so you can check it
+// (and edit the fields) before sending. ----
 const Q_MAX = 5000;   // deep-link `q` hard limit per the docs
-const talkBtn = document.getElementById("talk-btn");
+const WHOLE_BRAIN = "";   // talk-identity value meaning "/ask-brain", not a specific role
 const talkPanel = document.getElementById("talk-panel");
 const talkRepoSel = document.getElementById("talk-repo");
+const talkIdentitySel = document.getElementById("talk-identity");
 const talkProjectInput = document.getElementById("talk-project");
 const talkSlugInput = document.getElementById("talk-slug");
 const talkPromptInput = document.getElementById("talk-prompt");
 const talkPreview = document.getElementById("talk-preview");
 const talkCount = document.getElementById("talk-count");
+let talkOpener = null;   // element that opened the panel, for outside-click/focus-return handling
 
 function talkProjectDefault(repo){
   // "@event-sorc/monorepo" -> "event-sorc"; else fall back to the repo key.
@@ -1600,13 +1640,21 @@ function talkProjectDefault(repo){
   const m = disp.match(/^@([a-z0-9._-]+)\//i);
   return (m ? m[1] : repo || "").toLowerCase();
 }
+function populateTalkIdentity(repo, preferRole){
+  const roles = (window.__repoRoles||{})[repo] || [];
+  talkIdentitySel.innerHTML = '<option value="">— whole brain —</option>' +
+    roles.map(r=>`<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join("");
+  talkIdentitySel.value = (preferRole && roles.includes(preferRole)) ? preferRole : WHOLE_BRAIN;
+}
 function buildTalkText(){
   const project = talkProjectInput.value.trim();
   const slug = talkSlugInput.value.trim();
   const prompt = talkPromptInput.value.trim();
+  const identity = talkIdentitySel.value;
   const nameArgs = [project, slug].filter(Boolean).join(" ");
   const rename = nameArgs ? `/rename ${nameArgs}` : "";
-  return [rename, prompt].filter(Boolean).join("\n");
+  const ask = prompt ? (identity ? `/ask-identity ${identity} ${prompt}` : `/ask-brain ${prompt}`) : "";
+  return [rename, ask].filter(Boolean).join("\n");
 }
 function buildTalkUrl(){
   const repo = talkRepoSel.value;
@@ -1619,28 +1667,32 @@ function buildTalkUrl(){
 }
 function updateTalkPreview(){
   const text = buildTalkText();
-  talkPreview.textContent = text || "(empty — type a prompt below)";
+  talkPreview.textContent = text || "(empty — type a question below)";
   talkCount.textContent = `${text.length} / ${Q_MAX}`;
   talkCount.classList.toggle("over", text.length > Q_MAX);
 }
-function openTalkPanel(){
-  const cur = talkRepoSel.value;
+// repo: which repo to preselect. role: WHOLE_BRAIN or a specific identity to
+// preselect — pass the row/header element that triggered this as opener so
+// outside-click-to-close doesn't immediately re-close on the same click.
+function openTalkPanel(repo, role, opener){
+  talkOpener = opener || null;
   talkRepoSel.innerHTML = repoList.map(r=>`<option value="${escapeHtml(r)}">${escapeHtml(dispName(r))}</option>`).join("");
-  talkRepoSel.value = (cur && repoList.includes(cur)) ? cur : (repoList[0] || "");
-  if(!talkProjectInput.value) talkProjectInput.value = talkProjectDefault(talkRepoSel.value);
+  talkRepoSel.value = (repo && repoList.includes(repo)) ? repo : (repoList[0] || "");
+  populateTalkIdentity(talkRepoSel.value, role);
+  talkProjectInput.value = talkProjectDefault(talkRepoSel.value);
   talkPanel.classList.add("open"); talkPanel.setAttribute("aria-hidden","false");
   updateTalkPreview();
   talkPromptInput.focus();
 }
-function closeTalkPanel(){ talkPanel.classList.remove("open"); talkPanel.setAttribute("aria-hidden","true"); }
-talkBtn.onclick = (ev)=>{ ev.stopPropagation(); talkPanel.classList.contains("open") ? closeTalkPanel() : openTalkPanel(); };
+function closeTalkPanel(){ talkPanel.classList.remove("open"); talkPanel.setAttribute("aria-hidden","true"); talkOpener = null; }
 document.getElementById("talk-close").onclick = closeTalkPanel;
 document.addEventListener("click", (ev)=>{
-  if(talkPanel.classList.contains("open") && !talkPanel.contains(ev.target) && ev.target!==talkBtn){
+  if(talkPanel.classList.contains("open") && !talkPanel.contains(ev.target) && ev.target!==talkOpener){
     closeTalkPanel();
   }
 });
-talkRepoSel.onchange = ()=>{ talkProjectInput.value = talkProjectDefault(talkRepoSel.value); updateTalkPreview(); };
+talkRepoSel.onchange = ()=>{ talkProjectInput.value = talkProjectDefault(talkRepoSel.value); populateTalkIdentity(talkRepoSel.value); updateTalkPreview(); };
+talkIdentitySel.onchange = updateTalkPreview;
 for(const el of [talkProjectInput, talkSlugInput, talkPromptInput]) el.addEventListener("input", updateTalkPreview);
 document.getElementById("talk-send").onclick = ()=>{
   const text = buildTalkText();
