@@ -1379,7 +1379,15 @@ let simStepMs = 0, lastStepMs = -1e9, simCalibratedN = -1, simFastForward = 0;
 // dev repo / marketplace clone / plugin cache — and "why does it look old"
 // has burned real debugging time). Bump the PATCH on every template change
 // within an increment of work; bump the MINOR when the increment ships.
-const NV_VERSION = "0.25.3";
+const NV_VERSION = "0.25.4";
+// status chip segments carry native title tooltips explaining what each
+// readout means (hover "live", the version, the fps, the DPR marker, ...).
+function chipHtml(segs){
+  return segs.filter(Boolean).map(([text, title]) =>
+    `<span title="${title.replace(/"/g,"&quot;")}">${text}</span>`).join(" · ");
+}
+const CHIP_LIVE = ["live", "Connected — the page re-reads the brains every 15s and streams recall activations in as they happen"];
+const CHIP_VER = [`v${NV_VERSION}`, "neural-view template version — confirms which build this tab is rendering (bumped on every template change)"];
 // live fps readout in the status chip (replaces the static tagline)
 let fpsFrames = 0, fpsWindowStart = 0, fpsGoodWindows = 0;
 // ?perf: per-section frame-time EMAs shown in the chip (sim step / visual
@@ -1389,7 +1397,7 @@ const PERF = /[?&]perf\b/.test(location.search);
 const perfMs = {step:0, vis:0, render:0};
 function ema(k, ms){ perfMs[k] += (ms - perfMs[k]) * 0.08; }
 const statusEl = document.getElementById("status-txt");
-if(statusEl) statusEl.textContent = `live · v${NV_VERSION}`;   // fps appended once the first second of frames is measured
+if(statusEl) statusEl.innerHTML = chipHtml([CHIP_LIVE, CHIP_VER]);   // fps appended once the first second of frames is measured
 function frame(){
   requestAnimationFrame(frame);   // re-arm first: any exception below must never permanently kill the render loop
   tick++;
@@ -1403,10 +1411,15 @@ function frame(){
       if(fps < 45 && dprCur > 1){ dprCur = Math.max(1, dprCur - 0.25); fpsGoodWindows = 0; resize(); }
       else if(fps > 57 && dprCur < DPR_CAP){ if(++fpsGoodWindows >= 3){ dprCur = Math.min(DPR_CAP, dprCur + 0.25); fpsGoodWindows = 0; resize(); } }
       else fpsGoodWindows = 0;
-      statusEl.textContent = `live · v${NV_VERSION} · ${fps} fps`
-        + (dprCur < DPR_CAP ? ` · ${dprCur}x` : "")
-        + (PERF ? ` · sim ${perfMs.step.toFixed(1)} · vis ${perfMs.vis.toFixed(1)} · draw ${perfMs.render.toFixed(1)}ms` : "")
-        + (REDUCED ? " · reduced motion" : "");
+      statusEl.innerHTML = chipHtml([
+        CHIP_LIVE, CHIP_VER,
+        [`${fps} fps`, "rendered frames per second, measured over the last second (display target: 60)"],
+        dprCur < DPR_CAP && [`${dprCur}x`, "adaptive render resolution — pixel ratio lowered from " + DPR_CAP + "x to keep fps up; restores automatically when the frame rate recovers"],
+        PERF && [`sim ${perfMs.step.toFixed(1)}`, "physics step CPU ms per frame (smoothed) — force sim / fast-forward / calibration"],
+        PERF && [`vis ${perfMs.vis.toFixed(1)}`, "visual update CPU ms per frame (smoothed) — per-note/per-link attribute writes, labels, fly-to"],
+        PERF && [`draw ${perfMs.render.toFixed(1)}ms`, "render submission CPU ms per frame (smoothed) — if fps is low but sim+vis+draw are small, the cost is GPU fill"],
+        REDUCED && ["reduced motion", "prefers-reduced-motion is on: ambient throb and pulse dots are disabled"],
+      ]);
     }
     fpsFrames = 0; fpsWindowStart = nowMs;
   }
@@ -2360,7 +2373,8 @@ const PROBE = location.search.includes("hoverprobe");
   await loadSessions();
   if(uiState.liveBoard) startBoardPolling();  // off by default — enable via the ⚙ Settings popover
   const st=document.getElementById("status-txt");
-  if(!webglOK) st.textContent = `live · v${NV_VERSION} · 3D unavailable`;   // webglOK: fps is written by frame() once per second
+  if(!webglOK) st.innerHTML = chipHtml([CHIP_LIVE, CHIP_VER,
+    ["3D unavailable", "this browser/GPU can't create a WebGL context — the sidebar and boards still work, the 3D scene doesn't render"]]);   // webglOK: fps is written by frame() once per second
   setInterval(loadGraph, 15000);     // pick up new notes/links periodically
   setInterval(loadSessions, 20000);  // best-effort local session discovery
 })();
