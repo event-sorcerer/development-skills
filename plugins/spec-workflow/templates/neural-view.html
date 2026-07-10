@@ -1381,7 +1381,11 @@ let simStepMs = 0, lastStepMs = -1e9, simCalibratedN = -1, simFastForward = 0;
 // dev repo / marketplace clone / plugin cache — and "why does it look old"
 // has burned real debugging time). Bump the PATCH on every template change
 // within an increment of work; bump the MINOR when the increment ships.
-const NV_VERSION = "0.25.5";
+const NV_VERSION = "0.25.6";
+// every tab reports its live numbers to the server about once a second
+// (POST /metrics) so `neural-view.py status` — and any agent driving it —
+// can read the page's real frame rate without screenshots.
+const METRICS_ID = Math.random().toString(36).slice(2, 8);
 // status chip segments carry native title tooltips explaining what each
 // readout means (hover "live", the version, the fps, the DPR marker, ...).
 function chipHtml(segs){
@@ -1424,6 +1428,11 @@ function frame(){
         perfOn() && [`draw ${perfMs.render.toFixed(1)}ms`, "render submission CPU ms per frame (smoothed) — if fps is low but sim+vis+draw are small, the cost is GPU fill"],
         REDUCED && ["reduced motion", "prefers-reduced-motion is on: ambient throb and pulse dots are disabled"],
       ]);
+      fetch("/metrics", {method:"POST", body: JSON.stringify({
+        id: METRICS_ID, v: NV_VERSION, fps, dpr: dprCur,
+        sim: +perfMs.step.toFixed(1), vis: +perfMs.vis.toFixed(1), draw: +perfMs.render.toFixed(1),
+        notes: nodes.length, links: links.length,
+      })}).catch(()=>{});
     }
     fpsFrames = 0; fpsWindowStart = nowMs;
   }
