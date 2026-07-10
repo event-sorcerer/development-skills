@@ -485,14 +485,35 @@ function fibSphere(i, n, radius){
   const theta = ga*i;
   return {x: Math.cos(theta)*r*radius, y: y*radius, z: Math.sin(theta)*r*radius};
 }
+// A brain of n notes settles into a ball of radius ≈ BALL_K·∛n (the
+// gravity/repulsion equilibrium measured on real brains; the spawn density
+// in applyGraph uses the same constant). Cluster centers MUST be spaced by
+// these radii: the old relative sizing packed every brain inside a fixed
+// ~110-unit region, which at 10k-note brains meant tens of thousands of
+// nodes permanently inside each other's repulsion cutoff — an equilibrium so
+// dense the sim could never be cheap OR settle. Sizing by ∛n keeps
+// equilibrium density constant at ANY corpus size; small scenes come out
+// within a few units of the old layout.
+const BALL_K = 55;
+const ballR = n => BALL_K * Math.cbrt(Math.max(1, n));
 function layoutClusters(){
   clusters.clear(); repoCenters.clear(); repoRadius.clear();
-  const noteCount = new Map();
-  for(const nd of nodes) noteCount.set(nd.repo, (noteCount.get(nd.repo)||0)+1);
-  const maxCount = Math.max(1, ...repoList.map(r=>noteCount.get(r)||0));
+  const noteCount = new Map(), roleCount = new Map();
+  for(const nd of nodes){
+    noteCount.set(nd.repo, (noteCount.get(nd.repo)||0)+1);
+    const ck = clusterKey(nd.repo, nd.role);
+    roleCount.set(ck, (roleCount.get(ck)||0)+1);
+  }
+  // per repo: place role clusters on a fibSphere spaced by the LARGEST role
+  // ball, and size the repo region to contain them.
+  const roleRing = new Map();   // repo -> ring radius for its role clusters
   for(const repo of repoList){
-    const frac = (noteCount.get(repo)||0) / maxCount;
-    repoRadius.set(repo, MIN_REGION + (BASE_REGION - MIN_REGION) * Math.sqrt(frac));
+    const rolesInRepo = [...new Set(nodes.filter(n=>n.repo===repo).map(n=>n.role))].sort();
+    let maxBall = 0;
+    for(const role of rolesInRepo) maxBall = Math.max(maxBall, ballR(roleCount.get(clusterKey(repo,role))||0));
+    const ring = rolesInRepo.length>1 ? Math.max(BASE_REGION*0.6, maxBall*1.7) : 0;
+    roleRing.set(repo, {ring, rolesInRepo, maxBall});
+    repoRadius.set(repo, Math.max(MIN_REGION, ring + maxBall + 30));
   }
   const nRepos = repoList.length || 1;
   const totalR = [...repoRadius.values()].reduce((a,b)=>a+b, 0) || MIN_REGION;
@@ -502,15 +523,15 @@ function layoutClusters(){
   });
   for(const repo of repoList){
     const rc = repoCenters.get(repo);
-    const rolesInRepo = [...new Set(nodes.filter(n=>n.repo===repo).map(n=>n.role))].sort();
+    const {ring, rolesInRepo} = roleRing.get(repo);
     const n = rolesInRepo.length || 1;
-    const R = n>1 ? repoRadius.get(repo)*0.6 : 0;
     rolesInRepo.forEach((role,i)=>{
-      const off = n>1 ? fibSphere(i, n, R) : {x:0,y:0,z:0};
+      const off = n>1 ? fibSphere(i, n, ring) : {x:0,y:0,z:0};
       clusters.set(clusterKey(repo,role), {x: rc.x+off.x, y: rc.y+off.y, z: rc.z+off.z, hue: comboHue(repo,role), n:0, repo, role});
     });
   }
   nodes.forEach(nd=>{ const c = clusters.get(clusterKey(nd.repo,nd.role)); if(c) c.n++; });
+  updateSceneScale();
 }
 
 // ---- camera: hand-rolled spherical orbit rig (no OrbitControls addon
@@ -521,7 +542,27 @@ function layoutClusters(){
 // standing in for the fixed HUD panels' screen real estate (the old 2D view
 // subtracted their pixel width directly; a fixed margin is the 3D analogue). ----
 const FOV = 50 * Math.PI/180;      // vertical fov, radians
-const MIN_DIST = 80, MAX_DIST = 6000;
+const MIN_DIST = 80;
+let MAX_DIST = 6000;   // zoom ceiling — raised by updateSceneScale() for big corpora
+// scale-adaptive view: far plane, zoom ceiling and fog density must track the
+// scene's physical size (which now grows with ∛notes) or a big corpus gets
+// clipped by the far plane and fogged into a black screen.
+let sceneFogDensity = 0.0009;
+function updateSceneScale(){
+  if(!webglOK || !camera) return;
+  let R = 900;
+  for(const repo of repoList){
+    const rc = repoCenters.get(repo); if(!rc) continue;
+    R = Math.max(R, Math.hypot(rc.x, rc.y, rc.z) + (repoRadius.get(repo)||MIN_REGION));
+  }
+  MAX_DIST = Math.max(6000, R*7);
+  camera.far = Math.max(8000, R*12);
+  camera.updateProjectionMatrix();
+  sceneFogDensity = Math.min(0.0009, 0.0009 * (900/R));
+  scene.fog.density = sceneFogDensity;
+  for(const layer of [noteCore, noteHalo, synPulses])
+    if(layer) layer.mesh.material.uniforms.uFogDensity.value = sceneFogDensity;
+}
 const THETA0 = -0.6, PHI0 = 1.15;  // default orbit angle: a 3/4 elevated view
 function boundingSphere(){
   const pts = [];
@@ -769,7 +810,7 @@ function makeBillboardLayer(tex, count){
   geo.setAttribute("aColor", new THREE.InstancedBufferAttribute(color, 3));
   geo.instanceCount = count;
   const mat = new THREE.ShaderMaterial({
-    uniforms: { map:{value:tex}, uFogColor:{value:new THREE.Color(0x04070d)}, uFogDensity:{value:0.0009} },
+    uniforms: { map:{value:tex}, uFogColor:{value:new THREE.Color(0x04070d)}, uFogDensity:{value:sceneFogDensity} },
     vertexShader: BILLBOARD_VERT, fragmentShader: BILLBOARD_FRAG,
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   });
@@ -1089,7 +1130,7 @@ function applyGraph(g){
     if(!nd._fresh) continue;
     nd._fresh = false;
     const c = clusters.get(clusterKey(nd.repo, nd.role)) || {x:0, y:0, z:0, n: nodes.length};
-    const R = 55 * Math.cbrt(Math.max(1, c.n));   // ball sized so spacing lands near equilibrium (~90 units)
+    const R = ballR(c.n);   // same equilibrium-density constant the layout uses
     const u = Math.random()*2 - 1, ang = Math.random()*6.283, rr = R * Math.cbrt(Math.random());
     const s = Math.sqrt(Math.max(0, 1 - u*u));
     nd.x = c.x + rr*s*Math.cos(ang);
@@ -1432,7 +1473,7 @@ let simStepMs = 0, lastStepMs = -1e9, simCalibratedN = -1, simFastForward = 0;
 // dev repo / marketplace clone / plugin cache — and "why does it look old"
 // has burned real debugging time). Bump the PATCH on every template change
 // within an increment of work; bump the MINOR when the increment ships.
-const NV_VERSION = "0.25.9";
+const NV_VERSION = "0.25.10";
 // every tab reports its live numbers to the server about once a second
 // (POST /metrics) so `neural-view.py status` — and any agent driving it —
 // can read the page's real frame rate without screenshots.
