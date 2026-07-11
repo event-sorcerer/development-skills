@@ -592,7 +592,15 @@ function layoutClusters(){
   for(const repo of repoList){
     const rolesInRepo = [...new Set(nodes.filter(n=>n.repo===repo).map(n=>n.role))].sort();
     const ballOf = role => ballR(roleCount.get(clusterKey(repo,role))||0);
-    const offsets = packByRadius(rolesInRepo, ballOf, BASE_REGION*0.6, 1.7);
+    // outerMul 0.55, not 1.7: at 1.7 same-sized role balls sit clearly
+    // apart from each other (confirmed by an old-vs-new side-by-side on
+    // development-skills — same relative positions, but the old layout read
+    // as one brain with lobes and the new one as three separate balls in a
+    // container). A ring smaller than the balls' own radius makes adjacent,
+    // similarly-sized roles overlap/merge like hemispheres instead of
+    // floating apart — the outlier push-out below still keeps a genuinely
+    // huge role (card-vault) from swallowing its tiny siblings.
+    const offsets = packByRadius(rolesInRepo, ballOf, BASE_REGION*0.6, 0.55);
     roleInfo.set(repo, {rolesInRepo, offsets});
     let farthest = 0;
     for(const role of rolesInRepo){
@@ -1820,7 +1828,7 @@ let simStepMs = 0, lastStepMs = -1e9, simCalibratedN = -1, simFastForward = 0;
 // dev repo / marketplace clone / plugin cache — and "why does it look old"
 // has burned real debugging time). Bump the PATCH on every template change
 // within an increment of work; bump the MINOR when the increment ships.
-const NV_VERSION = "0.27.0";
+const NV_VERSION = "0.27.1";
 // every tab reports its live numbers to the server about once a second
 // (POST /metrics) so `neural-view.py status` — and any agent driving it —
 // can read the page's real frame rate without screenshots.
