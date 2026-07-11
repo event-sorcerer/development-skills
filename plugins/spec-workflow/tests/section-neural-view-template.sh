@@ -20,20 +20,25 @@ check "template has a tooltip DOM element for hover inspection" 'id="tooltip"' "
 check "tooltip is positioned fixed and never intercepts pointer events" "pointer-events:none;z-index:50" "$(cat "$NVHTML")"
 check "pointermove wires a throttled hover raycast" "hoverTest(ev.clientX, ev.clientY)" "$(cat "$NVHTML")"
 check "hitTest(clientX, clientY) keeps its signature -- only its raycast target set changes (#88)" "function hitTest(clientX, clientY){" "$(cat "$NVHTML")"
-# #72: note hover hit area must match the VISIBLE glow (the halo sprite,
-# scaled nd.r*6), not the tiny bright core (nd.r*2) -- the halo carries its
-# own "note" userData so hoverTest()'s note-priority group can raycast it
-# directly instead of the core.
+# #72/#88 (superseded by the neural-view-perf rewrite, fe7999d): hover/click
+# picking no longer raycasts three.js objects at all -- note halos are one
+# batched instanced sprite layer with no per-node object to raycast, so
+# hoverTest()/hitTest() both project each node's world position to CSS pixels
+# (pickNoteAt(), screen-space picking) and compare against a pixel radius.
+# The nd._halo (nd.r*6) vs nd._core (nd.r*2) distinction lives on in that
+# radius: pickNoteAt() sizes its hit test off nd.r*1.8 -- big enough to cover
+# the visible glow, not just the tiny bright core -- so hover and click still
+# share exactly one hit-area definition (one function, not two raycast target
+# sets that could drift apart again).
 check "note halo renders as a batched instanced layer (hover stays screen-space via pickNoteAt)" 'noteHalo = makeNoteLayer(HALO_TEX, nodes.length, true)' "$(cat "$NVHTML")"
-check "hoverTest()'s note group raycasts the halo (visible glow), not the small core sprite" "if(nd._halo) noteTargets.push(nd._halo);" "$(cat "$NVHTML")"
-# #88: click-to-inspect (hitTest) raycast the tiny core sprite (nd._core,
-# nd.r*2) while hover raycasts the visible halo (nd._halo, nd.r*6) -- a note
-# that shows a tooltip on hover could miss when clicked. hitTest's note
-# target (and the dblclick empty-space guard's, so double-click-on-a-note
-# stays aligned with what a single click can hit) must raycast the halo
-# instead, matching hover's hit area exactly.
+check "pickNoteAt()'s hit radius covers the visible glow, not just the small core (screen-space picking, not raycasting) (#72)" "const rPix = worldToPixels(nd.r*1.8, p.depth);" "$(cat "$NVHTML")"
+# #88: click-to-inspect (hitTest) and the dblclick empty-space guard must use
+# the SAME pick as hover (pickNoteAt) -- previously hitTest raycast a
+# separate, smaller core-only target set, so a note that showed a tooltip on
+# hover could miss when clicked. Now both call pickNoteAt() directly, so
+# there is no second target set left to drift out of alignment.
 check_absent "hitTest()/dblclick guard no longer raycast the tiny core sprite -- must match hover's halo hit area (#88)" "nd=>nd._core).filter(Boolean)" "$(cat "$NVHTML")"
-check "hitTest()'s note target is nd._halo, the same visible glow hover raycasts (#88)" "const noteSprites = nodes.map(nd=>nd._halo).filter(Boolean);" "$(cat "$NVHTML")"
+check "hitTest()'s note target is pickNoteAt(), the same screen-space pick hover uses (#88)" "const nd = pickNoteAt(clientX, clientY);" "$(cat "$NVHTML")"
 # #72: the repo region boundary must be raycast as its rendered wireframe
 # lines (so raycaster.params.Line.threshold narrows hits to near the visible
 # lines), not as the underlying solid icosahedron Mesh -- a Mesh's face
@@ -60,7 +65,10 @@ check "template polls GET /sessions" 'fetch("/sessions")' "$(cat "$NVHTML")"
 check "loadGraph() stores the server's per-repo role list for the BRAINS panel" 'window.__repoRoles = g.repoRoles || {};' "$(cat "$NVHTML")"
 check "orderedRoles() puts orchestrator first, remaining roles alphabetical" 'return known.includes("orchestrator") ? ["orchestrator", ...rest] : rest;' "$(cat "$NVHTML")"
 check "renderGauges() builds one repo-brains section per repo" 'section.className="repo-brains";' "$(cat "$NVHTML")"
-check "renderGauges() dims a role's row instead of omitting it when it has zero notes" 'row.className = n ? "brainrow" : "brainrow brainrow-empty";' "$(cat "$NVHTML")"
+# row.className also grew a brainrow-hidden suffix (the #73-adjacent
+# per-brain "hide from totals/scene" eye toggle) since this check was
+# written -- the empty/non-empty dimming half of the expression is unchanged.
+check "renderGauges() dims a role's row instead of omitting it when it has zero notes" 'row.className = (n ? "brainrow" : "brainrow brainrow-empty") + (hidden ? " brainrow-hidden" : "");' "$(cat "$NVHTML")"
 check "CSS dims empty brain rows without hiding them" ".brainrow-empty{opacity:.4}" "$(cat "$NVHTML")"
 check "CSS gives each repo section its own header" ".repo-brains-h{" "$(cat "$NVHTML")"
 # #75 micro-fix: the repo-hover tooltip must not double up "board unavailable"
@@ -139,8 +147,27 @@ const MIN_REGION = 46, BASE_REGION = 110, MIN_DIST = 80, MAX_DIST = 6000, FOV = 
 let clusters, repoCenters, repoRadius, repoList, nodes;
 const clusterKey = (repo, role) => repo + "|" + role;
 function roleHue() { return 190; }
+// comboHue() (used by layoutClusters() when it records each cluster's color)
+// normally reads window.__roleColors set by the server payload -- stubbed
+// straight through to roleHue() here since color isn't what this fixture
+// asserts (region sizing/framing is).
+function comboHue(repo, role) { return roleHue(role); }
+// updateSceneScale() (called at the end of layoutClusters() to grow the far
+// plane/fog for big corpora) is a THREE.js/camera side effect out of scope
+// for this pure-math fixture -- stubbed to a no-op, with webglOK/camera
+// stubbed so ITS OWN early-return guard doesn't need a real renderer.
+let webglOK = false, camera = null;
+function updateSceneScale() {}
+// ballR()/BALL_K (a brain of n notes settles into a ball of radius
+// BALL_K*cbrt(n) -- see the comment above the real definition) is a const
+// arrow function, not a `function` declaration, so extract()'s regex (which
+// requires "function name(...)") can't pull it out like the others; hand-
+// written here to match the template's definition verbatim.
+const BALL_K = 55;
+const ballR = n => BALL_K * Math.cbrt(Math.max(1, n));
 
 eval(extract("fibSphere"));
+eval(extract("packByRadius"));
 eval(extract("layoutClusters"));
 eval(extract("boundingSphere"));
 eval(extract("fitDistance"));
@@ -416,20 +443,21 @@ NODEJS
     check "userMoved is set only by a real drag past threshold, wheel, or pinch -- never a bare click/jitter (#71)" "USERMOVED_GATED_ON_REAL_INTERACTION_OK" "$usermoved_out"
     rm -f "$_nvusermoved"
 
-    # #72: hoverTest() must resolve overlapping hits by an explicit kind
-    # priority (note > synapse/pulse > repo label > repo region), NOT by raw
-    # raycast distance -- a repo region's wireframe edge can sit nearer the
-    # camera along the ray than a note it encloses, and pure nearest-wins
-    # would let the coarser region shadow the more specific note. This drives
-    # the real extracted hoverTest() with a stub raycaster whose
-    # intersectObjects() reports a "hit" per group based on the group's own
-    # kind (read off the first target's userData.kind), so the test pins
-    # actual runtime priority behavior, not just source text. The
-    # region-only-near-its-wireframe-lines rule itself is a raycasting
-    # geometry property (LineSegments + raycaster.params.Line.threshold) that
-    # can't be meaningfully simulated without real three.js geometry/camera
-    # math -- that half is covered by the structural EdgesGeometry/
-    # LineSegments checks above instead.
+    # #72 (superseded by the neural-view-perf rewrite, fe7999d): hoverTest()
+    # must resolve overlapping hits by an explicit kind priority (note >
+    # synapse/pulse > brain/role label > repo label > repo region), NOT by
+    # raw distance -- a repo region can sit "behind" a note in world space
+    # yet still be the nearer pixel hit, and pure nearest-wins would let the
+    # coarser region shadow the more specific note. Picking is no longer
+    # three.js raycasting at all (see the pickNoteAt() comment above pick*()
+    # in the template) -- every pick*At() function projects world positions
+    # to CSS pixels and measures pixel distance, so this fixture drives the
+    # real extracted pickNoteAt()/pickSynapseAt()/pickRoleLabelAt()/
+    # pickRepoAt()/hoverTest() with a stubbed projectToScreen()/
+    # worldToPixels() (an identity projection: screen coords == world x/y,
+    # fixed depth) so every candidate's hit/no-hit outcome is fully
+    # controllable by its world position, without needing real camera/FOV
+    # math (which isn't what this fixture is pinning).
     _nvhovertest="$(mktemp).cjs"
     cat >"$_nvhovertest" <<'NODEJS'
 const fs = require("fs");
@@ -442,9 +470,9 @@ function extract(name) {
 }
 
 const webglOK = true;
-const W = 800, H = 600;
-let sceneGroup = { children: [] };
-let nodes = [];
+const MIN_REGION = 46;
+let sceneGroup = {};   // hoverTest() only checks truthiness, never traverses it
+let nodes = [], links = [], liveClusterCenters = new Map(), liveRepoCenters = new Map(), repoCenters = new Map(), repoRadius = new Map(), repoList = [];
 let hoveredNode = null, hoveredLink = null;
 let lastTooltipKind = null, hoverableSet = null;
 const canvas = { classList: {
@@ -454,84 +482,94 @@ const canvas = { classList: {
 function hideTooltip() { hoveredNode = null; hoveredLink = null; lastTooltipKind = null; canvas.classList.remove("hoverable"); }
 function showTooltip(x, y, html) { lastTooltipKind = html; canvas.classList.add("hoverable"); }
 function tooltipHtml(ud) { return ud.kind; }
-class Vector2Stub { constructor(x, y) { this.x = x; this.y = y; } }
-const THREE = { Vector2: Vector2Stub };
-const camera = {};
+function projectToScreen(x, y, z) { return { x, y, depth: 1 }; }
+function worldToPixels(worldSize) { return worldSize; }
 
-let HIT = {};   // kind -> whether that group's raycast reports a hit
-const raycaster = {
-    params: {},
-    setFromCamera() {},
-    intersectObjects(targets) {
-        if (!targets.length) return [];
-        const kind = targets[0].userData.kind;
-        return HIT[kind] ? [{ object: targets[0], distance: 1 }] : [];
-    },
-};
-
+eval(extract("pickNoteAt"));
+eval(extract("distToSegment"));
+eval(extract("pickSynapseAt"));
+eval(extract("pickRepoAt"));
+eval(extract("pickRoleLabelAt"));
 eval(extract("hoverTest"));
 
-const noteHalo = { userData: { kind: "note", node: { slug: "n1" } } };
-nodes = [{ _core: {}, _halo: noteHalo }];
-const synapseObj = { userData: { kind: "synapse", link: { a: { slug: "a" }, b: { slug: "b" }, w: .5 } } };
-const labelObj = { userData: { kind: "repoLabel", repo: "r1" } };
-const regionObj = { userData: { kind: "repoRegion", repo: "r1" } };
-sceneGroup.children = [synapseObj, labelObj, regionObj];
+const CX = 100, CY = 100;
+function reset() {
+    hoveredNode = null; hoveredLink = null; lastTooltipKind = null; hoverableSet = null;
+    nodes = []; links = []; liveClusterCenters = new Map();
+    // a far-away second repo keeps pickRepoAt()'s repoList.length<2 guard
+    // from short-circuiting it in every tier.
+    repoList = ["r1", "r2"];
+    repoCenters = new Map([["r2", { x: 9000, y: 9000, z: 0 }]]);
+    repoRadius = new Map([["r2", 10]]);
+}
 
-function reset() { hoveredNode = null; hoveredLink = null; lastTooltipKind = null; hoverableSet = null; }
-
-// all four kinds report a hit -- note (most specific) must win.
-HIT = { note: true, synapse: true, repoLabel: true, repoRegion: true };
-reset(); hoverTest(1, 1);
-if (lastTooltipKind !== "note") throw new Error("note did not win priority over synapse/repoLabel/repoRegion: got " + lastTooltipKind);
+// tier 1: note wins over every other kind, all of which would otherwise hit.
+reset();
+nodes = [{ x: CX, y: CY, z: 0, r: 5, slug: "n1" }];
+links = [{ a: { x: CX - 10, y: CY, z: 0 }, b: { x: CX + 10, y: CY, z: 0 }, w: 1 }];
+liveClusterCenters = new Map([["r1|dev", { x: CX, y: CY - 26, z: 0, n: 3 }]]);
+repoCenters.set("r1", { x: CX, y: CY - 56, z: 0 }); repoRadius.set("r1", 30);
+hoverTest(CX, CY);
+if (lastTooltipKind !== "note") throw new Error("note did not win top priority: got " + lastTooltipKind);
 if (hoverableSet !== true) throw new Error("hoverable class was not set on a note hit");
 
-// note absent -- synapse/pulse must win over repo label/region.
-HIT = { synapse: true, repoLabel: true, repoRegion: true };
-reset(); hoverTest(1, 1);
-if (lastTooltipKind !== "synapse") throw new Error("synapse did not win priority over repoLabel/repoRegion: got " + lastTooltipKind);
+// tier 2: no note -- synapse must win over brain/repoLabel/repoRegion.
+reset();
+links = [{ a: { x: CX - 10, y: CY, z: 0 }, b: { x: CX + 10, y: CY, z: 0 }, w: 1 }];
+liveClusterCenters = new Map([["r1|dev", { x: CX, y: CY - 26, z: 0, n: 3 }]]);
+repoCenters.set("r1", { x: CX, y: CY - 56, z: 0 }); repoRadius.set("r1", 30);
+hoverTest(CX, CY);
+if (lastTooltipKind !== "synapse") throw new Error("synapse did not win priority over brain/repoLabel/repoRegion: got " + lastTooltipKind);
 
-// note+synapse absent -- repo label must win over repo region.
-HIT = { repoLabel: true, repoRegion: true };
-reset(); hoverTest(1, 1);
+// tier 3: no note/synapse -- brain (role) label must win over repoLabel/repoRegion.
+reset();
+liveClusterCenters = new Map([["r1|dev", { x: CX, y: CY - 26, z: 0, n: 3 }]]);
+repoCenters.set("r1", { x: CX, y: CY - 56, z: 0 }); repoRadius.set("r1", 30);
+hoverTest(CX, CY);
+if (lastTooltipKind !== "brain") throw new Error("brain (role) label did not win priority over repoLabel/repoRegion: got " + lastTooltipKind);
+
+// tier 4: no note/synapse/brain -- repo label must win over repo region.
+reset();
+repoCenters.set("r1", { x: CX, y: CY - 56, z: 0 }); repoRadius.set("r1", 30);
+hoverTest(CX, CY);
 if (lastTooltipKind !== "repoLabel") throw new Error("repoLabel did not win priority over repoRegion: got " + lastTooltipKind);
 
-// only the region hits -- region is the fallback, lowest priority.
-HIT = { repoRegion: true };
-reset(); hoverTest(1, 1);
+// tier 5: only the region rim hits -- region is the fallback, lowest priority.
+reset();
+repoCenters.set("r1", { x: CX - 30, y: CY, z: 0 }); repoRadius.set("r1", 30);
+hoverTest(CX, CY);
 if (lastTooltipKind !== "repoRegion") throw new Error("repoRegion (the only hit) was not reported: got " + lastTooltipKind);
 
 // nothing hits -- tooltip hides and the hoverable affordance clears.
-HIT = {};
-reset(); hoverTest(1, 1);
-if (lastTooltipKind !== null) throw new Error("a tooltip was shown with no raycast hits: " + lastTooltipKind);
-if (hoverableSet !== false) throw new Error("hoverable class was not cleared with no raycast hits");
+reset();
+repoList = [];
+hoverTest(CX, CY);
+if (lastTooltipKind !== null) throw new Error("a tooltip was shown with no hits: " + lastTooltipKind);
+if (hoverableSet !== false) throw new Error("hoverable class was not cleared with no hits");
 
 console.log("HOVERTEST_PRIORITY_OK");
 NODEJS
     hovertest_out="$(node "$_nvhovertest" "$NVHTML" 2>&1)"
-    check "hoverTest() resolves overlapping hits by kind priority (note > synapse/pulse > repoLabel > repoRegion) and drives the hoverable cursor affordance" "HOVERTEST_PRIORITY_OK" "$hovertest_out"
+    check "hoverTest() resolves overlapping hits by kind priority (note > synapse/pulse > brain label > repoLabel > repoRegion) and drives the hoverable cursor affordance" "HOVERTEST_PRIORITY_OK" "$hovertest_out"
     rm -f "$_nvhovertest"
 
-    # #88 behavioral: hitTest() (click-to-inspect) must raycast the same halo
-    # sprite hoverTest() raycasts (nd._halo, the visible glow), not the tiny
-    # core sprite (nd._core) -- a note that shows a tooltip on hover must not
-    # be missable by a click on the same spot. The dblclick empty-space-reset
-    # guard raycasts its own noteSprites array to decide "did this land on a
-    # note", so it must be realigned to the same halo target set: double-
-    # clicking a note's halo (visible glow, not just its tiny core) must still
-    # suppress the reset, and double-clicking real empty space must still
-    # reset. Drives the real extracted hitTest() and the anonymous dblclick
-    # listener (sliced by unique markers, same pattern as the #71/#73 pointer-
-    # wiring harnesses) against a stub raycaster keyed on object IDENTITY
-    # (which array was actually passed to intersectObjects), so this pins the
-    # real runtime target, not just source text.
+    # #88 behavioral (superseded by the neural-view-perf rewrite, fe7999d):
+    # hitTest() (click-to-inspect) and the dblclick empty-space guard must
+    # both pick a note through the exact same function hoverTest() does
+    # (pickNoteAt()) -- previously hitTest raycast a separate, core-only
+    # target set, so a note that showed a tooltip on hover could be missed by
+    # a click at the same spot. Drives the real extracted pickNoteAt()/
+    # pickRoleLabelAt()/hitTest() and the anonymous dblclick listener (sliced
+    # by unique markers, same pattern as the #71/#73 pointer-wiring
+    # harnesses) with the same stubbed identity projection as the hoverTest
+    # fixture above, so hits/misses are driven by world position, not a fake
+    # raycaster.
     _nvhittest="$(mktemp).cjs"
     cat >"$_nvhittest" <<'NODEJS'
 const fs = require("fs");
 const html = fs.readFileSync(process.argv[2], "utf8");
-function extractOneLine(name) {
-    const re = new RegExp("function " + name + "\\([^)]*\\)\\{[\\s\\S]*?\\}\\n");
+function extract(name) {
+    const re = new RegExp("function " + name + "\\([^)]*\\)\\{[\\s\\S]*?\\n\\}\\n");
     const m = html.match(re);
     if (!m) throw new Error("could not find function " + name + "() in template");
     return m[0];
@@ -543,59 +581,52 @@ if (dblStart === -1 || dblEndIdx === -1) throw new Error("could not locate the d
 const dblBlock = html.slice(dblStart, dblEndIdx + dblEndMarker.length);
 
 const webglOK = true;
-const W = 800, H = 600;
-class Vector2Stub { constructor(x, y) { this.x = x; this.y = y; } }
-const THREE = { Vector2: Vector2Stub };
-const camera = {};
-
-const core = { userData: { kind: "note", node: { slug: "n1" } } };
-const halo = { userData: { kind: "note", node: { slug: "n1" } } };
-let nodes = [{ _core: core, _halo: halo }];
+let nodes = [], liveClusterCenters = new Map();
+function projectToScreen(x, y, z) { return { x, y, depth: 1 }; }
+function worldToPixels(worldSize) { return worldSize; }
 
 let openNoteCalls = [];
 function openNote(nd) { openNoteCalls.push(nd); }
+let flyToClusterCalls = [];
+function flyToCluster(repo, role) { flyToClusterCalls.push({ repo, role }); }
 let resetViewCalls = 0;
 function resetView() { resetViewCalls++; }
 
-// stub raycaster reports a hit only when the target array's first element is
-// IDENTICALLY the halo stub -- so a hit here proves the real code raycast the
-// halo array, not the core array (which would report no hit).
-let lastTargets = null;
-const raycaster = {
-    setFromCamera() {},
-    intersectObjects(targets) {
-        lastTargets = targets;
-        if (!targets.length) return [];
-        return targets[0] === halo ? [{ object: targets[0] }] : [];
-    },
-};
-
-eval(extractOneLine("hitTest"));
+eval(extract("pickNoteAt"));
+eval(extract("pickRoleLabelAt"));
+eval(extract("hitTest"));
 eval(dblBlock.replace('canvas.addEventListener("dblclick", ev=>{', "function dblclickHandler(ev){").replace(/\}\);\s*$/, "}"));
 
-// case 1: click lands on the visible halo -- hitTest() must open the note,
-// proving its raycast target is nd._halo (a core-only raycast would miss).
-hitTest(1, 1);
-if (openNoteCalls.length !== 1 || openNoteCalls[0].slug !== "n1") throw new Error("hitTest() did not open the note when only the halo (not the core) reports a hit -- it is not raycasting nd._halo");
-if (lastTargets[0] !== halo) throw new Error("hitTest() did not pass the halo sprite as its raycast target");
+// case 1: click lands on a note (pickNoteAt()'s nd.r*1.8 pixel radius) --
+// hitTest() must open it, proving its note target is the same pick hover uses.
+nodes = [{ x: 100, y: 100, z: 0, r: 5, slug: "n1" }];
+hitTest(100, 100);
+if (openNoteCalls.length !== 1 || openNoteCalls[0].slug !== "n1") throw new Error("hitTest() did not open the note under the cursor -- it is not using pickNoteAt()");
 
-// case 2: dblclick on the halo -- must NOT reset (aligned with hitTest's own
-// target set, so a note reachable by click is also exempt from the reset).
-resetViewCalls = 0; lastTargets = null;
-dblclickHandler({ clientX: 1, clientY: 1 });
-if (resetViewCalls !== 0) throw new Error("dblclick on the halo must not reset the view (guard not aligned with hitTest's halo target)");
-if (lastTargets[0] !== halo) throw new Error("dblclick guard did not raycast the halo sprite");
+// case 2: no note under the cursor, but a brain (role) label is -- flies to
+// that cluster.
+nodes = [];
+liveClusterCenters = new Map([["r1|dev", { x: 200, y: 200, z: 0, n: 3 }]]);
+hitTest(200, 226);   // pickRoleLabelAt() projects (s.x, s.y+26, s.z)
+if (flyToClusterCalls.length !== 1 || flyToClusterCalls[0].repo !== "r1" || flyToClusterCalls[0].role !== "dev") throw new Error("hitTest() did not fly to the brain label under the cursor");
 
-// case 3: dblclick on real empty space (nothing hits) -- reset must still fire.
-raycaster.intersectObjects = (targets) => { lastTargets = targets; return []; };
+// case 3: dblclick on a note -- must NOT reset (aligned with hitTest's own
+// pickNoteAt() target, so a note reachable by a single click is also exempt).
+nodes = [{ x: 500, y: 500, z: 0, r: 5, slug: "n2" }];
 resetViewCalls = 0;
 dblclickHandler({ clientX: 500, clientY: 500 });
+if (resetViewCalls !== 0) throw new Error("dblclick on a note must not reset the view (guard not aligned with hitTest's pickNoteAt target)");
+
+// case 4: dblclick on real empty space (nothing hits) -- reset must still fire.
+nodes = [];
+resetViewCalls = 0;
+dblclickHandler({ clientX: 9999, clientY: 9999 });
 if (resetViewCalls !== 1) throw new Error("dblclick on empty space must still reset the view");
 
 console.log("HITTEST_HALO_ALIGNED_OK");
 NODEJS
     hittest_out="$(node "$_nvhittest" "$NVHTML" 2>&1)"
-    check "hitTest() and the dblclick empty-space guard raycast the same halo sprite hover uses, not the tiny core (#88)" "HITTEST_HALO_ALIGNED_OK" "$hittest_out"
+    check "hitTest() and the dblclick empty-space guard pick notes through the same pickNoteAt() hover uses (#88)" "HITTEST_HALO_ALIGNED_OK" "$hittest_out"
     rm -f "$_nvhittest"
 
     # #75 behavioral: renderGauges() must (a) group into one section per repo
@@ -639,8 +670,20 @@ const document = {
 };
 const clusterKey = (repo, role) => repo + "|" + role;
 function roleHue() { return 190; }
+// comboHue() (see the layoutClusters fixture's own comment above) is stubbed
+// straight through to roleHue() -- color isn't what this fixture asserts.
+function comboHue(repo, role) { return roleHue(role); }
 function cssColor() { return "hsla(190,95%,72%,.95)"; }
 function arc() { return "<svg></svg>"; }
+// isBrainHidden() (the #73-adjacent per-brain "hide from totals/scene"
+// toggle) reads uiState/localStorage -- stubbed to "nothing is hidden" since
+// that toggle isn't what this fixture asserts (grouping/ordering/dimming).
+function isBrainHidden() { return false; }
+function dispName(repo) { return repo; }
+let uiState = {};
+function saveUiState() {}
+function openTalkPanel() {}
+const WHOLE_BRAIN = "__whole__";
 eval(extractOneLine("escapeHtml"));
 eval(extractOneLine("orderedRoles"));
 eval(extract("renderGauges"));
@@ -659,24 +702,29 @@ let links = [];
 gaugeList = makeEl();
 renderGauges();
 
+// each repo-brains section is [hrow (header + talk button), rows (the
+// actual role rows)] -- the #73 fly-to-cluster rewrite added the collapse
+// header row and the rows wrapper div; role rows are no longer direct
+// children of the section.
 if (gaugeList._children.length !== 2) throw new Error("expected one repo-brains section per repo, got " + gaugeList._children.length);
 const [secA, secB] = gaugeList._children;
 if (secA.className !== "repo-brains" || secB.className !== "repo-brains") throw new Error("sections must use the repo-brains class");
-if (!secA.innerHTML.includes("repo-a")) throw new Error("repo-a section header missing repo name: " + secA.innerHTML);
-if (!secB.innerHTML.includes("repo-b")) throw new Error("repo-b section header missing repo name: " + secB.innerHTML);
+const [hrowA, rowsA] = secA._children, [hrowB, rowsB] = secB._children;
+if (hrowA._children[0].textContent !== "repo-a") throw new Error("repo-a section header missing repo name: " + hrowA._children[0].textContent);
+if (hrowB._children[0].textContent !== "repo-b") throw new Error("repo-b section header missing repo name: " + hrowB._children[0].textContent);
 
-if (secA._children.length !== 3) throw new Error("expected 3 role rows in repo-a (canonical roles), got " + secA._children.length);
-const rolesA = secA._children.map(r => { const m = r.innerHTML.match(/class="rname"[^>]*>([a-z]+)</); return m ? m[1] : null; });
+if (rowsA._children.length !== 3) throw new Error("expected 3 role rows in repo-a (canonical roles), got " + rowsA._children.length);
+const rolesA = rowsA._children.map(r => { const m = r.innerHTML.match(/class="rname"[^>]*>([a-z]+)</); return m ? m[1] : null; });
 if (rolesA.join(",") !== "orchestrator,dev,reviewer") throw new Error("repo-a roles not orchestrator-first-then-alphabetical: " + rolesA.join(","));
 
-const devRow = secA._children[1];
+const devRow = rowsA._children[1];
 if (devRow.className !== "brainrow") throw new Error("repo-a's dev row (has a note) must not be dimmed: " + devRow.className);
-const orchRowA = secA._children[0], revRowA = secA._children[2];
+const orchRowA = rowsA._children[0], revRowA = rowsA._children[2];
 if (orchRowA.className !== "brainrow brainrow-empty") throw new Error("repo-a's note-less orchestrator row must be dimmed: " + orchRowA.className);
 if (revRowA.className !== "brainrow brainrow-empty") throw new Error("repo-a's note-less reviewer row must be dimmed: " + revRowA.className);
 
-if (secB._children.length !== 3) throw new Error("expected 3 role rows in repo-b (brainless repo), got " + secB._children.length);
-for (const row of secB._children) {
+if (rowsB._children.length !== 3) throw new Error("expected 3 role rows in repo-b (brainless repo), got " + rowsB._children.length);
+for (const row of rowsB._children) {
     if (row.className !== "brainrow brainrow-empty") throw new Error("every role in a brainless repo must render as a dimmed row, not be omitted: " + row.className);
 }
 
