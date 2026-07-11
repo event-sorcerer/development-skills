@@ -104,8 +104,11 @@ canvas.grabbing{cursor:grabbing}
 #search-filters-panel::-webkit-scrollbar-thumb{background:rgba(90,190,255,.4);border-radius:5px}
 #search-filters-panel::-webkit-scrollbar-thumb:hover{background:rgba(90,190,255,.6)}
 
-/* search results — opens attached to #searchbar's bottom edge (see #search-wrap above) */
-#search-results{width:100%;border-radius:0 0 12px 12px;border-top:1px solid rgba(90,190,255,.18);
+/* search results — opens attached to #searchbar's bottom edge (see #search-wrap above), inset
+   slightly narrower than the bar itself so the seam still reads as one attached unit but the
+   panel doesn't look like a plain continuation of the same box. */
+#search-results{width:calc(100% - 22px);margin:0 auto;border-radius:0 0 12px 12px;
+  border-top:1px solid rgba(90,190,255,.18);
   max-height:min(50vh,360px);display:flex;flex-direction:column;overflow:hidden}
 #search-results[hidden]{display:none}
 #search-results-head{display:flex;justify-content:space-between;align-items:center;
@@ -685,6 +688,24 @@ function flyToCluster(repo, role){
   }
   flyAnim = {fromTarget: {...target}, toTarget: fit.target, fromRadius: radius, toRadius: fit.distance, t0: performance.now(), dur: 650};
 }
+// Same fly mechanics as flyToCluster(), but framing ONE note tightly instead
+// of a whole brain — used by the search-results list so clicking a match
+// jumps the camera straight to it (the note could be anywhere off-screen;
+// unlike clicking a note already visible in the scene, there's nothing to
+// hit-test against here).
+function flyToNote(nd){
+  if(!webglOK) return;
+  userMoved = true;
+  const sphere = {x: nd.x, y: nd.y, z: nd.z, r: Math.max(50, (nd.r||4)*4)};
+  const fit = distanceForSphere(sphere, W/Math.max(1,H));
+  if(REDUCED){
+    flyAnim = null;
+    target = fit.target; radius = fit.distance;
+    updateCameraPosition();
+    return;
+  }
+  flyAnim = {fromTarget: {...target}, toTarget: fit.target, fromRadius: radius, toRadius: fit.distance, t0: performance.now(), dur: 650};
+}
 function updateFly(){
   if(!flyAnim) return;
   const p = Math.min(1, (performance.now() - flyAnim.t0) / flyAnim.dur);
@@ -969,12 +990,13 @@ function renderSearchResults(matches){
     const hue = comboHue(nd.repo, nd.role);
     const row = document.createElement("div");
     row.className = "srrow"; row.tabIndex = 0; row.setAttribute("role", "button");
-    row.setAttribute("aria-label", `Open ${nd.slug}`);
+    row.setAttribute("aria-label", `Jump to ${nd.slug}`);
     row.innerHTML = `<span class="dot" style="background:${cssColor(hue,62,.95)}"></span>`+
       `<span class="srslug">${escapeHtml(nd.slug)}</span>`+
       `<span class="srmeta">${repoList.length>1 ? escapeHtml(dispName(nd.repo))+" · " : ""}${escapeHtml(nd.role)}</span>`;
-    row.onclick = ()=>openNote(nd);
-    row.onkeydown = ev=>{ if(ev.key==="Enter"){ ev.preventDefault(); openNote(nd); } };
+    const jump = ()=>{ flyToNote(nd); openNote(nd); };
+    row.onclick = jump;
+    row.onkeydown = ev=>{ if(ev.key==="Enter"){ ev.preventDefault(); jump(); } };
     list.appendChild(row);
   }
 }
