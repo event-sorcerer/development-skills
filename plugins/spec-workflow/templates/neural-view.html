@@ -234,8 +234,13 @@ canvas.grabbing{cursor:grabbing}
   cursor:pointer; transition:background .1s,border-color .1s}
 #search-filters-panel input[type="checkbox"]:hover{border-color:var(--cyan-dim)}
 #search-filters-panel input[type="checkbox"]:focus-visible{outline:1px solid var(--cyan-dim);outline-offset:1px}
+/* checkmark, not +, here: these are plain checked/unchecked controls (Search-in,
+   brain/facet "select all" toggles) — + is reserved for the tri-state VALUE
+   rows (.sf-tristate) where it specifically pairs with - to mean include/
+   exclude. A checkbox that only ever HAS or LACKS a check needs the ordinary
+   checkmark, not a symbol implying a third "exclude" state it doesn't have. */
 #search-filters-panel input[type="checkbox"]:checked{background:var(--cyan);border-color:var(--cyan)}
-#search-filters-panel input[type="checkbox"]:checked::before{content:"+";color:var(--bg);font-size:10px;font-weight:700;line-height:1}
+#search-filters-panel input[type="checkbox"]:checked::before{content:"✓";color:var(--bg);font-size:10px;font-weight:700;line-height:1}
 #search-filters-panel input[type="checkbox"]:indeterminate{background:var(--amber);border-color:var(--amber)}
 #search-filters-panel input[type="checkbox"]:indeterminate::before{content:"−";color:var(--bg);font-size:10px;font-weight:700;line-height:1}
 /* collapsible sections/groups — same ▾/▸ glyph as the left sidebar's own
