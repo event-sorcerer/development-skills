@@ -597,3 +597,11 @@ ag_ route "2026-07-01T10:00:00Z" 0 brain-note "x" >/dev/null
 ag_ route "2026-07-01T10:00:00Z" 1 backlog "y" >/dev/null
 check "archive: status unaffected by archive dir presence" "pending=0" "$(ag_ status)"
 rm -rf "$AG"
+
+# README's feedback.py scripts-list entry enumerates the CLI verbs explicitly
+# (emit/pending/route/status/migrate-qualify) -- it must name `archive` too,
+# or the doc silently goes stale the moment a new verb ships.
+readme="$PLUGIN/README.md"
+readme_verbs_line="$(grep -F 'emit/pending/route/status/migrate-qualify' "$readme")"
+check "README documents feedback.py's archive verb" "emit/pending/route/status/migrate-qualify/archive" "$readme_verbs_line"
+check "README describes what archive does" "archive/<YYYY-MM>.yaml" "$readme_verbs_line"
