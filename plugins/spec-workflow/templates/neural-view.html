@@ -133,6 +133,7 @@ canvas.grabbing{cursor:grabbing}
 .sf-h{font-size:.56rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:.3rem}
 .sf-section label{display:flex;align-items:center;gap:.45rem;font-size:.66rem;color:var(--fg);
   padding:.15rem 0;cursor:pointer}
+.sf-hint{color:var(--muted);font-size:.58rem}
 .sf-repo{margin-top:.5rem}
 .sf-repo-h{display:flex;align-items:center;gap:.4rem;font-size:.6rem;color:var(--cyan);
   letter-spacing:.06em;text-transform:uppercase;margin-bottom:.15rem}
@@ -254,6 +255,8 @@ canvas.grabbing{cursor:grabbing}
 #tickerlog{font-size:.62rem;line-height:1.5;color:var(--slate)}
 #tickerlog .ev{padding:.28rem 0;border-top:1px solid rgba(90,190,255,.1)}
 #tickerlog .ev:first-child{border-top:0}
+#tickerlog .ev-clickable{cursor:pointer;margin:0 -.4rem;padding-left:.4rem;padding-right:.4rem;border-radius:4px}
+#tickerlog .ev-clickable:hover,#tickerlog .ev-clickable:focus-visible{background:rgba(90,190,255,.08);outline:none}
 /* head (time · repo tag · ROLE · kind) stays one line — it's short and
    never the part that was overflowing; the note/link name is what got
    truncated to an unreadable "inject deco…", so only IT wraps. */
@@ -374,6 +377,8 @@ canvas.grabbing{cursor:grabbing}
           <div class="sf-h">Search in</div>
           <label><input type="checkbox" id="sf-field-slug" checked> Title / slug</label>
           <label><input type="checkbox" id="sf-field-tags" checked> Tags</label>
+          <label><input type="checkbox" id="sf-field-frontmatter"> Frontmatter <span class="sf-hint">(paths, source)</span></label>
+          <label><input type="checkbox" id="sf-field-fulltext"> Full text <span class="sf-hint">(note body — slower, server-side)</span></label>
         </div>
         <div class="sf-section">
           <div class="sf-h">Brains</div>
@@ -543,6 +548,33 @@ function fibSphere(i, n, radius){
 // within a few units of the old layout.
 const BALL_K = 55;
 const ballR = n => BALL_K * Math.cbrt(Math.max(1, n));
+// Places `items` on a fibonacci sphere sized off their MEDIAN radius — not
+// their sum or their max — so a typical set stays tight even when one item
+// is a huge outlier (e.g. one role/repo with thousands of notes next to
+// others with a few dozen: summing or maxing let that single outlier blow
+// the whole sphere out, dragging every OTHER small item far apart from each
+// other too, not just from the giant one). Anything substantially bigger
+// than the median gets pushed further out along its own already-assigned
+// direction individually instead. Shared by the repo constellation and the
+// role-cluster ring within each repo — both hit the same failure mode.
+function packByRadius(items, radiusOf, minOuter, outerMul){
+  const n = items.length || 1;
+  const sorted = items.map(radiusOf).sort((a,b)=>a-b);
+  const typical = sorted[Math.floor(sorted.length/2)] || 0;
+  const outerR = n>1 ? Math.max(minOuter, typical*outerMul) : 0;
+  const offsets = new Map();
+  items.forEach((item,i)=>{
+    let c = n>1 ? fibSphere(i, n, outerR) : {x:0,y:0,z:0};
+    const r = radiusOf(item);
+    if(r > typical*1.8){
+      const len = Math.hypot(c.x,c.y,c.z) || 1;
+      const s = (len + (r - typical)) / len;
+      c = {x:c.x*s, y:c.y*s, z:c.z*s};
+    }
+    offsets.set(item, c);
+  });
+  return offsets;
+}
 function layoutClusters(){
   clusters.clear(); repoCenters.clear(); repoRadius.clear();
   const noteCount = new Map(), roleCount = new Map();
@@ -551,31 +583,42 @@ function layoutClusters(){
     const ck = clusterKey(nd.repo, nd.role);
     roleCount.set(ck, (roleCount.get(ck)||0)+1);
   }
-  // per repo: place role clusters on a fibSphere spaced by the LARGEST role
-  // ball, and size the repo region to contain them.
-  const roleRing = new Map();   // repo -> ring radius for its role clusters
+  // Per repo: pack role clusters (packByRadius, above) and size the repo
+  // region to actually contain them — including any role that got pushed
+  // out as an outlier, which the OLD "ring + maxBall" formula didn't
+  // account for (it assumed every role sat at exactly `ring`, never
+  // further).
+  const roleInfo = new Map();   // repo -> {rolesInRepo, offsets}
   for(const repo of repoList){
     const rolesInRepo = [...new Set(nodes.filter(n=>n.repo===repo).map(n=>n.role))].sort();
-    let maxBall = 0;
-    for(const role of rolesInRepo) maxBall = Math.max(maxBall, ballR(roleCount.get(clusterKey(repo,role))||0));
-    const ring = rolesInRepo.length>1 ? Math.max(BASE_REGION*0.6, maxBall*1.7) : 0;
-    roleRing.set(repo, {ring, rolesInRepo, maxBall});
-    repoRadius.set(repo, Math.max(MIN_REGION, ring + maxBall + 30));
+    const ballOf = role => ballR(roleCount.get(clusterKey(repo,role))||0);
+    // outerMul 0.55, not 1.7: at 1.7 same-sized role balls sit clearly
+    // apart from each other (confirmed by an old-vs-new side-by-side on
+    // development-skills — same relative positions, but the old layout read
+    // as one brain with lobes and the new one as three separate balls in a
+    // container). A ring smaller than the balls' own radius makes adjacent,
+    // similarly-sized roles overlap/merge like hemispheres instead of
+    // floating apart — the outlier push-out below still keeps a genuinely
+    // huge role (card-vault) from swallowing its tiny siblings.
+    const offsets = packByRadius(rolesInRepo, ballOf, BASE_REGION*0.6, 0.55);
+    roleInfo.set(repo, {rolesInRepo, offsets});
+    let farthest = 0;
+    for(const role of rolesInRepo){
+      const off = offsets.get(role);
+      farthest = Math.max(farthest, Math.hypot(off.x,off.y,off.z) + ballOf(role));
+    }
+    repoRadius.set(repo, Math.max(MIN_REGION, farthest + 30));
   }
   const nRepos = repoList.length || 1;
-  const totalR = [...repoRadius.values()].reduce((a,b)=>a+b, 0) || MIN_REGION;
-  const outerR = nRepos>1 ? Math.max(BASE_REGION*2.2, totalR*1.15) : 0;
-  repoList.forEach((repo,i)=>{
-    repoCenters.set(repo, nRepos>1 ? fibSphere(i, nRepos, outerR) : {x:0,y:0,z:0});
-  });
+  const repoOffsets = packByRadius(repoList, repo=>repoRadius.get(repo)||MIN_REGION, BASE_REGION*2.2, 2.5);
+  repoList.forEach(repo=>repoCenters.set(repo, repoOffsets.get(repo)));
   for(const repo of repoList){
     const rc = repoCenters.get(repo);
-    const {ring, rolesInRepo} = roleRing.get(repo);
-    const n = rolesInRepo.length || 1;
-    rolesInRepo.forEach((role,i)=>{
-      const off = n>1 ? fibSphere(i, n, ring) : {x:0,y:0,z:0};
+    const {rolesInRepo, offsets} = roleInfo.get(repo);
+    for(const role of rolesInRepo){
+      const off = offsets.get(role);
       clusters.set(clusterKey(repo,role), {x: rc.x+off.x, y: rc.y+off.y, z: rc.z+off.z, hue: comboHue(repo,role), n:0, repo, role});
-    });
+    }
   }
   nodes.forEach(nd=>{ const c = clusters.get(clusterKey(nd.repo,nd.role)); if(c) c.n++; });
   // container radius for big brains' gravity (see the integrate loop)
@@ -1162,16 +1205,33 @@ let searchActive = false;
 let lastSearchQuery = null;   // tracks the LAST query a search actually ran with, so re-issuing the
                                // same search (click/Enter again unchanged) reads as "toggle off"
 const searchFilters = {
-  fields: {slug: true, tags: true},
+  fields: {slug: true, tags: true, frontmatter: false, fulltext: false},
   brains: null,   // null = every brain in scope; else a Set of "repo/role" keys
 };
 function searchBrainInScope(repo, role){ return !searchFilters.brains || searchFilters.brains.has(brainKey(repo, role)); }
+// Full-text is the one scope that can't be matched client-side — note BODY
+// text is deliberately never shipped in /graph (payload size at thousands-
+// of-notes scale). fetchFulltextMatches() populates this Set of matching
+// note ids via GET /search-body BEFORE applySearchToNodes() runs; null
+// means "not fetched / not applicable" (fulltext scope off, or the fetch
+// failed — treated as no fulltext matches rather than blocking search).
+let fulltextMatchIds = null;
+async function fetchFulltextMatches(ql){
+  if(!searchFilters.fields.fulltext || !ql){ fulltextMatchIds = null; return; }
+  try{
+    const r = await fetch(`/search-body?q=${encodeURIComponent(ql)}`);
+    const d = await r.json();
+    fulltextMatchIds = new Set(Array.isArray(d.ids) ? d.ids : []);
+  }catch{ fulltextMatchIds = null; }
+}
 function searchNoteMatches(nd, ql){
   if(!searchBrainInScope(nd.repo, nd.role)) return false;
+  if(searchFilters.fields.fulltext && fulltextMatchIds && fulltextMatchIds.has(nd.id)) return true;
   const hay = [];
   if(searchFilters.fields.slug) hay.push(String(nd.slug||"").replace(/[-_]/g, " "));
   if(searchFilters.fields.tags) hay.push((nd.tags||[]).join(" "));
-  return hay.join("   ").toLowerCase().includes(ql);
+  if(searchFilters.fields.frontmatter){ hay.push((nd.paths||[]).join(" ")); hay.push(nd.source||""); }
+  return hay.join("   ").toLowerCase().includes(ql);
 }
 function applySearchToNodes(){
   const active = searchActive && lastSearchQuery;
@@ -1226,7 +1286,7 @@ function updateSearchUI(matches){
   resultsPanel.hidden = !searchActive;
   if(searchActive) renderSearchResults(matches);
 }
-function triggerSearch(){
+async function triggerSearch(){
   const q = document.getElementById("search-input").value.trim();
   if(!q){ clearSearch(); return; }
   const ql = q.toLowerCase();
@@ -1234,12 +1294,19 @@ function triggerSearch(){
   lastSearchQuery = ql;
   searchActive = true;
   searchResultsCollapsed = false;   // a fresh search always opens expanded
+  // Full-text needs a server round trip before matches can be computed —
+  // await it (a no-op if that scope is off) so applySearchToNodes() sees a
+  // fresh fulltextMatchIds instead of racing an in-flight fetch.
+  document.getElementById("search-count").textContent = "searching…";
+  await fetchFulltextMatches(ql);
+  if(ql !== lastSearchQuery) return;   // superseded by a newer search/clear while the fetch was in flight
   updateSearchUI(applySearchToNodes());
   visSearchEpoch++;   // updateVisuals(): rewrite aSearch + link colors once
 }
 function clearSearch(){
   searchActive = false;
   lastSearchQuery = null;
+  fulltextMatchIds = null;
   for(const nd of nodes) nd.searchMatch = false;
   updateSearchUI([]);
   visSearchEpoch++;   // updateVisuals(): rewrite aSearch + link colors once
@@ -1247,9 +1314,14 @@ function clearSearch(){
 // Called after a graph reload rebuilds `nodes` (fresh objects — searchMatch
 // doesn't survive that) and after a filter checkbox changes — re-run the
 // SAME lastSearchQuery against current data/filters without touching the
-// toggle-off logic in triggerSearch().
-function refreshSearchHighlight(){
+// toggle-off logic in triggerSearch(). Filter changes can flip the
+// fulltext scope on/off too, so re-fetch (fetchFulltextMatches is a no-op
+// when that scope is off) rather than reusing a possibly-stale Set.
+async function refreshSearchHighlight(){
   if(!searchActive) return;
+  const q = lastSearchQuery;
+  await fetchFulltextMatches(q);
+  if(q !== lastSearchQuery || !searchActive) return;   // superseded while the fetch was in flight
   updateSearchUI(applySearchToNodes());
   visSearchEpoch++;   // updateVisuals(): rewrite aSearch + link colors once
 }
@@ -1756,7 +1828,7 @@ let simStepMs = 0, lastStepMs = -1e9, simCalibratedN = -1, simFastForward = 0;
 // dev repo / marketplace clone / plugin cache — and "why does it look old"
 // has burned real debugging time). Bump the PATCH on every template change
 // within an increment of work; bump the MINOR when the increment ships.
-const NV_VERSION = "0.26.0";
+const NV_VERSION = "0.27.1";
 // every tab reports its live numbers to the server about once a second
 // (POST /metrics) so `neural-view.py status` — and any agent driving it —
 // can read the page's real frame rate without screenshots.
@@ -1999,6 +2071,22 @@ function logEvent(e){
   const tag = (repoList.length>1 && e.repo) ? `<span class="t">[${escapeHtml(e.repo)}]</span> ` : "";
   div.innerHTML = `<div class="ev-head"><span class="t">${t}</span> ${tag}<span class="${cls}">${(e.role||"?").toUpperCase()} · ${kind}</span></div>` +
     (what ? `<div class="ev-note">${escapeHtml(what)}</div>` : "");
+  // Clickable when the event names a single note (seed/hop/inject — not a
+  // consult, whose `what` is a link key "a->b", not one slug): jumps the
+  // camera there and opens the same detail panel a search-result row does.
+  if(e.note && e.repo && e.role){
+    div.classList.add("ev-clickable");
+    div.tabIndex = 0;
+    div.setAttribute("role", "button");
+    div.setAttribute("aria-label", `Jump to ${e.note}`);
+    const jump = ()=>{
+      const nd = nodeById.get(`${e.repo}/${e.role}/${e.note}`);
+      if(!nd) return;   // note since hidden/pruned/graduated out of the current graph — nothing to jump to
+      flyToNote(nd); openNote(nd);
+    };
+    div.onclick = jump;
+    div.onkeydown = ev=>{ if(ev.key==="Enter"){ ev.preventDefault(); jump(); } };
+  }
   LOG.prepend(div);
   while(LOG.childNodes.length>40) LOG.lastChild.remove();   // sidebar has vertical room the old bottom strip lacked
 }
@@ -2539,6 +2627,8 @@ document.getElementById("sr-collapse").onclick = ()=>{
 };
 document.getElementById("sf-field-slug").onchange = ev=>{ searchFilters.fields.slug = ev.target.checked; refreshSearchHighlight(); };
 document.getElementById("sf-field-tags").onchange = ev=>{ searchFilters.fields.tags = ev.target.checked; refreshSearchHighlight(); };
+document.getElementById("sf-field-frontmatter").onchange = ev=>{ searchFilters.fields.frontmatter = ev.target.checked; refreshSearchHighlight(); };
+document.getElementById("sf-field-fulltext").onchange = ev=>{ searchFilters.fields.fulltext = ev.target.checked; refreshSearchHighlight(); };
 const searchFiltersBtn = document.getElementById("search-filters-btn");
 const searchFiltersPanel = document.getElementById("search-filters-panel");
 searchFiltersBtn.onclick = (ev)=>{
