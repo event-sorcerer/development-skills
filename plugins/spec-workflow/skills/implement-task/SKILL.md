@@ -91,5 +91,16 @@ work.type governs delivery (absent == `pr`): `pr` — push the branch, `gh pr cr
 
 **Auto-merge** (`methodology.autoMerge: true`): after both passes are clean, do NOT wait for a human — run the PR-review/approve/merge protocol in `${CLAUDE_PLUGIN_ROOT}/skills/build-next/references/auto-review.md` (independent reviewer agent on a suitable model from the reviewer identity's allowed list, ≤3 fix rounds, approval recorded on the PR, `gh pr merge`, merge announced on the issue + to live teammates).
 
-## 4. Stop
-One task per invocation. Report: task, gate result, PR link, board status. Later statuses (QA/Ready/Deployed) only when merge/validation/publish actually happen.
+## 4. Retro + feedback — MANDATORY at PR close, standalone or via `build-next`
+This step applies every time this skill closes a task (merge OR abandon), including a direct, standalone invocation of this skill. Do not assume a wrapping `build-next` loop will run it for you — if nothing else ran it this session, you own it.
+
+**Telemetry**: after each review round in step 3, `telemetry.py <root> record '{"kind":"review-round","task":"N","round":R,"verdict":"...","ts":"<now, UTC ISO 8601>"}'`; once the task closes (merge/QA), `telemetry.py <root> record '{"kind":"task-close","task":"N","estimate":<points>,"ts":"<now>"}'` (estimate from `board.sh show N` / the issue).
+
+**Retro**: interview the dev and reviewer agents, mint/prune/graduate brain notes, regenerate the directory, commit as the orchestrator — full protocol, including `.claude/lessons.jsonl` (SW-020) as retro input, in `${CLAUDE_PLUGIN_ROOT}/skills/build-next/references/brains.md`. `.claude/identities/` not existing yet is NOT a skip reason — minting is self-bootstrapping (`brain.py mint` creates the directory); treat a missing dir the same as an empty one and mint into it. The only valid skips are `delegation.identities` being absent/fully disabled for this repo, or a genuine blocker (e.g. no orchestrator identity configured to author the commit) — either way, state it via `retro: SKIPPED — <reason>` in your final report, AND `telemetry.py <root> record '{"kind":"retro-skip","reason":"...","ts":"<now>"}'` — a silent skip is never acceptable.
+
+**Feedback** (if `methodology.feedback` enabled, distinct from and in addition to retro — feedback emits/triages a per-task process signal, retro mints brain notes; neither replaces the other): invoke the `feedback` skill to record this task's process signal. Then, as the ORCHESTRATOR — never a dev agent — triage `feedback.py <root> pending`: dedupe each item's `generalized` text via `python3 scripts/similar.py <root> "<generalized text>"` against existing issues, then `feedback.py <root> route <ts> <idx> <action> <ref>` per item — `backlog`, `brain-note` (folds into this step's minting — never a second minting path), `graduate`, `upstream`, or `ignore` (state why). `methodology.feedback.autoTriage` (default false) gates `backlog` routing on explicit human consent.
+
+If the task involves UI-affecting decisions and iterative UI mode is on (`.claude/ITERATIVE_UI_OFF` absent, `methodology.iterativeUI` not false): follow the `ui-options` skill's protocol (see `build-next` skill, "Iterative UI mode") rather than guessing — this applies whether or not a `build-next` loop is wrapping this invocation.
+
+## 5. Stop
+One task per invocation. Report: task, gate result, PR link, board status, and a **retro-status line** (`retro: done (notes minted/pruned: ...)` or `retro: SKIPPED — <reason>`) per step 4. Later statuses (QA/Ready/Deployed) only when merge/validation/publish actually happen.

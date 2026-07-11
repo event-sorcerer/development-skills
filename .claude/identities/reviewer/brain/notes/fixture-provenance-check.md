@@ -3,7 +3,7 @@ tags: [fixtures, provenance]
 paths: ["**"]
 strength: 4
 source: "#50 retro — refinement (assertion-matched vs trigger-only strings)"
-graduated: false
+graduated: true
 created: 2026-07-08
 ---
 

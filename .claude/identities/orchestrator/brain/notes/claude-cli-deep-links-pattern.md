@@ -3,7 +3,7 @@ tags: [deep-links, claude-cli, neural-view, tooling, plugins]
 paths: ["plugins/spec-workflow/templates/neural-view.html", "plugins/spec-workflow/scripts/neural-view.py", "plugins/spec-workflow/skills/ask-identity", "plugins/spec-workflow/skills/ask-brain"]
 strength: 3
 source: "neural-view Talk panel, confirmed via user manual testing (Unknown command: /ask-identity)"
-graduated: false
+graduated: true
 created: 2026-07-10
 ---
 
