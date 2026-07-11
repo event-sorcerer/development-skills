@@ -790,6 +790,95 @@ else
 fi
 rm -rf "$BQ" "$FGH" "$LOG" "$LISTCC" "$EDITCC"
 
+# --- (aa) review finding (#104, round 1): _aside_write_remaining's rewrite of
+# the aside file must itself be atomic -- a kill -9 landing between an
+# in-place truncate and its line-by-line appends would leave the aside file
+# empty/partial, i.e. an entry mid-rewrite in NEITHER the aside file nor
+# $QUEUE_FILE. Pins the exact window right before the atomic `mv` (via the
+# dedicated, separately-gated BOARD_QUEUE_TEST_ASIDE_SYNC hook, so this
+# doesn't cost every other sync-using test above an extra wait) and asserts
+# the aside path still shows its OLD, untouched, full content at that point
+# -- proving the new content lives only in a sibling temp file until the
+# single atomic rename lands, never as a partially-written aside file. ---
+_qsetup
+mkdir -p "$BQ/.claude"
+printf '{"op":"prio","issue":"950","priority":"P1","ts":"2020-01-01T00:00:00Z"}\n' >"$BQ/.claude/board-queue.jsonl"
+SYNC="$(mktemp -d)"; : >"$SYNC/.board-queue-test-sync"
+LOG="$(mktemp)"; LISTCC="$(mktemp)"; EDITCC="$(mktemp)"; OUT="$(mktemp)"
+
+(
+    cd "$BQ" || exit 1
+    exec env PATH="$FGH:$PATH" FAKE_GH_LOG="$LOG" FAKE_GH_LIST_CALLCOUNT="$LISTCC" FAKE_GH_EDIT_CALLCOUNT="$EDITCC" \
+        FAKE_GH_ISSUE_NUM=950 FAKE_GH_ITEM_VISIBLE=1 FAKE_GH_ITEM_STATUS="Backlog" \
+        BOARD_QUEUE_TEST_SYNC="$SYNC" BOARD_QUEUE_TEST_TAG=asideatomic BOARD_QUEUE_TEST_ASIDE_SYNC=1 \
+        bash "$PLUGIN/scripts/board.sh" flush
+) >"$OUT" 2>&1 &
+PID=$!
+
+# Release the pre-apply pause (right after the aside-move) immediately so the
+# flush proceeds to actually apply the one queued entry, then wait on the
+# aside-write-specific pause (right before _aside_write_remaining's atomic
+# mv, i.e. AFTER the entry applied but BEFORE the aside file is rewritten to
+# reflect that).
+_i=0
+while [[ ! -f "$SYNC/asideatomic.ready" && $_i -lt 150 ]]; do sleep 0.02; _i=$((_i + 1)); done
+: >"$SYNC/asideatomic.go"
+_i=0
+while [[ ! -f "$SYNC/asideatomic-aside-write.ready" && $_i -lt 150 ]]; do sleep 0.02; _i=$((_i + 1)); done
+
+asideglob=("$BQ"/.claude/.flush.*)
+if [[ -e "${asideglob[0]}" ]]; then
+    asidecontent="$(cat "${asideglob[@]}" 2>/dev/null)"
+    check "(aa) mid-aside-rewrite pause: the aside file still shows its OLD, untruncated content (no partial write visible)" '"op":"prio","issue":"950"' "$asidecontent"
+else
+    echo "FAIL (aa) mid-aside-rewrite pause: aside file missing entirely at the pause point"
+    fails=$((fails + 1))
+fi
+tmpglob=("$BQ"/.claude/.flush-remaining.*)
+if [[ -e "${tmpglob[0]}" ]]; then
+    echo "ok   (aa) mid-aside-rewrite pause: the new (empty) content sits in a sibling temp file, not yet mv'd over the aside path"
+else
+    echo "FAIL (aa) mid-aside-rewrite pause: expected a sibling .flush-remaining.* temp file to exist mid-write"
+    fails=$((fails + 1))
+fi
+
+kill -9 "$PID" 2>/dev/null
+wait "$PID" 2>/dev/null
+
+# Durability check: even crashing exactly inside the aside rewrite must never
+# lose the entry -- it's recoverable (either the aside still holds it, or an
+# already-applied entry is simply gone because it was durably confirmed,
+# never "vanished mid-write").
+asideglob=("$BQ"/.claude/.flush.*)
+recoverable=0
+if [[ -e "${asideglob[0]}" ]] && grep -qF '"issue":"950"' "${asideglob[@]}" 2>/dev/null; then
+    recoverable=1
+fi
+applied=0
+grep -qF "prio #950 -> P1" "$OUT" 2>/dev/null && applied=1
+if [[ "$recoverable" -eq 1 || "$applied" -eq 1 ]]; then
+    echo "ok   (aa) crash mid-aside-rewrite: the entry was either already applied or remains recoverable on disk -- never lost"
+else
+    echo "FAIL (aa) crash mid-aside-rewrite: entry #950 is neither applied nor recoverable -- lost"
+    fails=$((fails + 1))
+fi
+rmdir "$BQ/.claude/board-queue.lock" 2>/dev/null
+if [[ ! -s "$BQ/.claude/board-queue.jsonl" ]]; then
+    cat "${asideglob[@]}" 2>/dev/null >"$BQ/.claude/board-queue.jsonl"
+fi
+rm -f "${asideglob[@]}" "${tmpglob[@]}" 2>/dev/null
+LOG2="$(mktemp)"; EDITCC2="$(mktemp)"
+out2="$(cd "$BQ" && PATH="$FGH:$PATH" FAKE_GH_LOG="$LOG2" FAKE_GH_LIST_CALLCOUNT="$(mktemp)" FAKE_GH_EDIT_CALLCOUNT="$EDITCC2" \
+    FAKE_GH_ISSUE_NUM=950 FAKE_GH_ITEM_VISIBLE=1 FAKE_GH_ITEM_STATUS="Backlog" \
+    bash "$PLUGIN/scripts/board.sh" flush --verbose 2>&1; echo "rc=$?")"
+if grep -qF "prio #950 -> P1" <<<"$out2" || grep -qF "queue empty" <<<"$out2"; then
+    echo "ok   (aa) recovery flush: the entry ends up applied (either just now, or already was)"
+else
+    echo "FAIL (aa) recovery flush: entry #950 never applied"
+    fails=$((fails + 1))
+fi
+rm -rf "$BQ" "$FGH" "$SYNC" "$LOG" "$LISTCC" "$EDITCC" "$OUT" "$LOG2" "$EDITCC2"
+
 echo "== setup-project: .gitignore covers the board-queue feed =="
 check "setup-project SKILL.md gitignores .claude/board-queue.jsonl" '.claude/board-queue.jsonl' "$(cat "$PLUGIN/skills/setup-project/SKILL.md")"
 check "repo .gitignore covers .claude/board-queue.jsonl" '.claude/board-queue.jsonl' "$(cat "$(dirname "$(dirname "$PLUGIN")")/.gitignore")"
