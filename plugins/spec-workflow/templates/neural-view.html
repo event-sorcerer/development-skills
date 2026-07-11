@@ -67,7 +67,13 @@ canvas.grabbing{cursor:grabbing}
    separate floating thing — see the corner-flattening/no-border-between rule below. */
 #search-wrap{position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:22;
   width:min(600px,52vw);display:flex;flex-direction:column}
-#searchbar{position:static;display:flex;align-items:center;gap:.4rem;padding:.4rem .55rem;width:100%}
+/* #searchbar and #search-results are SIBLING .hud panels (each its own
+   stacking context via backdrop-filter — see the comment on .hud above), so
+   the filters popover's z-index:60 (a descendant of #searchbar) is trapped
+   inside #searchbar's own context and can't outrank #search-results on its
+   own; without an explicit z-index here, DOM order (search-results comes
+   after #searchbar) would paint the matches dropdown on top instead. */
+#searchbar{position:static;z-index:2;display:flex;align-items:center;gap:.4rem;padding:.4rem .55rem;width:100%}
 #searchbar.results-open{border-radius:12px 12px 0 0;border-bottom-color:transparent}
 /* input wraps its own search-icon (+ clear, when active) buttons, right-inset INSIDE the field —
    not separate controls beside it. The input itself is the primary element and gets the bar's
@@ -89,8 +95,18 @@ canvas.grabbing{cursor:grabbing}
 #search-count{font-size:.58rem;color:var(--muted);white-space:nowrap}
 #search-filters-btn{display:inline-flex;align-items:center;justify-content:center;border:0;background:none}
 #search-filters-wrap{position:relative}
-#search-filters-panel{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);
-  min-width:230px;max-height:min(60vh,420px);overflow-y:scroll;padding:.65rem .75rem;display:none;
+/* position:fixed, anchored at the SAME top-left corner as #gauges (the left
+   BRAINS sidebar: top:70px;left:14px;width:296px) and sized to match it
+   (slightly wider) — while filters are open they replace that sidebar in
+   place rather than float off elsewhere as a separate, disconnected panel.
+   HEIGHT (not just max-height): the panel's content is often shorter than
+   #gauges (e.g. no brain has a schema selected yet, so no Filters section),
+   and a content-sized box would leave the sidebar exposed below it — fixed
+   height keeps it a full opaque overlay regardless of how much is inside;
+   multi-column content (BRAINS/FILTERS groups) auto-collapses to one column
+   at this width since column-width:150px can't fit a second one. */
+#search-filters-panel{position:fixed;top:70px;left:14px;
+  width:320px;height:calc(100vh - 100px);overflow-y:scroll;padding:.65rem .75rem;display:none;
   flex-direction:column;gap:.6rem;z-index:60;background:var(--panel-solid);backdrop-filter:none;
   -webkit-backdrop-filter:none;scrollbar-gutter:stable;
   scrollbar-width:thin;scrollbar-color:rgba(90,190,255,.4) rgba(255,255,255,.05)}
@@ -133,12 +149,73 @@ canvas.grabbing{cursor:grabbing}
 .sf-section label{display:flex;align-items:center;gap:.45rem;font-size:.66rem;color:var(--fg);
   padding:.15rem 0;cursor:pointer}
 .sf-hint{color:var(--muted);font-size:.58rem}
-.sf-repo{margin-top:.5rem}
+/* multi-column so a long BRAINS list (many repos × roles) reads across instead
+   of forcing a tall single-file scroll — columns (not grid) because .sf-repo
+   blocks have uneven heights (different role counts per repo). */
+#sf-brains{column-width:150px;column-gap:1.1rem}
+#sf-facets{column-width:150px;column-gap:1.1rem}
+#sf-facets-heading{display:flex;align-items:center;justify-content:space-between}
+#sf-facets-heading .sf-hint{text-transform:none;letter-spacing:normal;font-size:.6rem}
+.sf-repo{margin-top:.5rem;break-inside:avoid}
 .sf-repo-h{display:flex;align-items:center;gap:.4rem;font-size:.6rem;color:var(--cyan);
   letter-spacing:.06em;text-transform:uppercase;margin-bottom:.15rem}
 .sf-repo-h button{background:none;border:0;color:var(--muted);cursor:pointer;font-size:.56rem;
   padding:0;text-decoration:underline;text-underline-offset:2px}
 .sf-repo-h button:hover{color:var(--cyan)}
+/* tri-state all/none toggle — a checkbox in a "chip" a shade lighter than the
+   popover's own --panel-solid background, per-repo AND one master toggle
+   beside the "Brains" heading itself. .indeterminate is set in JS (native
+   checkboxes have no CSS-only indeterminate state). */
+.sf-toggle{display:inline-flex;align-items:center;gap:.3rem;padding:.1rem .4rem;
+  border-radius:5px;background:rgba(70,120,170,.2);cursor:pointer;
+  font-size:.56rem;letter-spacing:.04em;color:var(--cyan);text-transform:none}
+.sf-toggle:hover{background:rgba(70,120,170,.34)}
+.sf-toggle input{margin:0;accent-color:var(--cyan)}
+.sf-h-row{display:flex;align-items:center;gap:.4rem}
+.sf-brainrow{display:flex;align-items:center;justify-content:space-between;gap:.4rem;
+  padding:.15rem 0;cursor:pointer;font-size:.66rem;color:var(--fg)}
+.sf-brainrow-left{display:flex;align-items:center;gap:.4rem;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.sf-schema-icon{flex:none;color:var(--cyan);opacity:.85}
+.sf-only{flex:none;background:none;border:0;color:var(--muted);font-size:.56rem;
+  cursor:pointer;padding:0;text-decoration:underline;text-underline-offset:2px;
+  opacity:0;transition:opacity .12s}
+.sf-brainrow:hover .sf-only,.sf-brainrow:focus-within .sf-only{opacity:1}
+.sf-only:hover{color:var(--cyan)}
+/* numeric facet widget (cost/power/defense/... comparator + value) */
+.sf-numrow{display:flex;align-items:center;gap:.35rem}
+.sf-numrow select,.sf-numrow input{background:rgba(70,120,170,.14);border:1px solid var(--border);
+  border-radius:5px;color:var(--fg);font-family:var(--mono);font-size:.66rem;padding:.2rem .35rem}
+.sf-numrow select{flex:none;cursor:pointer}
+.sf-numrow input{width:100%;min-width:0}
+.sf-numrow input:focus,.sf-numrow select:focus{outline:0;border-color:var(--cyan-dim)}
+/* tri-state enum value row: click/Enter/Space cycles unselected -> include ->
+   exclude -> unselected. Custom-styled indicator instead of a native
+   checkbox — unselected is a faint outline (not a stark white box), include
+   is cyan+check, exclude is amber/red+minus, so "will I see MORE or LESS"
+   reads at a glance without hovering or opening a legend. */
+.sf-facetrow{display:flex;align-items:center;gap:.45rem;padding:.15rem 0;
+  font-size:.66rem;color:var(--fg);cursor:pointer;user-select:none}
+.sf-facetrow:focus-visible{outline:1px solid var(--cyan-dim);outline-offset:2px;border-radius:3px}
+.sf-tristate{width:13px;height:13px;border-radius:4px;flex:none;position:relative;
+  border:1.5px solid rgba(143,166,189,.4);background:rgba(255,255,255,.04);transition:background .1s,border-color .1s}
+.sf-facetrow:hover .sf-tristate{border-color:var(--cyan-dim)}
+.sf-tristate[data-state="include"]{background:var(--cyan);border-color:var(--cyan)}
+.sf-tristate[data-state="include"]::after{content:"";position:absolute;left:3px;top:0;width:4px;height:8px;
+  border:solid var(--bg);border-width:0 2px 2px 0;transform:rotate(45deg)}
+.sf-tristate[data-state="exclude"]{background:var(--amber);border-color:var(--amber)}
+.sf-tristate[data-state="exclude"]::after{content:"";position:absolute;left:2px;top:5px;width:7px;height:2px;background:var(--bg)}
+/* collapsible sections/groups — same ▾/▸ glyph as the left sidebar's own
+   .secthead section headers (#sect-brains etc.), just sized for these
+   smaller sub-headers. Hiding the body: everything in a collapsed
+   .sf-section/.sf-repo EXCEPT its own header row. */
+.sf-collapse-btn{background:none;border:0;padding:0;margin-right:.4rem;cursor:pointer;
+  color:var(--cyan-dim);font-size:.6rem;flex:none;line-height:1}
+.sf-collapse-btn:hover{color:var(--cyan)}
+.sf-collapse-btn::before{content:"▾"}
+.sf-collapse-btn[aria-expanded="false"]::before{content:"▸"}
+.sf-section.collapsed > *:not(.sf-h){display:none}
+.sf-repo.collapsed > *:not(.sf-repo-h){display:none}
 
 /* settings popover (top bar gear) */
 #settings-wrap{position:relative}
@@ -266,7 +343,7 @@ canvas.grabbing{cursor:grabbing}
 #tickerlog .t{color:#7c92a6}
 
 /* inspect panel (right) */
-#inspect{top:70px;right:14px;width:min(340px,42vw);max-height:calc(100vh - 150px);z-index:30;   /* overlays the activation-log sidebar while open */
+#inspect{top:70px;right:14px;width:min(340px,42vw);max-height:calc(100vh - 150px);z-index:65;   /* above #search-filters-panel (60) too — the card detail sidebar always wins */
   overflow:auto;padding:.9rem 1rem;transform:translateX(120%);transition:transform .25s ease;
   opacity:0}
 #inspect.open{transform:none;opacity:1}
@@ -371,19 +448,6 @@ canvas.grabbing{cursor:grabbing}
           <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
         </svg>
       </button>
-      <div class="hud" id="search-filters-panel">
-        <div class="sf-section">
-          <div class="sf-h">Search in</div>
-          <label><input type="checkbox" id="sf-field-slug" checked> Title / slug</label>
-          <label><input type="checkbox" id="sf-field-tags" checked> Tags</label>
-          <label><input type="checkbox" id="sf-field-frontmatter"> Frontmatter <span class="sf-hint">(paths, source)</span></label>
-          <label><input type="checkbox" id="sf-field-fulltext"> Full text <span class="sf-hint">(note body — slower, server-side)</span></label>
-        </div>
-        <div class="sf-section">
-          <div class="sf-h">Brains</div>
-          <div id="sf-brains"></div>
-        </div>
-      </div>
     </div>
   </div>
   <div class="hud" id="search-results" hidden>
@@ -392,6 +456,31 @@ canvas.grabbing{cursor:grabbing}
       <button class="iconbtn" id="sr-collapse" title="Collapse results" aria-label="Collapse results">▾</button>
     </div>
     <div id="search-results-list"></div>
+  </div>
+</div>
+<!-- NOT nested under #search-wrap: that wrapper has `transform:translateX(-50%)`,
+     and a transform on an ancestor turns a position:fixed descendant's containing
+     block into THAT ancestor instead of the viewport (a CSS spec quirk) — so
+     `left:14px` below would land near #search-wrap's own edge, not the true
+     viewport edge, and the panel would never actually reach/cover #gauges. -->
+<div class="hud" id="search-filters-panel">
+  <div class="sf-section">
+    <div class="sf-h">Search in</div>
+    <label><input type="checkbox" id="sf-field-slug" checked> Title / slug</label>
+    <label><input type="checkbox" id="sf-field-tags" checked> Tags</label>
+    <label><input type="checkbox" id="sf-field-frontmatter"> Frontmatter <span class="sf-hint">(paths, source)</span></label>
+    <label><input type="checkbox" id="sf-field-fulltext"> Full text <span class="sf-hint">(note body — slower, server-side)</span></label>
+  </div>
+  <div class="sf-section">
+    <div class="sf-h sf-h-row">
+      <label class="sf-toggle" title="Select/deselect all brains"><input type="checkbox" id="sf-brains-master" aria-label="Select/deselect all brains"></label>
+      <span>Brains</span>
+    </div>
+    <div id="sf-brains"></div>
+  </div>
+  <div class="sf-section" id="sf-facets-section" hidden>
+    <div class="sf-h" id="sf-facets-heading">Filters</div>
+    <div id="sf-facets"></div>
   </div>
 </div>
 
@@ -1206,8 +1295,39 @@ let lastSearchQuery = null;   // tracks the LAST query a search actually ran wit
 const searchFilters = {
   fields: {slug: true, tags: true, frontmatter: false, fulltext: false},
   brains: null,   // null = every brain in scope; else a Set of "repo/role" keys
+  facets: {},     // fieldKey -> Set of selected tag strings — enum CHECKBOX UI state only
+  numeric: {},    // fieldKey -> {op, value} — numeric widget UI state only
+  queryTerms: [], // parsed {neg, kind, field|null, values|word|op+num} — the actual match source
 };
 function searchBrainInScope(repo, role){ return !searchFilters.brains || searchFilters.brains.has(brainKey(repo, role)); }
+function hasActiveFacets(){ return searchFilters.queryTerms.length > 0; }
+const NUM_CMP = {"=": (a,b)=>a===b, ">": (a,b)=>a>b, "<": (a,b)=>a<b, ">=": (a,b)=>a>=b, "<=": (a,b)=>a<=b};
+// AND across terms, OR within one field's comma-separated values (enum) or ANY
+// of a numeric field's variant values satisfying the comparator, '-' negates a
+// term — same grammar as brain.py's `recall --query`. Matching is against the
+// note's TAGS for enum/word terms, and nd.num[field] (an array — a card whose
+// stat varies by pitch has one value per variant, see numeric_field_values()
+// server-side) for numeric terms. queryTerms is built either from checkbox/
+// numeric-widget state (facetsToQueryTerms, positive-only) or parsed directly
+// from typed text in the search box (parseQueryString, supports negation the
+// widgets can't represent — e.g. "classes:brute -rarity:revered").
+function queryTermMatches(term, nd){
+  let ok;
+  if(term.kind === "numeric"){
+    const vals = (nd.num && nd.num[term.field]) || [];
+    const cmp = NUM_CMP[term.op];
+    ok = cmp ? vals.some(v => cmp(v, term.num)) : false;
+  } else if(term.field){
+    const tags = nd.tags || [];
+    ok = term.values.some(v => tags.includes(v));
+  } else {
+    ok = (nd.tags || []).includes(term.word);
+  }
+  return term.neg ? !ok : ok;
+}
+function facetNoteMatches(nd){
+  return searchFilters.queryTerms.every(t => queryTermMatches(t, nd));
+}
 // Full-text is the one scope that can't be matched client-side — note BODY
 // text is deliberately never shipped in /graph (payload size at thousands-
 // of-notes scale). fetchFulltextMatches() populates this Set of matching
@@ -1232,12 +1352,24 @@ function searchNoteMatches(nd, ql){
   if(searchFilters.fields.frontmatter){ hay.push((nd.paths||[]).join(" ")); hay.push(nd.source||""); }
   return hay.join("   ").toLowerCase().includes(ql);
 }
+// Two independent filter mechanisms can both be live at once: the text search
+// bar (searchActive + lastSearchQuery) and schema-driven facet checkboxes
+// (searchFilters.facets, only rendered when exactly one brain is selected —
+// see updateFacetSchema()). filterActive() is true if EITHER has a live
+// constraint; a node must satisfy whichever ones are active (AND between the
+// two mechanisms when both are on).
+function filterActive(){ return (searchActive && !!lastSearchQuery) || hasActiveFacets(); }
 function applySearchToNodes(){
-  const active = searchActive && lastSearchQuery;
+  const textActive = searchActive && !!lastSearchQuery;
+  const facetsActive = hasActiveFacets();
+  const active = textActive || facetsActive;
   const matches = [];
   for(const nd of nodes){
-    nd.searchMatch = !!active && searchNoteMatches(nd, lastSearchQuery);
-    if(nd.searchMatch) matches.push(nd);
+    let match = active;
+    if(match && textActive) match = searchNoteMatches(nd, lastSearchQuery);
+    if(match && facetsActive) match = facetNoteMatches(nd);
+    nd.searchMatch = match;
+    if(match) matches.push(nd);
   }
   return matches;
 }
@@ -1273,21 +1405,45 @@ function renderSearchResults(matches){
   }
 }
 function updateSearchUI(matches){
+  const active = filterActive();
   const clearBtn = document.getElementById("search-clear");
   const countEl = document.getElementById("search-count");
   const btn = document.getElementById("search-btn");
   const bar = document.getElementById("searchbar");
   const resultsPanel = document.getElementById("search-results");
-  clearBtn.hidden = !searchActive;
-  countEl.textContent = searchActive ? `${matches.length} match${matches.length===1?"":"es"}` : "";
-  btn.classList.toggle("active", searchActive);
-  bar.classList.toggle("results-open", searchActive);
-  resultsPanel.hidden = !searchActive;
-  if(searchActive) renderSearchResults(matches);
+  clearBtn.hidden = !active;   // visible whenever the box shows EITHER a text search or a generated facet query
+  countEl.textContent = active ? `${matches.length} match${matches.length===1?"":"es"}` : "";
+  btn.classList.toggle("active", active);
+  bar.classList.toggle("results-open", active);
+  resultsPanel.hidden = !active;
+  if(active) renderSearchResults(matches);
+}
+// True when `q` contains at least one "knownField:value" term — i.e. it reads
+// as a structured facet query (brain.py `--query` grammar), not a plain
+// substring search. Only meaningful while a schema-having brain is the sole
+// selection (currentFacetSchema set); otherwise there are no known fields to
+// recognize, so this is always false and normal substring search proceeds.
+function looksLikeStructuredQuery(q){
+  const facets = (currentFacetSchema && currentFacetSchema.facets) || [];
+  if(!facets.length) return false;
+  const knownFields = new Set(facets.map(f=>f.key));
+  const numericFields = new Set(facets.filter(f=>f.type==="numeric").map(f=>f.key));
+  return q.trim().split(/\s+/).some(raw=>{
+    const body = raw.startsWith("-") ? raw.slice(1) : raw;
+    const numMatch = NUM_OP_RE.exec(body);
+    if(numMatch && numericFields.has(numMatch[1].toLowerCase())) return true;
+    const ci = body.indexOf(":");
+    return ci > 0 && knownFields.has(body.slice(0, ci).toLowerCase());
+  });
 }
 async function triggerSearch(){
   const q = document.getElementById("search-input").value.trim();
-  if(!q){ clearSearch(); return; }
+  if(!q){
+    if(hasActiveFacets()) applyQueryTermsFromText("");   // Enter on an emptied box also clears a structured query
+    clearSearch();
+    return;
+  }
+  if(looksLikeStructuredQuery(q)){ applyQueryTermsFromText(q); return; }
   const ql = q.toLowerCase();
   if(searchActive && ql === lastSearchQuery){ clearSearch(); return; }   // re-issuing the same search de-highlights
   lastSearchQuery = ql;
@@ -1303,24 +1459,36 @@ async function triggerSearch(){
   visSearchEpoch++;   // updateVisuals(): rewrite aSearch + link colors once
 }
 function clearSearch(){
+  // The ✕ button clears whatever the box is currently showing — a plain text
+  // search, a schema-generated facet query, or both — so also uncheck any
+  // checked facet checkboxes and drop queryTerms, not just the text state.
   searchActive = false;
   lastSearchQuery = null;
   fulltextMatchIds = null;
-  for(const nd of nodes) nd.searchMatch = false;
-  updateSearchUI([]);
+  if(hasActiveFacets()){
+    searchFilters.queryTerms = [];
+    for(const key in searchFilters.facets) searchFilters.facets[key] = {include: new Set(), exclude: new Set()};
+    searchFilters.numeric = {};
+    document.querySelectorAll('#sf-facets .sf-facetrow').forEach(r=>setTristate(r, ""));
+    document.querySelectorAll('#sf-facets .sf-repo-h .sf-toggle input').forEach(b=>{ b.checked = false; b.indeterminate = false; });
+    document.querySelectorAll('#sf-facets .sf-num-value').forEach(b=>{ b.value = ""; });
+    document.querySelectorAll('#sf-facets .sf-num-op').forEach(b=>{ b.value = "="; });
+  }
+  updateSearchUI(applySearchToNodes());
   visSearchEpoch++;   // updateVisuals(): rewrite aSearch + link colors once
 }
 // Called after a graph reload rebuilds `nodes` (fresh objects — searchMatch
-// doesn't survive that) and after a filter checkbox changes — re-run the
-// SAME lastSearchQuery against current data/filters without touching the
-// toggle-off logic in triggerSearch(). Filter changes can flip the
-// fulltext scope on/off too, so re-fetch (fetchFulltextMatches is a no-op
-// when that scope is off) rather than reusing a possibly-stale Set.
+// doesn't survive that), after a brain/facet filter checkbox changes, and
+// after a text search is already active — re-run the SAME lastSearchQuery
+// (if any) plus current facet selections against current data/filters,
+// without touching the toggle-off logic in triggerSearch(). Filter changes
+// can flip the fulltext scope on/off too, so re-fetch (fetchFulltextMatches
+// is a no-op when that scope is off) rather than reusing a possibly-stale Set.
 async function refreshSearchHighlight(){
-  if(!searchActive) return;
+  if(!filterActive()){ updateSearchUI(applySearchToNodes()); visSearchEpoch++; return; }
   const q = lastSearchQuery;
   await fetchFulltextMatches(q);
-  if(q !== lastSearchQuery || !searchActive) return;   // superseded while the fetch was in flight
+  if(q !== lastSearchQuery) return;   // superseded while the fetch was in flight
   updateSearchUI(applySearchToNodes());
   visSearchEpoch++;   // updateVisuals(): rewrite aSearch + link colors once
 }
@@ -1338,6 +1506,7 @@ function applyGraph(g){
   window.__roleColors = g.roleColors || {};
   window.__repoDisplay = g.displayNames || {};
   window.__repoRoots = g.roots || {};
+  window.__schemaRoles = g.schemaRoles || {};
   const rawNodes = g.nodes || [];
   const rawCounts = {};
   for(const n of rawNodes){ const k = brainKey(n.repo, n.role); rawCounts[k] = (rawCounts[k]||0) + 1; }
@@ -1827,7 +1996,7 @@ let simStepMs = 0, lastStepMs = -1e9, simCalibratedN = -1, simFastForward = 0;
 // dev repo / marketplace clone / plugin cache — and "why does it look old"
 // has burned real debugging time). Bump the PATCH on every template change
 // within an increment of work; bump the MINOR when the increment ships.
-const NV_VERSION = "0.27.2";
+const NV_VERSION = "0.28.0";
 // every tab reports its live numbers to the server about once a second
 // (POST /metrics) so `neural-view.py status` — and any agent driving it —
 // can read the page's real frame rate without screenshots.
@@ -2575,47 +2744,422 @@ document.getElementById("rightbar-tab").onclick = ()=>{ uiState.rpanel = false; 
 applyUiState();
 
 // ---- search bar: wire the button/input/clear + the filters popover ----
+// Filled from /graph's schemaRoles: {repo: [role, ...]} — roles with a
+// SCHEMA.json, i.e. brains that offer facet filters when selected alone.
+const SCHEMA_ICON_TITLE = "This brain has custom filters. Select it alone (uncheck every other brain) to see extra filter options for it.";
+const SCHEMA_ICON = `<span class="sf-schema-icon" tabindex="0" title="${SCHEMA_ICON_TITLE}" aria-label="${SCHEMA_ICON_TITLE}">`+
+  `<svg viewBox="0 0 24 24" width="11" height="11" fill="none"
+  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg></span>`;
+function brainRoleCheckboxes(){ return document.querySelectorAll('#sf-brains .sf-brainrow input[type="checkbox"]'); }
+
+// ---- collapsible sections/groups (top-level Search-in/Brains/Filters, and
+// each repo/facet sub-group within them) — a chevron in the header toggles a
+// "collapsed" class that CSS uses to hide everything but the header itself.
+// Selecting something inside a collapsed group (or "only") auto-expands it +
+// any collapsed ancestor, so an active filter is never hidden from view. ----
+function setCollapsed(container, collapsed){
+  if(!container || !container.classList) return;
+  container.classList.toggle("collapsed", collapsed);
+  const btn = container.querySelector(":scope > .sf-h .sf-collapse-btn, :scope > .sf-repo-h .sf-collapse-btn");
+  if(btn) btn.setAttribute("aria-expanded", String(!collapsed));
+}
+// Same ▾/▸ glyph as the left BRAINS sidebar's own section headers (.secthead,
+// e.g. #sect-brains) — a CSS ::before driven purely by aria-expanded, no
+// textContent to keep in sync by hand.
+function addCollapseToggle(headerEl, container){
+  const btn = document.createElement("button");
+  btn.type = "button"; btn.className = "sf-collapse-btn";
+  btn.setAttribute("aria-label", "Collapse/expand section"); btn.setAttribute("aria-expanded", "true");
+  btn.onclick = (ev)=>{ ev.preventDefault(); ev.stopPropagation(); setCollapsed(container, !container.classList.contains("collapsed")); };
+  headerEl.insertBefore(btn, headerEl.firstChild);
+}
+// Walks up from `el` expanding every collapsed .sf-repo/.sf-section ancestor
+// (a selected value's own group AND the top-level section it lives in).
+function expandAncestors(el){
+  let cur = el;
+  while(cur && cur !== document.body){
+    if(cur.classList && (cur.classList.contains("sf-repo") || cur.classList.contains("sf-section"))){
+      setCollapsed(cur, false);
+    }
+    cur = cur.parentElement;
+  }
+}
+// Wire the three static top-level sections once at load — dynamic repo/facet
+// sub-groups get their own toggle inline where they're built (below).
+document.querySelectorAll("#search-filters-panel > .sf-section").forEach(section=>{
+  const header = section.querySelector(":scope > .sf-h");
+  if(header) addCollapseToggle(header, section);
+});
+
 function renderSearchFiltersBrains(){
   const wrap = document.getElementById("sf-brains");
   wrap.innerHTML = "";
+  const schemaRoles = window.__schemaRoles || {};
   for(const repo of repoList){
     const roles = (window.__repoRoles||{})[repo] || [];
     if(!roles.length) continue;
     const section = document.createElement("div"); section.className = "sf-repo";
     const h = document.createElement("div"); h.className = "sf-repo-h";
-    const label = document.createElement("span"); label.textContent = dispName(repo);
-    h.appendChild(label);
-    const allBtn = document.createElement("button");
-    allBtn.type = "button"; allBtn.textContent = "all/none";
-    allBtn.onclick = ()=>{
-      const boxes = section.querySelectorAll('input[type="checkbox"]');
-      const anyUnchecked = [...boxes].some(b=>!b.checked);
-      boxes.forEach(b=>{ b.checked = anyUnchecked; });
+    const toggle = document.createElement("label"); toggle.className = "sf-toggle";
+    toggle.title = `Select/deselect all of ${dispName(repo)}`;
+    toggle.innerHTML = `<input type="checkbox" aria-label="Select/deselect all of ${escapeHtml(dispName(repo))}">`;
+    const toggleCb = toggle.querySelector("input");
+    toggleCb.onchange = ()=>{
+      section.querySelectorAll('.sf-brainrow input[type="checkbox"]').forEach(b=>{ b.checked = toggleCb.checked; });
+      if(toggleCb.checked) setCollapsed(section, false);
       syncSearchBrainFilter();
     };
-    h.appendChild(allBtn);
+    h.appendChild(toggle);
+    const label = document.createElement("span"); label.textContent = dispName(repo);
+    h.appendChild(label);
+    addCollapseToggle(h, section);
     section.appendChild(h);
     for(const role of roles){
       const k = brainKey(repo, role);
-      const row = document.createElement("label");
+      const row = document.createElement("label"); row.className = "sf-brainrow";
       const checked = !searchFilters.brains || searchFilters.brains.has(k);
-      row.innerHTML = `<input type="checkbox" data-key="${escapeHtml(k)}" ${checked?"checked":""}> ${escapeHtml(role)}`;
-      row.querySelector("input").onchange = syncSearchBrainFilter;
+      const hasSchema = (schemaRoles[repo]||[]).includes(role);
+      row.innerHTML =
+        `<span class="sf-brainrow-left"><input type="checkbox" data-key="${escapeHtml(k)}" `+
+        `data-repo="${escapeHtml(repo)}" data-role="${escapeHtml(role)}" ${checked?"checked":""}> `+
+        `${escapeHtml(role)}${hasSchema ? SCHEMA_ICON : ""}</span>`+
+        `<button type="button" class="sf-only" title="Select only ${escapeHtml(role)}">only</button>`;
+      const cb = row.querySelector('input[type="checkbox"]');
+      cb.onchange = ()=>{ if(cb.checked) expandAncestors(row); syncSearchBrainFilter(); };
+      row.querySelector(".sf-only").onclick = (ev)=>{
+        ev.preventDefault(); ev.stopPropagation();   // don't let the enclosing <label> also toggle this checkbox
+        brainRoleCheckboxes().forEach(b=>{ b.checked = (b.dataset.key === k); });
+        expandAncestors(row);
+        syncSearchBrainFilter();
+      };
       section.appendChild(row);
     }
     wrap.appendChild(section);
   }
+  updateBrainToggleStates();
 }
+// Recomputes every per-repo toggle's checked/indeterminate state (checked =
+// every role in that repo checked, indeterminate = some-but-not-all) and the
+// master toggle beside "Brains" the same way over ALL repos combined.
+function updateBrainToggleStates(){
+  const repoSections = document.querySelectorAll("#sf-brains .sf-repo");
+  let totalAll = true, totalAny = false;
+  repoSections.forEach(section=>{
+    const boxes = [...section.querySelectorAll('.sf-brainrow input[type="checkbox"]')];
+    const checkedCount = boxes.filter(b=>b.checked).length;
+    const allChecked = boxes.length > 0 && checkedCount === boxes.length;
+    const anyChecked = checkedCount > 0;
+    const toggleCb = section.querySelector(".sf-repo-h .sf-toggle input");
+    if(toggleCb){ toggleCb.checked = allChecked; toggleCb.indeterminate = anyChecked && !allChecked; }
+    if(!allChecked) totalAll = false;
+    if(anyChecked) totalAny = true;
+  });
+  const master = document.getElementById("sf-brains-master");
+  if(master){ master.checked = totalAll; master.indeterminate = totalAny && !totalAll; }
+}
+document.getElementById("sf-brains-master").onchange = (ev)=>{
+  brainRoleCheckboxes().forEach(b=>{ b.checked = ev.target.checked; });
+  syncSearchBrainFilter();
+};
 function syncSearchBrainFilter(){
-  const boxes = document.querySelectorAll('#sf-brains input[type="checkbox"]');
+  const boxes = brainRoleCheckboxes();
   const allChecked = [...boxes].every(b=>b.checked);
   searchFilters.brains = allChecked ? null : new Set([...boxes].filter(b=>b.checked).map(b=>b.dataset.key));
+  updateBrainToggleStates();
+  updateFacetSchema(boxes);
+  refreshSearchHighlight();
+}
+
+// ---- schema-driven facet filters — only shown when exactly ONE brain is
+// checked in the Brains section above. A brain declares its facets by
+// writing <role>/brain/SCHEMA.json (see fab-cli's build-card-vault.py for
+// the reference producer); a brain without one just shows no extra filters.
+let currentFacetBrainKey = null;
+let currentFacetSchema = null;   // the active single-brain's SCHEMA.json, or null
+async function updateFacetSchema(boxes){
+  const checked = [...boxes].filter(b => b.checked);
+  const single = checked.length === 1 ? checked[0] : null;
+  const key = single ? single.dataset.key : null;
+  if(key === currentFacetBrainKey) return;   // unchanged selection — don't re-fetch/re-render
+  currentFacetBrainKey = key;
+  currentFacetSchema = null;
+  const hadQuery = searchFilters.queryTerms.length > 0;
+  searchFilters.facets = {};       // switching (or leaving) single-brain scope drops any prior selection
+  searchFilters.numeric = {};
+  searchFilters.queryTerms = [];
+  const section = document.getElementById("sf-facets-section");
+  const wrap = document.getElementById("sf-facets");
+  wrap.innerHTML = "";
+  section.hidden = true;
+  // Only touch the search box if it was actually showing a generated facet
+  // query — a brain-selection change unrelated to facets must never clobber
+  // unrelated substring text the user is mid-typing.
+  if(hadQuery) syncSearchInputFromQuery();
+  if(!single) return;
+  let schema;
+  try{
+    const r = await fetch(`/schema/${encodeURIComponent(single.dataset.repo)}/${encodeURIComponent(single.dataset.role)}`);
+    if(!r.ok) return;   // 404 = no schema for this brain — nothing more to do
+    schema = await r.json();
+  }catch{ return; }
+  if(currentFacetBrainKey !== key) return;   // brain selection changed again while the fetch was in flight
+  currentFacetSchema = schema;
+  renderFacetSchema(schema);
+}
+const NUM_OPS_LABEL = ["=", ">", "<", ">=", "<="];
+function renderFacetSchema(schema){
+  const wrap = document.getElementById("sf-facets");
+  const section = document.getElementById("sf-facets-section");
+  wrap.innerHTML = "";
+  const facets = (schema && schema.facets) || [];
+  if(!facets.length) return;
+  for(const facet of facets){
+    if(facet.type === "numeric"){
+      const group = document.createElement("div"); group.className = "sf-repo";
+      group.dataset.facetKey = facet.key; group.dataset.facetType = "numeric";
+      const h = document.createElement("div"); h.className = "sf-repo-h";
+      h.innerHTML = `<span>${escapeHtml(facet.label || facet.key)}</span>`;
+      addCollapseToggle(h, group);
+      group.appendChild(h);
+      const row = document.createElement("div"); row.className = "sf-numrow";
+      const opSelect = `<select class="sf-num-op">${NUM_OPS_LABEL.map(op=>`<option value="${op}">${op}</option>`).join("")}</select>`;
+      row.innerHTML = `${opSelect}<input type="number" class="sf-num-value" placeholder="value">`;
+      const numInput = row.querySelector(".sf-num-value");
+      const onChange = ()=>{ if(numInput.value !== "") expandAncestors(group); syncNumericFilter(facet.key, group); };
+      row.querySelector(".sf-num-op").onchange = onChange;
+      numInput.onchange = onChange;
+      group.appendChild(row);
+      wrap.appendChild(group);
+      continue;
+    }
+    if(!facet.values || !facet.values.length) continue;
+    searchFilters.facets[facet.key] = searchFilters.facets[facet.key] || {include: new Set(), exclude: new Set()};
+    const group = document.createElement("div"); group.className = "sf-repo";
+    group.dataset.facetKey = facet.key;
+    const h = document.createElement("div"); h.className = "sf-repo-h";
+    const toggle = document.createElement("label"); toggle.className = "sf-toggle";
+    toggle.title = `Include all ${facet.label || facet.key} values / clear`;
+    toggle.innerHTML = `<input type="checkbox" aria-label="Include all ${escapeHtml(facet.label || facet.key)} values, or clear">`;
+    const toggleCb = toggle.querySelector("input");
+    toggleCb.onchange = ()=>{
+      const next = toggleCb.checked ? "include" : "";
+      group.querySelectorAll(".sf-facetrow").forEach(r=>setTristate(r, next));
+      if(toggleCb.checked) setCollapsed(group, false);
+      syncFacetFilter(facet.key, group);
+    };
+    h.appendChild(toggle);
+    const label = document.createElement("span"); label.textContent = facet.label || facet.key;
+    h.appendChild(label);
+    addCollapseToggle(h, group);
+    group.appendChild(h);
+    for(const v of facet.values){
+      const row = document.createElement("div"); row.className = "sf-facetrow";
+      row.tabIndex = 0; row.setAttribute("role", "button"); row.dataset.tag = v.tag; row.dataset.state = "";
+      row.innerHTML = `<span class="sf-tristate" data-state=""></span><span>${escapeHtml(v.label)}</span>`;
+      const cycle = ()=>{
+        const next = TRI_NEXT[row.dataset.state];
+        setTristate(row, next);
+        if(next !== "") expandAncestors(row);
+        syncFacetFilter(facet.key, group);
+      };
+      row.onclick = cycle;
+      row.onkeydown = ev=>{ if(ev.key==="Enter"||ev.key===" "){ ev.preventDefault(); cycle(); } };
+      group.appendChild(row);
+    }
+    wrap.appendChild(group);
+  }
+  section.hidden = false;
+}
+// Value rows cycle unselected -> include -> exclude -> unselected on click (or
+// Enter/Space when focused) instead of a plain checked/unchecked box — plain
+// checkboxes can only ever express "has this," never "must NOT have this,"
+// which is exactly the gap that made typing "-rarity:revered" necessary. Now
+// exclude is a first-class click away, no typing required.
+const TRI_NEXT = {"": "include", "include": "exclude", "exclude": ""};
+const TRI_ARIA = {"": "unselected", "include": "included", "exclude": "excluded"};
+function setTristate(row, state){
+  row.dataset.state = state;
+  row.querySelector(".sf-tristate").dataset.state = state;
+  row.setAttribute("aria-label", `${row.querySelector("span:last-child").textContent}: ${TRI_ARIA[state]}`);
+}
+function updateFacetToggleState(group){
+  const rows = [...group.querySelectorAll(".sf-facetrow")];
+  const toggleCb = group.querySelector(".sf-repo-h .sf-toggle input");
+  if(!toggleCb || !rows.length) return;
+  const allInclude = rows.every(r => r.dataset.state === "include");
+  const anySet = rows.some(r => r.dataset.state !== "");
+  toggleCb.checked = allInclude;
+  toggleCb.indeterminate = anySet && !allInclude;
+}
+function syncFacetFilter(facetKey, group){
+  const rows = group.querySelectorAll(".sf-facetrow");
+  const include = new Set(), exclude = new Set();
+  rows.forEach(r=>{
+    if(r.dataset.state === "include") include.add(r.dataset.tag);
+    else if(r.dataset.state === "exclude") exclude.add(r.dataset.tag);
+  });
+  searchFilters.facets[facetKey] = {include, exclude};
+  updateFacetToggleState(group);
+  searchFilters.queryTerms = facetsToQueryTerms();
+  syncSearchInputFromQuery();
+  refreshSearchHighlight();
+}
+function syncNumericFilter(facetKey, group){
+  const op = group.querySelector(".sf-num-op").value;
+  const raw = group.querySelector(".sf-num-value").value;
+  if(raw === "") delete searchFilters.numeric[facetKey];
+  else searchFilters.numeric[facetKey] = {op, value: raw};
+  searchFilters.queryTerms = facetsToQueryTerms();
+  syncSearchInputFromQuery();
+  refreshSearchHighlight();
+}
+
+// ---- checkbox/numeric-widget state <-> typed query text, two-way -------
+// A facet's schema tag is often prefixed for uniqueness (rarity-majestic,
+// interacts-axe) — strip/restore that prefix so the TYPED value matches what
+// a human would naturally write ("rarity:majestic", not "rarity:rarity-majestic").
+function facetTagToValue(facetKey, tag){
+  if(facetKey === "rarity" && tag.startsWith("rarity-")) return tag.slice(7);
+  if(facetKey === "interacts-with" && tag.startsWith("interacts-")) return tag.slice(10);
+  return tag;
+}
+function facetValueToTag(facetKey, value){
+  const v = value.trim().toLowerCase().replace(/\s+/g, "-");
+  if(!v) return null;
+  if(facetKey === "rarity") return v.startsWith("rarity-") ? v : "rarity-" + v;
+  if(facetKey === "interacts-with") return v.startsWith("interacts-") ? v : "interacts-" + v;
+  return v;
+}
+// Checkbox/numeric-widget state (positive-only) -> queryTerms. Order matches
+// schema field order so re-serializing to text is stable/predictable.
+function facetsToQueryTerms(){
+  if(!currentFacetSchema) return [];
+  const terms = [];
+  for(const facet of currentFacetSchema.facets || []){
+    if(facet.type === "numeric"){
+      const n = searchFilters.numeric[facet.key];
+      if(n && n.op && n.value !== "" && n.value !== undefined && !Number.isNaN(Number(n.value))){
+        terms.push({neg: false, kind: "numeric", field: facet.key, op: n.op, num: Number(n.value)});
+      }
+      continue;
+    }
+    const sel = searchFilters.facets[facet.key];
+    if(!sel) continue;
+    if(sel.include && sel.include.size) terms.push({neg: false, kind: "enum", field: facet.key, values: [...sel.include]});
+    if(sel.exclude && sel.exclude.size) terms.push({neg: true, kind: "enum", field: facet.key, values: [...sel.exclude]});
+  }
+  return terms;
+}
+function queryTermsToString(terms){
+  return terms.map(t=>{
+    let body;
+    if(t.kind === "numeric") body = `${t.field}${t.op}${t.num}`;
+    else if(t.field) body = `${t.field}:${t.values.map(v=>facetTagToValue(t.field, v)).join(",")}`;
+    else body = t.word;
+    return (t.neg ? "-" : "") + body;
+  }).join(" ");
+}
+// Reflects searchFilters.queryTerms into the search box text — display only,
+// does NOT run it through the substring-search path (queryTerms already
+// drives matching independently via facetNoteMatches/hasActiveFacets).
+function syncSearchInputFromQuery(){
+  const input = document.getElementById("search-input");
+  if(document.activeElement === input) return;   // don't fight the user mid-edit
+  input.value = queryTermsToString(searchFilters.queryTerms);
+}
+// field OP number, no colon — e.g. "power>=3", "cost=0". Checked BEFORE the
+// enum "field:value" form since neither syntax can collide (one requires a
+// colon, the other forbids it).
+const NUM_OP_RE = /^([a-z][a-z0-9_-]*?)(>=|<=|=|>|<)(-?\d+(?:\.\d+)?)$/i;
+// Parses typed text into queryTerms using the CURRENT schema's field keys
+// (brain.py `recall --query` grammar: AND terms, '-' negates, 'field:v1,v2'
+// ORs within a field, 'field>=N' etc. for numeric facets). Terms whose field
+// isn't a known facet key, or that match neither form, fall through as a
+// plain word (bare tag match, same as before schema-aware queries existed) —
+// so normal substring-style single-word searches keep working unchanged even
+// while a schema is active.
+function parseQueryString(q){
+  const facets = (currentFacetSchema && currentFacetSchema.facets) || [];
+  const knownFields = new Set(facets.map(f=>f.key));
+  const numericFields = new Set(facets.filter(f=>f.type==="numeric").map(f=>f.key));
+  const terms = [];
+  for(const raw of q.trim().split(/\s+/).filter(Boolean)){
+    const neg = raw.startsWith("-");
+    const body = neg ? raw.slice(1) : raw;
+    if(!body) continue;
+    const numMatch = NUM_OP_RE.exec(body);
+    if(numMatch && numericFields.has(numMatch[1].toLowerCase())){
+      terms.push({neg, kind: "numeric", field: numMatch[1].toLowerCase(), op: numMatch[2], num: Number(numMatch[3])});
+      continue;
+    }
+    const ci = body.indexOf(":");
+    if(ci > 0 && knownFields.has(body.slice(0, ci).toLowerCase())){
+      const field = body.slice(0, ci).toLowerCase();
+      const values = body.slice(ci+1).split(",").map(v=>facetValueToTag(field, v)).filter(Boolean);
+      if(values.length){ terms.push({neg, kind: "enum", field, values}); continue; }
+    }
+    terms.push({neg, kind: "word", field: null, word: body.toLowerCase()});
+  }
+  return terms;
+}
+// Applies parsed terms as the active filter AND reflects whatever's
+// representable back into the facet checkboxes/numeric widgets (positive,
+// recognized-field terms only — negated or unrecognized terms still filter
+// correctly via queryTerms, they just have no widget to show as active).
+function applyQueryTermsFromText(q){
+  const terms = parseQueryString(q);
+  searchFilters.queryTerms = terms;
+  const nextFacets = {};
+  const nextNumeric = {};
+  for(const t of terms){
+    if(t.kind === "numeric"){ if(!t.neg) nextNumeric[t.field] = {op: t.op, value: String(t.num)}; continue; }
+    if(t.kind !== "enum") continue;
+    if(!nextFacets[t.field]) nextFacets[t.field] = {include: new Set(), exclude: new Set()};
+    const bucket = t.neg ? nextFacets[t.field].exclude : nextFacets[t.field].include;
+    t.values.forEach(v=>bucket.add(v));
+  }
+  searchFilters.facets = nextFacets;
+  searchFilters.numeric = nextNumeric;
+  let anyFacetSet = false;
+  document.querySelectorAll("#sf-facets .sf-repo").forEach(group=>{
+    const key = group.dataset.facetKey;
+    if(group.dataset.facetType === "numeric"){
+      const n = nextNumeric[key];
+      const opSel = group.querySelector(".sf-num-op");
+      const numInput = group.querySelector(".sf-num-value");
+      if(opSel) opSel.value = n ? n.op : "=";
+      if(numInput) numInput.value = n ? n.value : "";
+      if(n){ setCollapsed(group, false); anyFacetSet = true; }
+      return;
+    }
+    const sel = nextFacets[key] || {include: new Set(), exclude: new Set()};
+    let anySet = false;
+    group.querySelectorAll(".sf-facetrow").forEach(r=>{
+      const tag = r.dataset.tag;
+      const state = sel.include.has(tag) ? "include" : sel.exclude.has(tag) ? "exclude" : "";
+      setTristate(r, state);
+      if(state !== "") anySet = true;
+    });
+    if(anySet){ setCollapsed(group, false); anyFacetSet = true; }
+    updateFacetToggleState(group);
+  });
+  if(anyFacetSet){ const s = document.getElementById("sf-facets-section"); if(s) setCollapsed(s, false); }
   refreshSearchHighlight();
 }
 document.getElementById("search-btn").onclick = triggerSearch;
 document.getElementById("search-input").addEventListener("keydown", ev=>{
   if(ev.key==="Enter"){ ev.preventDefault(); triggerSearch(); }
 });
+// Plain <input> elements don't natively pan on a trackpad two-finger
+// horizontal swipe (only caret-follow while typing/arrow-keys) — long
+// generated queries (e.g. several ANDed field:v1,v2,v3 terms) can overflow
+// well past the visible width, so wire deltaX to scrollLeft directly.
+document.getElementById("search-input").addEventListener("wheel", ev=>{
+  if(ev.deltaX === 0) return;
+  ev.currentTarget.scrollLeft += ev.deltaX;
+  ev.preventDefault();
+}, {passive:false});
 document.getElementById("search-clear").onclick = ()=>{
   document.getElementById("search-input").value = "";
   clearSearch();
@@ -2637,7 +3181,14 @@ searchFiltersBtn.onclick = (ev)=>{
   searchFiltersPanel.classList.toggle("open", willOpen);
 };
 document.addEventListener("click", (ev)=>{
-  if(searchFiltersPanel.classList.contains("open") && !searchFiltersPanel.contains(ev.target) && ev.target!==searchFiltersBtn){
+  // Clicking a match row (jumps to a note), the results collapse/expand
+  // toggle, anywhere in the matches dropdown, or anywhere in the note detail
+  // sidebar (including its own close button) must NOT close the filters
+  // popover — only a click genuinely outside all three should.
+  const resultsEl = document.getElementById("search-results");
+  const inspectEl = document.getElementById("inspect");
+  if(searchFiltersPanel.classList.contains("open") && !searchFiltersPanel.contains(ev.target)
+     && ev.target!==searchFiltersBtn && !resultsEl.contains(ev.target) && !inspectEl.contains(ev.target)){
     searchFiltersPanel.classList.remove("open");
   }
 });

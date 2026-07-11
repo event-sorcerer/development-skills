@@ -255,6 +255,26 @@ def _as_list(v):
     return v if isinstance(v, list) else [v]
 
 
+def numeric_field_values(fm, field):
+    """All numeric values relevant to a schema numeric facet field, for one
+    note: the plain scalar (`power: 4`) PLUS any per-variant-suffixed key
+    (`power-red: 4`, `power-yellow: 3`, ... — see fab-cli's build-card-vault.py
+    consolidated pitch-variant notes) whose value is numeric. A card whose
+    stat varies by pitch/print has no plain `power` key at all, only the
+    suffixed ones, so both sources must be checked. Comparator matching (see
+    the client) is OR across whatever values come back — "power >= 3" matches
+    if ANY variant qualifies, not every one."""
+    out = []
+    v = fm.get(field)
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        out.append(v)
+    prefix = field + "-"
+    for k, v in fm.items():
+        if k.startswith(prefix) and isinstance(v, (int, float)) and not isinstance(v, bool):
+            out.append(v)
+    return out
+
+
 def _safe_slug(slug):
     return bool(slug) and "/" not in slug and "\\" not in slug and ".." not in slug
 
@@ -295,17 +315,27 @@ def build_graph(repos):
     every anchored repo must show all three canonical roles in the BRAINS
     panel even before a role's brain/ dir has ever been created, and any
     future/custom role that DOES have a brain dir still shows up too."""
-    nodes, edges, repo_roles = [], [], {}
+    nodes, edges, repo_roles, schema_roles = [], [], {}, {}
     for name, root in repos:
         roles_here = set(CANONICAL_ROLES)
         for role, brain in iter_brains(root):
             roles_here.add(role)
+            schema_file = brain / "SCHEMA.json"
+            numeric_fields = []
+            if schema_file.is_file():
+                schema_roles.setdefault(name, []).append(role)
+                try:
+                    schema = json.loads(schema_file.read_text(errors="replace"))
+                    numeric_fields = [f["key"] for f in (schema.get("facets") or [])
+                                       if f.get("type") == "numeric" and f.get("key")]
+                except Exception:  # noqa: BLE001 — malformed schema just yields no numeric facets
+                    pass
             notes_dir = brain / "notes"
             if notes_dir.is_dir():
                 for f in sorted(notes_dir.glob("*.md")):
                     fm, _ = parse_note(f.read_text(errors="replace"))
                     slug = f.stem
-                    nodes.append({
+                    node = {
                         "id": f"{name}/{role}/{slug}",
                         "repo": name,
                         "role": role,
@@ -320,7 +350,12 @@ def build_graph(repos):
                         # thousands-of-notes scale).
                         "paths": [str(p) for p in _as_list(fm.get("paths"))],
                         "source": str(fm.get("source", "") or ""),
-                    })
+                    }
+                    if numeric_fields:
+                        num = {k: v for k, v in ((k, numeric_field_values(fm, k)) for k in numeric_fields) if v}
+                        if num:
+                            node["num"] = num
+                    nodes.append(node)
             links = brain / "links.json"
             if links.is_file():
                 try:
@@ -363,7 +398,11 @@ def build_graph(repos):
     # new session's working directory regardless of GitHub state.
     roots = {name: str(root) for name, root in repos}
     return {"nodes": nodes, "edges": edges, "repos": [name for name, _ in repos], "repoRoles": repo_roles,
-            "roleColors": role_colors, "displayNames": display_names, "roots": roots}
+            "roleColors": role_colors, "displayNames": display_names, "roots": roots,
+            # {repo: [role, ...]} for roles whose brain has a SCHEMA.json (see
+            # schema_payload()) — lets the client show a "has filters" icon
+            # next to those brains without a round trip per brain.
+            "schemaRoles": schema_roles}
 
 
 def build_body_index(repos):
@@ -657,6 +696,28 @@ def note_payload(repos, repo, role, slug):
                     elif dst == slug:
                         links.append({"target": src, "weight": meta.get("weight", 0.5), "fires": meta.get("fires", 0), "dir": "in"})
             return {"repo": repo, "role": role, "slug": slug, "frontmatter": fm, "bodyHtml": render_body(body), "links": links}
+        return None
+    return None
+
+
+def schema_payload(repos, repo, role):
+    """A brain's optional SCHEMA.json — declares which note tags a generator
+    considers faceted filter fields (see fab-cli's build-card-vault.py for the
+    reference producer). None if the brain has no schema or doesn't exist;
+    a brain without one is just not facet-filterable, not an error."""
+    for name, root in repos:
+        if name != repo:
+            continue
+        for r, brain in iter_brains(root):
+            if r != role:
+                continue
+            f = brain / "SCHEMA.json"
+            if not f.is_file():
+                return None
+            try:
+                return json.loads(f.read_text(errors="replace"))
+            except Exception:  # noqa: BLE001 — malformed schema reads as "none"
+                return None
         return None
     return None
 
@@ -1073,6 +1134,13 @@ class Handler(BaseHTTPRequestHandler):
                 if payload is not None:
                     return self._send(200, payload)
             return self._send(404, {"error": "unknown note"})
+        if path.startswith("/schema/"):
+            parts = path[len("/schema/"):].split("/", 1)
+            if len(parts) == 2 and parts[0] and parts[1]:
+                payload = schema_payload(REPOS, parts[0], parts[1])
+                if payload is not None:
+                    return self._send(200, payload)
+            return self._send(404, {"error": "no schema"})
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
