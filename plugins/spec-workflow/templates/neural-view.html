@@ -254,6 +254,8 @@ canvas.grabbing{cursor:grabbing}
 #tickerlog{font-size:.62rem;line-height:1.5;color:var(--slate)}
 #tickerlog .ev{padding:.28rem 0;border-top:1px solid rgba(90,190,255,.1)}
 #tickerlog .ev:first-child{border-top:0}
+#tickerlog .ev-clickable{cursor:pointer;margin:0 -.4rem;padding-left:.4rem;padding-right:.4rem;border-radius:4px}
+#tickerlog .ev-clickable:hover,#tickerlog .ev-clickable:focus-visible{background:rgba(90,190,255,.08);outline:none}
 /* head (time · repo tag · ROLE · kind) stays one line — it's short and
    never the part that was overflowing; the note/link name is what got
    truncated to an unreadable "inject deco…", so only IT wraps. */
@@ -563,10 +565,27 @@ function layoutClusters(){
     repoRadius.set(repo, Math.max(MIN_REGION, ring + maxBall + 30));
   }
   const nRepos = repoList.length || 1;
-  const totalR = [...repoRadius.values()].reduce((a,b)=>a+b, 0) || MIN_REGION;
-  const outerR = nRepos>1 ? Math.max(BASE_REGION*2.2, totalR*1.15) : 0;
+  // Sphere sized off the MEDIAN repo radius, not the sum (or the max) of
+  // every repo's radius — either of those let one outsized brain (e.g. a
+  // card-vault at thousands of notes vs. neighbors at a few dozen) blow the
+  // whole constellation out, dragging every small repo far apart from every
+  // OTHER small repo too, even though only the giant one actually needed
+  // the room. Sizing off the median keeps the typical case tight; any repo
+  // that's substantially bigger than that gets pushed further out along its
+  // own already-assigned fibSphere direction below, individually, instead
+  // of inflating everyone's spacing to accommodate it.
+  const radii = [...repoRadius.values()].sort((a,b)=>a-b);
+  const typicalR = radii[Math.floor(radii.length/2)] || MIN_REGION;
+  const outerR = nRepos>1 ? Math.max(BASE_REGION*2.2, typicalR*2.5) : 0;
   repoList.forEach((repo,i)=>{
-    repoCenters.set(repo, nRepos>1 ? fibSphere(i, nRepos, outerR) : {x:0,y:0,z:0});
+    let c = nRepos>1 ? fibSphere(i, nRepos, outerR) : {x:0,y:0,z:0};
+    const r = repoRadius.get(repo);
+    if(r > typicalR*1.8){
+      const len = Math.hypot(c.x,c.y,c.z) || 1;
+      const s = (len + (r - typicalR)) / len;
+      c = {x:c.x*s, y:c.y*s, z:c.z*s};
+    }
+    repoCenters.set(repo, c);
   });
   for(const repo of repoList){
     const rc = repoCenters.get(repo);
@@ -1999,6 +2018,22 @@ function logEvent(e){
   const tag = (repoList.length>1 && e.repo) ? `<span class="t">[${escapeHtml(e.repo)}]</span> ` : "";
   div.innerHTML = `<div class="ev-head"><span class="t">${t}</span> ${tag}<span class="${cls}">${(e.role||"?").toUpperCase()} · ${kind}</span></div>` +
     (what ? `<div class="ev-note">${escapeHtml(what)}</div>` : "");
+  // Clickable when the event names a single note (seed/hop/inject — not a
+  // consult, whose `what` is a link key "a->b", not one slug): jumps the
+  // camera there and opens the same detail panel a search-result row does.
+  if(e.note && e.repo && e.role){
+    div.classList.add("ev-clickable");
+    div.tabIndex = 0;
+    div.setAttribute("role", "button");
+    div.setAttribute("aria-label", `Jump to ${e.note}`);
+    const jump = ()=>{
+      const nd = nodeById.get(`${e.repo}/${e.role}/${e.note}`);
+      if(!nd) return;   // note since hidden/pruned/graduated out of the current graph — nothing to jump to
+      flyToNote(nd); openNote(nd);
+    };
+    div.onclick = jump;
+    div.onkeydown = ev=>{ if(ev.key==="Enter"){ ev.preventDefault(); jump(); } };
+  }
   LOG.prepend(div);
   while(LOG.childNodes.length>40) LOG.lastChild.remove();   // sidebar has vertical room the old bottom strip lacked
 }
