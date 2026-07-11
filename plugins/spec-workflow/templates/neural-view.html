@@ -66,7 +66,7 @@ canvas.grabbing{cursor:grabbing}
    #search-wrap's fixed width so the results panel reads as physically attached to the bar, not a
    separate floating thing — see the corner-flattening/no-border-between rule below. */
 #search-wrap{position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:22;
-  width:min(1040px,84vw);display:flex;flex-direction:column}
+  width:min(600px,52vw);display:flex;flex-direction:column}
 #searchbar{position:static;display:flex;align-items:center;gap:.4rem;padding:.4rem .55rem;width:100%}
 #searchbar.results-open{border-radius:12px 12px 0 0;border-bottom-color:transparent}
 /* input wraps its own search-icon (+ clear, when active) buttons, right-inset INSIDE the field —
@@ -107,7 +107,7 @@ canvas.grabbing{cursor:grabbing}
 /* search results — opens attached to #searchbar's bottom edge (see #search-wrap above), inset
    slightly narrower than the bar itself so the seam still reads as one attached unit but the
    panel doesn't look like a plain continuation of the same box. */
-#search-results{width:calc(100% - 22px);margin:0 auto;border-radius:0 0 12px 12px;
+#search-results{position:static;width:calc(100% - 22px);margin:0 auto;border-radius:0 0 12px 12px;
   border-top:1px solid rgba(90,190,255,.18);
   max-height:min(50vh,360px);display:flex;flex-direction:column;overflow:hidden}
 #search-results[hidden]{display:none}
@@ -1039,6 +1039,7 @@ function refreshSearchHighlight(){
 }
 
 let lastRawGraph = null;
+let lastNodeIdSet = null;   // wakeSim() gate — see applyGraph()
 async function loadGraph(){
   let g; try { g = await (await fetch("/graph")).json(); } catch { return; }
   lastRawGraph = g;
@@ -1095,7 +1096,21 @@ function applyGraph(g){
   window.__consultEdges = (g.edges||[]).filter(e=>e.type==="consult" && !isBrainHidden(e.source.split("/")[0], e.source.split("/")[1]) && !isBrainHidden(e.target.split("/")[0], e.target.split("/")[1]));
   layoutClusters();
   rebuildScene();
-  wakeSim();   // nodes/links/cluster targets may have changed — resume integrating (no-op if already awake)
+  // Only wake the sim when the set of VISIBLE notes actually changed (added,
+  // removed, or a hide/show toggle) — not on every routine 15s poll of an
+  // unchanged graph. Existing notes keep their settled x/y/z (old.x reuse
+  // above), so an unconditional wake here bought nothing but cost twice
+  // over at the thousands-of-notes scale this now runs at: (1) a real perf
+  // hit — a full physics burst (~90 frames) every single poll, forever; (2)
+  // each of those unnecessary wakes gave repulsion (strong at close range)
+  // another chance to nudge notes apart before the much weaker cluster
+  // gravity (0.015) could fully pull them back within the ~1.5s settle
+  // window, and refreezing there — repeated over hours, this is what
+  // "dispersed" a brain that used to sit in a tight cluster.
+  const idSet = new Set(nodes.map(n=>n.id));
+  const idsChanged = !lastNodeIdSet || idSet.size !== lastNodeIdSet.size || [...idSet].some(id=>!lastNodeIdSet.has(id));
+  lastNodeIdSet = idSet;
+  if(idsChanged) wakeSim();
   // The FIRST graph with content always fits, even if userMoved — /graph can
   // take a while (it scans every repo's notes), and a stray wheel tick or
   // drag in that window would otherwise cancel the initial framing forever,
