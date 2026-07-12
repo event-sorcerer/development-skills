@@ -4,6 +4,8 @@
 # _lib.sh (check/check_rc/check_absent/lifecycle_start/_rand_port) and set
 # HERE/PLUGIN/FIX/fails/flaky before sourcing this file. This file assumes
 # those are already in scope.
+# shellcheck disable=SC2016  # lifecycle_start command-strings are single-quoted on
+# purpose -- they're expanded when eval'd inside the function, not at call site.
 declare -F check >/dev/null 2>&1 || { echo "section files are sourced by run-tests.sh; run: bash plugins/spec-workflow/tests/run-tests.sh" >&2; exit 2; }
 echo "== neural-view rescan_once() (pure unit, no server) =="
 NV="$PLUGIN/scripts/neural-view.py"
