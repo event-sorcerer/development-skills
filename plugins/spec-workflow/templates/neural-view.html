@@ -44,8 +44,8 @@ canvas.grabbing{cursor:grabbing}
 .val{color:var(--cyan)}
 
 /* top bar */
-#topbar{top:14px;left:14px;right:14px;display:flex;gap:14px;align-items:center;
-  padding:.55rem .9rem;justify-content:space-between;z-index:25}   /* .hud's backdrop-filter makes
+#topbar{top:14px;left:14px;right:14px;display:flex;gap:2.2rem;align-items:center;
+  padding:.55rem .9rem;z-index:25}   /* .hud's backdrop-filter makes
   every panel its own stacking context — a descendant's z-index (e.g. #settings-panel) can never
   outrank a later-in-DOM sibling .hud (#rightbar) without the PANEL itself being raised */
 #brand{letter-spacing:.34em;text-transform:uppercase;font-size:.72rem;color:var(--cyan);
@@ -53,7 +53,7 @@ canvas.grabbing{cursor:grabbing}
 #brand b{color:var(--fg)}
 #totals{display:flex;gap:1.4rem;font-size:.66rem}
 #totals span b{color:var(--cyan);font-size:.9rem;font-weight:600}
-#status{font-size:.6rem;color:var(--muted);display:flex;align-items:center;gap:.7rem}
+#status{font-size:.6rem;color:var(--muted);display:flex;align-items:center;gap:.7rem;margin-left:auto}
 #status .dot{display:inline-block;width:.5rem;height:.5rem;border-radius:50%;
   background:var(--cyan);box-shadow:0 0 8px var(--cyan);margin-right:.4rem;vertical-align:middle}
 .iconbtn{background:none;border:1px solid var(--border);color:var(--muted);border-radius:6px;
@@ -385,7 +385,15 @@ canvas.grabbing{cursor:grabbing}
   overflow:auto;padding:.9rem 1rem;transform:translateX(120%);transition:transform .25s ease;
   opacity:0}
 #inspect.open{transform:none;opacity:1}
+/* user-dragged position: left/top set inline; the docked slide-in animation
+   is relative to the docked spot, so fall back to a small fade instead.
+   .dragging suspends the transition so the panel tracks the pointer 1:1. */
+#inspect.custom{right:auto}
+#inspect.custom:not(.open){transform:translateY(-8px)}
+#inspect.dragging{transition:none;user-select:none}
 #inspect .close{float:right;cursor:pointer;color:var(--muted);border:0;background:none;font-size:1rem;font-family:var(--mono)}
+#inspect .close.grip{cursor:grab;touch-action:none}
+#inspect.dragging .close.grip{cursor:grabbing}
 #inspect h3{margin:.1rem 0 .1rem;font-size:.9rem;color:var(--cyan);letter-spacing:.04em;word-break:break-word}
 #inspect .role{font-size:.6rem;letter-spacing:.22em;text-transform:uppercase;color:var(--muted)}
 .chips{display:flex;flex-wrap:wrap;gap:.3rem;margin:.6rem 0}
@@ -446,7 +454,7 @@ canvas.grabbing{cursor:grabbing}
 <div id="stage"><canvas id="c"></canvas></div>
 
 <div class="hud" id="topbar">
-  <div id="brand">NEURAL&nbsp;VIEW · <b>identity brains</b></div>
+  <div id="brand">NEURAL&nbsp;VIEW</div>
   <div id="totals">
     <span class="label">notes <b id="t-notes">0</b></span>
     <span class="label">synapses <b id="t-links">0</b></span>
@@ -581,6 +589,8 @@ canvas.grabbing{cursor:grabbing}
 
 <aside class="hud" id="inspect" aria-hidden="true" inert>
   <button class="close" id="inspect-close" aria-label="Close note">✕</button>
+  <button class="close" id="inspect-reset" title="Reset panel position" aria-label="Reset panel position" hidden>⌖</button>
+  <button class="close grip" id="inspect-grip" title="Drag to move panel" aria-label="Drag to move panel">⠿</button>
   <div class="role" id="i-role"></div>
   <h3 id="i-title"></h3>
   <div class="chips" id="i-chips"></div>
@@ -2034,7 +2044,7 @@ let simStepMs = 0, lastStepMs = -1e9, simCalibratedN = -1, simFastForward = 0;
 // dev repo / marketplace clone / plugin cache — and "why does it look old"
 // has burned real debugging time). Bump the PATCH on every template change
 // within an increment of work; bump the MINOR when the increment ships.
-const NV_VERSION = "0.28.0";
+const NV_VERSION = "0.28.2";
 // every tab reports its live numbers to the server about once a second
 // (POST /metrics) so `neural-view.py status` — and any agent driving it —
 // can read the page's real frame rate without screenshots.
@@ -2047,6 +2057,11 @@ function chipHtml(segs){
 }
 const CHIP_LIVE = ["live", "Connected — the page re-reads the brains every 15s and streams recall activations in as they happen"];
 const CHIP_VER = [`v${NV_VERSION}`, "neural-view template version — confirms which build this tab is rendering (bumped on every template change)"];
+// git branch of the serving repo — filled by the /version probe at boot
+// (falsy until then; chipHtml drops it, frame()'s per-second rebuild picks
+// it up as soon as it lands).
+let CHIP_BRANCH = null;
+const CHIP_NO3D = ["3D unavailable", "this browser/GPU can't create a WebGL context — the sidebar and boards still work, the 3D scene doesn't render"];
 // live fps readout in the status chip (replaces the static tagline)
 let fpsFrames = 0, fpsWindowStart = 0, fpsGoodWindows = 0;
 // perf timers: per-section frame-time EMAs shown in the chip (sim step /
@@ -2074,8 +2089,9 @@ function frame(){
       else fpsGoodWindows = 0;
       statusEl.innerHTML = chipHtml([
         CHIP_LIVE, CHIP_VER,
-        [`${fps} fps`, "rendered frames per second, measured over the last second (display target: 60)"],
-        dprCur < DPR_CAP && [`${dprCur}x`, "adaptive render resolution — pixel ratio lowered from " + DPR_CAP + "x to keep fps up; restores automatically when the frame rate recovers"],
+        CHIP_BRANCH,
+        [`${String(Math.min(fps, 999)).padStart(3, " ")} fps`, "rendered frames per second, measured over the last second (display target: 60)"],
+        dprCur < DPR_CAP && [`${dprCur.toFixed(2)}x`, "adaptive render resolution — pixel ratio lowered from " + DPR_CAP + "x to keep fps up; restores automatically when the frame rate recovers"],
         perfOn() && [`sim ${perfMs.step.toFixed(1)}`, "physics step CPU ms per frame (smoothed) — force sim / fast-forward / calibration"],
         perfOn() && [`vis ${perfMs.vis.toFixed(1)}`, "visual update CPU ms per frame (smoothed) — per-note/per-link attribute writes, labels, fly-to"],
         perfOn() && [`draw ${perfMs.render.toFixed(1)}ms`, "render submission CPU ms per frame (smoothed) — if fps is low but sim+vis+draw are small, the cost is GPU fill"],
@@ -3447,6 +3463,51 @@ document.getElementById("talk-copy").onclick = async ()=>{
 
 const panel=document.getElementById("inspect");
 document.getElementById("inspect-close").onclick=()=>{ panel.classList.remove("open"); panel.setAttribute("aria-hidden","true"); panel.setAttribute("inert",""); };
+// ---- draggable inspect panel (grip ⠿) with remembered position ----
+// uiState.inspectPos = {x, y} in px; absent = docked (top-right CSS default).
+// The reset button (⌖) only shows while a custom position is active.
+const inspectResetBtn = document.getElementById("inspect-reset");
+function applyInspectPos(){
+  const pos = uiState.inspectPos;
+  if(pos && Number.isFinite(pos.x) && Number.isFinite(pos.y)){
+    // clamp into the viewport so a stale position (smaller window, detached
+    // monitor) can never strand the panel off-screen.
+    const x = Math.min(Math.max(pos.x, 0), Math.max(0, innerWidth - 80));
+    const y = Math.min(Math.max(pos.y, 0), Math.max(0, innerHeight - 60));
+    panel.style.left = x + "px"; panel.style.top = y + "px";
+    panel.classList.add("custom"); inspectResetBtn.hidden = false;
+  }else{
+    panel.classList.remove("custom");
+    panel.style.left = ""; panel.style.top = "";
+    inspectResetBtn.hidden = true;
+  }
+}
+inspectResetBtn.onclick = ()=>{ delete uiState.inspectPos; saveUiState(); applyInspectPos(); };
+{
+  const grip = document.getElementById("inspect-grip");
+  let dragOff = null;   // pointer offset inside the panel while dragging
+  grip.addEventListener("pointerdown", ev=>{
+    const r = panel.getBoundingClientRect();
+    dragOff = {dx: ev.clientX - r.left, dy: ev.clientY - r.top};
+    panel.classList.add("dragging");
+    grip.setPointerCapture(ev.pointerId);
+    ev.preventDefault();
+  });
+  grip.addEventListener("pointermove", ev=>{
+    if(!dragOff) return;
+    uiState.inspectPos = {x: ev.clientX - dragOff.dx, y: ev.clientY - dragOff.dy};
+    applyInspectPos();
+  });
+  const end = ev=>{
+    if(!dragOff) return;
+    dragOff = null; panel.classList.remove("dragging");
+    try{ grip.releasePointerCapture(ev.pointerId); }catch{}
+    saveUiState();
+  };
+  grip.addEventListener("pointerup", end);
+  grip.addEventListener("pointercancel", end);
+}
+applyInspectPos();
 async function openNote(nd){
   let d; try{ d=await (await fetch(`/note/${encodeURIComponent(nd.repo)}/${encodeURIComponent(nd.role)}/${encodeURIComponent(nd.slug)}`)).json(); }catch{ return; }
   document.getElementById("i-role").textContent = repoList.length>1 ? `${nd.repo} · ${nd.role}` : nd.role;
@@ -3530,6 +3591,11 @@ const PROBE = location.search.includes("hoverprobe");
 // a normal server costs one probe at boot, then silence.
 (async function(){
   let base; try{ base = await (await fetch("/version")).json(); }catch{ return; }
+  if(base && base.branch){
+    CHIP_BRANCH = [base.branch, "git branch the serving repo is on (read at server boot probe)"];
+    // frame() rebuilds the chip every second; repaint now for the non-WebGL path
+    if(statusEl && !webglOK) statusEl.innerHTML = chipHtml([CHIP_LIVE, CHIP_VER, CHIP_BRANCH, CHIP_NO3D]);
+  }
   if(!base || !base.dev) return;
   setInterval(async ()=>{
     try{
@@ -3547,8 +3613,7 @@ const PROBE = location.search.includes("hoverprobe");
   await loadSessions();
   if(uiState.liveBoard) startBoardPolling();  // off by default — enable via the ⚙ Settings popover
   const st=document.getElementById("status-txt");
-  if(!webglOK) st.innerHTML = chipHtml([CHIP_LIVE, CHIP_VER,
-    ["3D unavailable", "this browser/GPU can't create a WebGL context — the sidebar and boards still work, the 3D scene doesn't render"]]);   // webglOK: fps is written by frame() once per second
+  if(!webglOK) st.innerHTML = chipHtml([CHIP_LIVE, CHIP_VER, CHIP_BRANCH, CHIP_NO3D]);   // webglOK: fps is written by frame() once per second
   // graph poll: adaptive — a huge corpus can take tens of seconds to scan
   // and tens of MB to parse; re-polling such a graph every 15s would keep
   // both server and tab permanently busy. The interval stretches to 8x the

@@ -108,6 +108,26 @@ def git_root():
         return os.getcwd()
 
 
+def git_branch():
+    """Current branch of the serving repo, read from .git/HEAD per call so a
+    branch switch shows up on the page's next /version probe without a server
+    restart (no subprocess — /version is polled every 1.5s in dev mode).
+    Follows a `.git`-file indirection (worktrees); detached HEAD -> short sha;
+    any failure -> "" (the chip segment is simply dropped client-side)."""
+    try:
+        root = Path(git_root())
+        g = root / ".git"
+        if g.is_file():  # worktree/submodule: ".git" is a "gitdir: <path>" pointer
+            gitdir = g.read_text().split("gitdir:", 1)[1].strip()
+            g = Path(gitdir) if os.path.isabs(gitdir) else (root / gitdir).resolve()
+        head = (g / "HEAD").read_text().strip()
+        if head.startswith("ref: refs/heads/"):
+            return head[len("ref: refs/heads/"):]
+        return head[:7]  # detached HEAD
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def state_dir():
     env = os.environ.get("NEURAL_VIEW_STATE")
     return Path(env) if env else Path(git_root()) / ".claude" / "neural-view"
@@ -1126,7 +1146,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"clients": sorted(out, key=lambda d: d.get("age", 0))})
         if path == "/version":
             tmpl = TEMPLATE.stat().st_mtime_ns if TEMPLATE.is_file() else 0
-            return self._send(200, {"boot": BOOT_ID, "template": tmpl, "dev": DEV_MODE})
+            return self._send(200, {"boot": BOOT_ID, "template": tmpl, "dev": DEV_MODE, "branch": git_branch()})
         if path.startswith("/note/"):
             parts = path[len("/note/"):].split("/", 2)
             if len(parts) == 3 and parts[0] and parts[1] and parts[2]:
