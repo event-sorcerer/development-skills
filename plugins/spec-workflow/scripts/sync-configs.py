@@ -108,6 +108,9 @@ PEER_REVIEWER_NAME_TEMPLATE = "Peer Reviewer (codex) - {name}"
 PEER_REVIEWER_EMAIL_TEMPLATE = "{local}+peer_reviewer@{domain}"
 
 _identities_line_pat = re.compile(r"(?m)^([ \t]+)identities:[ \t]*\n")
+# Intentionally unscoped to the identities: block -- a "peer-reviewer:" key
+# anywhere in project.yaml is not valid YAML shape for anything else this
+# schema defines, so a false-positive match is not a realistic risk here.
 _peer_reviewer_key_pat = re.compile(r"(?m)^[ \t]+peer-reviewer:\s*$")
 
 
