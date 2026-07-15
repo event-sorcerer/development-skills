@@ -4,10 +4,11 @@
 # sources every section-*.sh file. Exits nonzero if any check failed.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC2034  # PLUGIN is used by the section-*.sh files
 PLUGIN="$(cd "$HERE/.." && pwd)"
 fails=0
 
-# shellcheck source=_lib.sh
+# shellcheck source=plugins/peer-review/tests/_lib.sh
 source "$HERE/_lib.sh"
 
 for section in "$HERE"/section-*.sh; do

@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # section-diff-source.sh -- sourced by run-tests.sh; do not run standalone.
 # Contract: the runner already defines set -uo pipefail and has sourced
 # _lib.sh (check/check_rc/check_absent) and set HERE/PLUGIN/fails before
@@ -55,16 +56,25 @@ check_absent "mainBranch fallback: trunk-only content absent when falling back t
 rm -rf "$D2"
 
 # --- mainBranch from repo config: git config peer-review.mainBranch overrides the fallback ---
-D3="$(mkrepo)"
-git -C "$D3" -c user.name=t -c user.email=t@t.t checkout -q -b trunk main
+# feature2 branches off trunk (which itself branched off main with its own
+# commit), so the triple-dot merge-base differs between "main" and "trunk"
+# and the two configs are distinguishable in the resulting diff.
+D3="$(mktemp -d)"
+git -C "$D3" -c init.defaultBranch=main init -q
+git -C "$D3" -c user.name=t -c user.email=t@t.t -c commit.gpgsign=false commit -q --allow-empty -m "initial on main"
+git -C "$D3" -c user.name=t -c user.email=t@t.t checkout -q -b trunk
 echo "trunk-only line" >"$D3/trunk.txt"
 git -C "$D3" add trunk.txt
 git -C "$D3" -c user.name=t -c user.email=t@t.t -c commit.gpgsign=false commit -q -m "trunk-only commit"
+git -C "$D3" -c user.name=t -c user.email=t@t.t checkout -q -b feature2
+echo "feature2 line" >"$D3/feature2.txt"
+git -C "$D3" add feature2.txt
+git -C "$D3" -c user.name=t -c user.email=t@t.t -c commit.gpgsign=false commit -q -m "add feature2.txt"
 git -C "$D3" config peer-review.mainBranch trunk
-git -C "$D3" -c user.name=t -c user.email=t@t.t checkout -q feature
 out="$(cd "$D3" && PATH="$FAKECODEX:$NOBIN" bash "$SCRIPT" 2>&1; echo "rc=$?")"
 check "mainBranch config: exits 0" "rc=0" "$out"
-check "mainBranch config: diff computed against configured mainBranch (trunk)" "trunk.txt" "$out"
+check "mainBranch config: diff computed against configured mainBranch (trunk)" "feature2.txt" "$out"
+check_absent "mainBranch config: trunk's own commit not included (merge-base is trunk, not main)" "trunk-only line" "$out"
 rm -rf "$D3"
 
 # --- --base <ref> ---
@@ -127,7 +137,7 @@ D8="$(mkrepo)"
 out="$(cd "$D8" && PATH="$NOBIN" bash "$SCRIPT" 2>&1; echo "rc=$?")"
 check_absent "missing codex: nonzero exit (not rc=0)" "rc=0" "$out"
 check "missing codex: mentions codex" "codex" "$out"
-check "missing codex: prints install instructions" "install" "$out"
+check "missing codex: prints install instructions" "Install the codex CLI" "$out"
 rm -rf "$D8"
 
 rm -rf "$FAKECODEX"
