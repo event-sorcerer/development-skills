@@ -33,6 +33,7 @@ Everything project-specific lives in the consumer repo's **`.claude/project.yaml
 | `feedback` | Emit structured process feedback about the workflow itself (`methodology.feedback`); triaged at retro time, or offers `retrospective` when run standalone |
 | `retrospective` | On-demand retro — triage pending feedback and mint/prune/graduate brain notes, outside a `build-next` PR-close |
 | `sync-project-configs` | Discover anchored repos (`.claude/.neural-network` marker) and bring their `.claude/project.yaml` up to this plugin's config surface via versioned sync rules; dry-run by default |
+| `changelog-generate` | Read-only: renders a Markdown changelog section from git log grouped by conventional-commit type, since the last `spec-workflow--v*` tag; `--write <file>` prepends it to a named file |
 
 ## Scripts (`scripts/`)
 

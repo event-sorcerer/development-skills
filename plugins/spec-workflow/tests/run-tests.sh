@@ -114,6 +114,7 @@ SECTIONS=(
     section-find-task.sh
     section-pagination.sh
     section-skill-contracts.sh
+    section-changelog.sh
     section-sync-configs.sh
     section-guard-pr-create.sh
     section-board-audit.sh

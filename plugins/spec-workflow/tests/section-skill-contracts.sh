@@ -83,3 +83,16 @@ check "queue SKILL.md tells the human they can steer via comments or Priority" "
 echo "== plugin README documents the queue skill =="
 QREADME="$(cat "$PLUGIN/README.md" 2>/dev/null)"
 check "plugin README lists the queue skill in the skills table" "| \`queue\` |" "$QREADME"
+
+echo "== changelog-generate SKILL.md contract (#165) =="
+CLSKILL="$PLUGIN/skills/changelog-generate/SKILL.md"
+if [[ -f "$CLSKILL" ]]; then echo "ok   changelog-generate/SKILL.md exists"; else echo "FAIL changelog-generate/SKILL.md missing"; fails=$((fails + 1)); fi
+CLBODY="$(cat "$CLSKILL" 2>/dev/null)"
+check "changelog-generate SKILL.md has name frontmatter" "name: changelog-generate" "$CLBODY"
+check "changelog-generate SKILL.md wires changelog.sh" "changelog.sh\"" "$CLBODY"
+check "changelog-generate SKILL.md states it is read-only" "READ-ONLY" "$CLBODY"
+
+echo "== plugin + root README document the changelog-generate skill (#165) =="
+RROOTREADME="$(cat "$HERE/../../../README.md" 2>/dev/null)"
+check "plugin README lists the changelog-generate skill in the skills table" "| \`changelog-generate\` |" "$QREADME"
+check "root README lists the changelog-generate skill in the skills table" "| \`changelog-generate\` |" "$RROOTREADME"

@@ -83,6 +83,7 @@ Spec-driven autonomous build workflow. A repo declares its boards, specs, epics,
 | `neural-view` | Live JARVIS-style visualization of the identity brains — notes as neurons, recalls lighting up in real time |
 | `feedback` | Structured per-iteration process feedback about the workflow itself (`methodology.feedback`); triaged into backlog/brain-note/graduate/upstream/ignore at retro time |
 | `sync-project-configs` | Discover every anchored repo and bring its `.claude/project.yaml` up to the plugin's current config surface via versioned sync rules; dry-run by default |
+| `changelog-generate` | Read-only: Markdown changelog section from git log grouped by conventional-commit type, since the last `spec-workflow--v*` tag; `--write <file>` to prepend |
 
 Humans steer the loop by commenting on task issues: `next-task`/`implement-task` read every comment before starting, fold accepted changes into the issue's acceptance criteria, and reply on the issue.
 
