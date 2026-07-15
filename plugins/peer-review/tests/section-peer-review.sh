@@ -65,6 +65,7 @@ check "valid: finding failure scenario shown" "word-splitting on a path with spa
 check "valid: verdict shown" "looks OK with one nit" "$out"
 check "valid: invocation used --sandbox read-only" "read-only" "$(cat "$ARGLOG")"
 check "valid: invocation used --sandbox read-only (flag itself)" "--sandbox" "$(cat "$ARGLOG")"
+# shellcheck disable=SC2016  # intentional: matching a literal $x in the fixture diff, not expanding it
 check "valid: diff text embedded in the prompt sent to codex" 'echo "$x"' "$(cat "$ARGLOG")"
 check_absent "valid: sandbox is never workspace-write" "workspace-write" "$(cat "$ARGLOG")"
 check_absent "valid: sandbox is never danger-full-access" "danger-full-access" "$(cat "$ARGLOG")"
