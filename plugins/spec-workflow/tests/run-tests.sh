@@ -129,6 +129,7 @@ SECTIONS=(
     section-runner-filter.sh
     section-section-guard.sh
     section-local-state-manifest.sh
+    section-gitignore-sync.sh
 )
 
 if [[ ${#SECTIONS[@]} -eq 0 ]]; then

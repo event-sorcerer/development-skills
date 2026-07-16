@@ -21,7 +21,12 @@
 #   bash "$CLAUDE_PLUGIN_ROOT/scripts/lib/local-state.sh" ignore >> .gitignore
 #
 # $SPEC_WORKFLOW_LOCAL_STATE_MANIFEST overrides the resolved manifest path (tests).
-set -uo pipefail
+#
+# No file-scope `set -uo pipefail`: sourcing (the documented primary interface)
+# would otherwise flip nounset+pipefail ON in the caller's shell — a real
+# footgun for sourcing callers like gitignore-sync.sh. Every read below is
+# already nounset-safe via ${x:-} / ${x:?} defaults, so the options are not
+# needed here.
 
 # spec_workflow_local_state_manifest -- resolve the manifest's path from this
 # file's own on-disk location (lib/ -> scripts/), honoring an env override.
@@ -47,6 +52,10 @@ spec_workflow_local_state_paths() {
         path="${line#*$'\t'}"
         [[ "$policy" == "$want" ]] && printf '%s\n' "$path"
     done < "$manifest"
+    # The read-loop's EOF condition leaves $? == 1; return success explicitly so
+    # callers under `set -e`/rc-checks (and `bash local-state.sh ignore`) don't
+    # see a spurious failure on a normal read.
+    return 0
 }
 
 # spec_workflow_local_state_policy <path> [manifest]
