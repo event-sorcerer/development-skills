@@ -63,6 +63,28 @@ out="$(PEER_REVIEW_PROVIDERS_FILE="$FIXDIR/providers.tsv" bash "$SCRIPT" claude 
 check_rc "claude list-models: exits 1 (not a crash)" 1 "${out##*rc=}"
 check "claude list-models: says not yet available" "not yet available" "$out"
 
+# --- an EMPTY MIDDLE column (list_models_script empty, run_script present)
+# must not misparse. Bash's `IFS=$'\t' read` collapses adjacent tabs (tab is
+# "IFS whitespace" even when it's the only char in IFS), which would shift
+# run_script's value into the list_script slot -- this row is exactly the
+# shape the registry's own header comment documents as valid ("leave a
+# script column empty if that provider's backend isn't implemented yet").
+cat >"$FIXDIR/gap.tsv" <<EOF
+gapproto	Gap Provider		gap-run.sh
+EOF
+cat >"$FIXDIR/gap-run.sh" <<'EOF'
+#!/usr/bin/env bash
+set -uo pipefail
+echo "gap review ran"
+EOF
+chmod +x "$FIXDIR/gap-run.sh"
+out="$(PEER_REVIEW_PROVIDERS_FILE="$FIXDIR/gap.tsv" bash "$SCRIPT" gapproto run 2>&1; echo "rc=$?")"
+check "empty middle column: run stage uses run_script (not the empty list_script slot)" "gap review ran" "$out"
+check_rc "empty middle column: run stage exits 0" 0 "${out##*rc=}"
+out="$(PEER_REVIEW_PROVIDERS_FILE="$FIXDIR/gap.tsv" bash "$SCRIPT" gapproto list-models 2>&1; echo "rc=$?")"
+check_rc "empty middle column: list-models stage exits 1 (list_script genuinely empty)" 1 "${out##*rc=}"
+check "empty middle column: list-models stage reports not yet available, doesn't wrongly exec gap-run.sh" "not yet available" "$out"
+
 # --- unknown provider id -> exit 2, clear error ---
 out="$(PEER_REVIEW_PROVIDERS_FILE="$FIXDIR/providers.tsv" bash "$SCRIPT" nonexistent run 2>&1; echo "rc=$?")"
 check_rc "unknown provider: exit 2" 2 "${out##*rc=}"
