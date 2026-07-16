@@ -20,8 +20,14 @@ bash "${CLAUDE_PLUGIN_ROOT}/scripts/list-models.sh"
 ```
 Prints `{"models":[{"slug","display_name","description"}, ...], "recommended":"<slug>"}` —
 every codex model currently available, sorted best-first, with `recommended` naming the top
-one. Build one `AskUserQuestion` option per model (`preview`: `<slug> — <description>`), the
-`recommended` entry first and labeled "(Recommended)". Use the human's pick as `<slug>` below.
+one.
+
+`AskUserQuestion` accepts 2–4 options, and the model catalog can have more than 4 entries — so:
+- **Exactly 1 model**: skip `AskUserQuestion` entirely (nothing to choose between) — use that
+  slug directly.
+- **2 or more models**: take at most the first 4 (already priority-sorted, so this is always
+  the best 4), one `AskUserQuestion` option each (`preview`: `<slug> — <description>`), the
+  `recommended` entry first and labeled "(Recommended)". Use the human's pick as `<slug>` below.
 
 **If this script exits nonzero** (codex missing, discovery failed, or nothing came back):
 skip this step entirely — proceed straight to step 2 with no `--model` flag. Never block a
