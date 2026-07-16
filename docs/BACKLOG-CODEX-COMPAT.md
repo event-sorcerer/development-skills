@@ -137,13 +137,90 @@ Once the compute-registry work (issue #166) lands a mergeable skill, review it a
 **DoD:** matrix updated; suite green if any fix was needed and included.
 
 ### CDX-051 · Sweep peer-review skill(s) for dual-host compliance — P2 · 3 pts · §11.2
-Same review as CDX-050, scoped to the peer-review work (issues #167/#168, backlog at `docs/BACKLOG-PEER-REVIEW.md`).
+Same review as CDX-050, scoped to the peer-review work (issues #167/#168/#201, backlog at
+`docs/BACKLOG-PEER-REVIEW.md`).
 **Acceptance:** same as CDX-050.
 **DoD:** matrix updated; suite green if any fix was needed and included.
+
+**Expanded scope (2026-07-16, human request):** the portability sweep above found a real
+functional gap, not just a compliance question — `/peer-review`'s "never let a model review
+its own diff" premise inverts once Codex (not Claude Code) is the orchestrator; Codex
+reviewing its own diff would recreate the exact blind-spot problem this skill exists to avoid.
+Fixing this is genuinely new behavior (a provider-selection layer + a second review backend),
+too large for CDX-051's own 3-pt budget per this repo's complexity rubric (8+ = split before
+entering WIP) — split into CDX-053/054/055 below, tracked as CDX-051's expanded scope rather
+than a separate, disconnected feature.
+
+Design, confirmed feasible before filing:
+- `claude -p --output-format json --json-schema <schema> --model <slug> --permission-mode plan
+  "<prompt>"` mirrors `codex exec --output-schema` closely enough that `peer-review.sh`'s
+  existing architecture (embed diff in prompt, schema-constrained JSON, raw-fallback on parse
+  failure) can be replicated for a Claude backend with minimal new design.
+- `claude ultrareview` was considered and REJECTED — it is an explicitly billed,
+  user-triggered-only multi-agent cloud review; an automated skill must never invoke it
+  programmatically (this is a hard operating-rule constraint, not a preference).
+- No `claude` CLI subcommand enumerates available models dynamically (unlike `codex debug
+  models`) — the Claude-side model catalog must be a small maintained static list, sourced
+  from this repo's own `claude-api` reference material rather than duplicated by hand.
+- Human decision (2026-07-16): NOT auto-detected. `/peer-review` always asks, two steps, both
+  via `AskUserQuestion` + `preview` (same pattern PRV-004 already established): (1) which
+  provider — starts with Claude and OpenAI/Codex, designed so a third provider is a registry
+  entry + one adapter script, not a rewrite; (2) which model for the chosen provider — for
+  Codex, PRV-004's existing `list-models.sh` flow unchanged; for Claude, the static catalog,
+  same top-4-cap/skip-if-1/recommend-one UX.
+
+### CDX-053 · Provider-selection step for `/peer-review` — P1 · 5 pts · §11.2 (new)
+A small provider registry (e.g. `plugins/peer-review/scripts/providers.sh` or a JSON/TOML list
+— pick the shape that keeps "add a third provider" to one new entry + one adapter script, no
+branching logic changes elsewhere) naming each provider's id, display name, and which script
+implements it. `/peer-review`'s SKILL.md gains a new first step: `AskUserQuestion` over the
+registry (id + display name, 2–4 options per the same tool constraint PRV-004 already handles;
+this v1 has exactly 2 providers so no capping logic is exercised yet, but the registry shape
+must not assume exactly 2). The chosen provider's id selects which of CDX-054's/PRV-004's
+scripts runs next.
+**Acceptance:** registry is data, not a hardcoded if/else in SKILL.md prose; adding a fixture
+third provider in a test is enough to prove the registry, not the prose, drives the option
+list; existing Codex-only behavior (PRV-004, already merged) is reachable through this new
+step with zero behavior change when Codex is chosen.
+**DoD:** suite green; design doc note added to whatever this epic's own design-doc-guard
+location is (or `docs/design/peer-E0.md`, extending the existing peer-review epic doc, if this
+epic doesn't have its own).
+
+### CDX-054 · Claude review backend for `/peer-review` — P1 · 8 pts · §11.2 (new — flag for
+further split at implementation time per the 8+ rule if the actual diff turns out larger than
+estimated)
+`plugins/peer-review/scripts/claude-review.sh` (naming to match `peer-review.sh`'s shape):
+takes a diff-text file, embeds it in a prompt structurally parallel to `peer-review.sh`'s
+existing one, invokes `claude -p --output-format json --json-schema
+schema/peer-review-findings.json --model <slug> --permission-mode plan "<prompt>"`, parses the
+same findings shape PRV-002 already defined (reuse the existing JSON Schema — do not fork a
+second one), renders under an analogous label (e.g. "External review — Claude"), with the same
+raw-fallback-on-parse-failure and auth/invocation-failure-surfaced-verbatim behavior PRV-002
+established for the Codex side. Plus `plugins/peer-review/scripts/list-claude-models.sh`: a
+small static catalog (sourced from the `claude-api` reference, not hand-duplicated), same
+JSON shape as PRV-004's `list-models.sh` (`{"models":[...], "recommended":"<slug>"}`) so
+SKILL.md's existing AskUserQuestion-building instructions need no provider-specific branching.
+**Acceptance:** `--permission-mode plan` (or an equivalently-verified no-write mode) is as
+unconditional and hardcoded here as `--sandbox read-only` is on the Codex side — same class of
+invariant, same rigor (no flag/env var can weaken it); fake-`claude`-binary fixture tests
+(same pattern as PRV-002's fake-`codex` tests) cover valid/malformed/auth-failure paths; the
+static model catalog is a single named source of truth, not copy-pasted model ids scattered
+across files.
+**DoD:** suite green.
+
+### CDX-055 · Docs + compatibility matrix for the provider-selection feature — P2 · 2 pts ·
+§10.3 §11.2
+Update `plugins/peer-review/README.md` (provider-selection flow, both backends' usage), the
+CDX-042 compatibility matrix (this is now a feature with real per-host behavior, not just a
+portability note), and `SPEC-PEER-REVIEW.md` (a spec delta — new provider-selection section)
+to reflect merged reality.
+**Acceptance:** a newcomer reading only the README could explain what happens when they type
+`/peer-review` under either host, without reading source.
+**DoD:** suite green.
 
 ### CDX-052 · Standing dual-host compliance checklist — P2 · 2 pts · §11.3
 Add a short, linkable checklist (e.g. a `references/` doc or a section in `craft-spec`/`seed-board`) that any future new skill or plugin gets checked against §7–§9 before being considered dual-host complete, so this isn't a one-time sweep.
 **Acceptance:** checklist exists, is referenced from at least one skill in the seed/creation path (e.g. `craft-spec` or `seed-board`), and explicitly states that CI (§10.1) already covers the lint-able portion so the checklist only needs to cover judgment-requiring items.
 **DoD:** suite green.
 
-*(CDX-053–059 headroom for future new-skill sweeps.)*
+*(CDX-056–059 headroom for future new-skill sweeps.)*
