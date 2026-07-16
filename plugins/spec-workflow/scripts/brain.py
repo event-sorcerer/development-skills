@@ -234,6 +234,51 @@ def log_event(identities, role, obj):
         f.write(json.dumps(obj) + "\n")
 
 
+# ------------------------------------------------ unified brain-event feed (E2)
+BRAIN_EVENT_SCHEMA_VERSION = 1
+BRAIN_EVENTS_FILENAME = "brain-events.jsonl"
+
+
+def _feed_repo(root):
+    """Identify the repo an event belongs to: project.name, else root basename."""
+    cfg = C.load_config(root=root, warn=False) or {}
+    name = (cfg.get("project") or {}).get("name")
+    if name:
+        return name
+    return os.path.basename(os.path.abspath(root)) or root
+
+
+def emit_event(root, obj):
+    """Append ONE JSON line to <root>/.claude/brain-events.jsonl (§8.1, §8.2).
+
+    The line is written in a SINGLE os.write() to an O_APPEND file descriptor;
+    on POSIX, concurrent appends of a whole line under PIPE_BUF (~4KB) are
+    atomic, so parallel emitters never interleave or lose writes. Callers pass a
+    payload carrying at least `role` and `type` (one of the §8.2 enum) plus
+    slug/link-key/count fields — NEVER full note bodies. The v1 baseline fields
+    `v`/`ts`/`repo` are filled here.
+
+    The feed is NEVER load-bearing (§8.1.1): any failure prints a warning and
+    returns False without raising, so the caller's real work completes normally.
+    Returns True on a successful append.
+    """
+    try:
+        event = {"v": BRAIN_EVENT_SCHEMA_VERSION, "ts": now_iso(), "repo": _feed_repo(root)}
+        event.update(obj)
+        line = json.dumps(event, sort_keys=True) + "\n"
+        p = os.path.join(root, ".claude", BRAIN_EVENTS_FILENAME)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        fd = os.open(p, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            os.write(fd, line.encode("utf-8"))
+        finally:
+            os.close(fd)
+        return True
+    except Exception as e:
+        sys.stderr.write("warning: brain-event feed append failed: %s\n" % e)
+        return False
+
+
 # ------------------------------------------------------------------------- mint
 def cmd_mint(identities, args):
     body = sys.stdin.read().rstrip("\n") + "\n"

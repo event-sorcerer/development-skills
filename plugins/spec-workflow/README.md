@@ -77,6 +77,24 @@ Each agent role (dev / reviewer / orchestrator, extensible) owns a **private** b
 
 Full protocol: [`skills/build-next/references/brains.md`](./skills/build-next/references/brains.md).
 
+### Brain-event feed (`.claude/brain-events.jsonl`)
+
+A single per-repo append-only JSON-lines file — the **episodic** record of memory operations across every role, distinct from each role's private `<role>/brain/.activation.jsonl` (which stays a frozen, byte-identical contract). `brain.py`'s `emit_event(root, obj)` appends one `\n`-terminated line per semantic event in a **single `write()`** to an `O_APPEND` file descriptor; on POSIX, whole-line appends under `PIPE_BUF` (~4KB) are atomic, so concurrent emitters from parallel processes never interleave or lose writes. The feed is **never load-bearing**: if the append fails (e.g. unwritable directory) the triggering operation completes normally and a warning is printed.
+
+**Schema v1** — each line is an object with these baseline fields plus a type-specific payload:
+
+| field  | type    | meaning                                                        |
+| ------ | ------- | ------------------------------------------------------------- |
+| `v`    | integer | schema version (`1`)                                          |
+| `ts`   | string  | ISO-8601 UTC timestamp (seconds precision)                    |
+| `repo` | string  | `project.name` from `project.yaml`, else the repo dir basename |
+| `role` | string  | the identity the event belongs to (`dev` / `reviewer` / …)   |
+| `type` | string  | event type (enum below)                                       |
+
+`type` ∈ `NoteMinted`, `NoteEvolved`, `NoteSuperseded`, `NoteGraduated`, `LinkFormed`, `LinkFired`, `LinkPruned`, `RecallPerformed`, `ConsultPerformed`, `FeedbackEmitted`, `FeedbackRouted`, `FeedbackArchived`.
+
+Payloads identify slugs / link keys / counts — **never full note bodies**. Consumers ignore unknown fields (forward-compatible). `emit_event` only builds and appends the line; wiring it into the individual commands (mint → `NoteMinted`, recall → `RecallPerformed`, …) is layered on separately.
+
 ### Recommended `/goal` for an autonomous loop
 
 `build-next` already runs retro (step 7) and feedback (step 8) as mandatory,
