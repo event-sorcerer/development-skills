@@ -30,6 +30,7 @@ inside that repo's working copy (per-clone resolution — a plugin-repo
 identity roster.py answers for THAT repo, not for this script's own).
 """
 import argparse
+import difflib
 import json
 import os
 import re
@@ -359,7 +360,10 @@ def process_repo(repo_root, args):
     if not args.apply:
         result.add("route: dry-run")
         if new_text != original_text:
-            result.add(f"[diff] {config_path.relative_to(repo_root)} would change ({len(new_text.splitlines())} lines)")
+            diff = list(difflib.ndiff(original_text.splitlines(), new_text.splitlines()))
+            added = sum(1 for line in diff if line.startswith("+ "))
+            removed = sum(1 for line in diff if line.startswith("- "))
+            result.add(f"[diff] {config_path.relative_to(repo_root)} (+{added}/-{removed} lines)")
         if sw062_applies:
             result.add("[diff] .claude/feedback/ would move to .claude/feedbacks/; its .gitignore line would be dropped")
         return result, False
