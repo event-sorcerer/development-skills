@@ -58,7 +58,7 @@ for m in models:
     # bool is a subclass of int in Python (isinstance(True, int) is True),
     # so it must be excluded explicitly or a malformed "priority": true/false
     # would silently sort/recommend as if it were 1/0.
-    if not isinstance(slug, str):
+    if not isinstance(slug, str) or not slug.strip():
         continue
     if not isinstance(priority, int) or isinstance(priority, bool):
         continue
