@@ -147,6 +147,12 @@ def state_dir():
 S = state_dir()
 PIDFILE, PORTFILE, REPOSFILE = S / "pid", S / "port", S / "repos.json"
 DEFAULT_PORT = int(os.environ.get("NEURAL_VIEW_PORT", "4748"))
+# `start`'s wait-for-bind budget (development-skills#208): under severe host
+# load, a spawned subprocess can genuinely take longer than the historical
+# 3s to get scheduled and bind. Configurable so callers under known
+# contention (this repo's own test suite) can raise it without changing the
+# default end-user experience.
+START_TIMEOUT_S = float(os.environ.get("NEURAL_VIEW_START_TIMEOUT_S", "3.0"))
 TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "neural-view.html"
 VENDOR_DIR = Path(__file__).resolve().parent.parent / "templates" / "vendor"
 # Explicit allowlist of servable vendor filenames — never derive the fs path
@@ -1650,7 +1656,8 @@ def main():
         log = open(S / "server.log", "ab")
         subprocess.Popen(child, stdout=log, stderr=log, start_new_session=True, env=os.environ)
         came_up = False
-        for _ in range(30):
+        deadline = time.time() + START_TIMEOUT_S
+        while time.time() < deadline:
             time.sleep(0.1)
             if pid_alive():
                 came_up = True

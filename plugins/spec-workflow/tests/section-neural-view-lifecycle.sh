@@ -261,7 +261,12 @@ s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 s.bind(("127.0.0.1", int(os.environ["NVBIND_PORT"])))
 s.listen(1)
-time.sleep(8)
+# development-skills#208: must outlive NEURAL_VIEW_START_TIMEOUT_S (this
+# file sets it to 15s above) plus this test's own status/start/stop --force
+# sequence, or `start`'s own wait can outlast the blocker and find the port
+# already free -- turning a genuine "port still blocked" assertion into a
+# false "never bound" failure instead of the intended zombie diagnosis.
+time.sleep(25)
 PY
 _zblocker=$!
 sleep 0.3
