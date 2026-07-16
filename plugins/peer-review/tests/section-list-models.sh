@@ -51,6 +51,14 @@ JSON
             echo 'this is not { valid json'
             exit 0
             ;;
+        missing-description)
+            cat <<'JSON'
+{"models":[
+  {"slug":"gpt-5.6-sol","visibility":"list","supported_in_api":true,"priority":1}
+]}
+JSON
+            exit 0
+            ;;
         empty-eligible)
             cat <<'JSON'
 {"models":[
@@ -85,6 +93,12 @@ out="$(CODEX_DEBUG_MODELS_FIXTURE=with-hidden PATH="$FAKECODEX_DIR:$NOBIN" bash 
 check "with-hidden: exits 0" "rc=0" "$out"
 check_absent "with-hidden: hidden model excluded from output" "codex-auto-review" "$out"
 check "with-hidden: visible model still present" "gpt-5.6-sol" "$out"
+
+# --- a model missing display_name/description is still eligible (only slug+priority+visibility+supported_in_api are required) ---
+out="$(CODEX_DEBUG_MODELS_FIXTURE=missing-description PATH="$FAKECODEX_DIR:$NOBIN" bash "$SCRIPT" 2>&1; echo "rc=$?")"
+check "missing-description: exits 0 (model still eligible)" "rc=0" "$out"
+check "missing-description: recommended is still the slug" '"recommended": "gpt-5.6-sol"' "$out"
+check "missing-description: slug present in models array" "gpt-5.6-sol" "$out"
 
 # --- a supported_in_api:false entry is excluded ---
 out="$(CODEX_DEBUG_MODELS_FIXTURE=with-non-api PATH="$FAKECODEX_DIR:$NOBIN" bash "$SCRIPT" 2>&1; echo "rc=$?")"
