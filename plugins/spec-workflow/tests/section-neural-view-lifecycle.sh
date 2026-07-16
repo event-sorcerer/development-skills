@@ -9,6 +9,16 @@
 declare -F check >/dev/null 2>&1 || { echo "section files are sourced by run-tests.sh; run: bash plugins/spec-workflow/tests/run-tests.sh" >&2; exit 2; }
 echo "== neural-view (lifecycle + endpoints on a scratch port, legacy single-repo mode) =="
 NV="$PLUGIN/scripts/neural-view.py"
+# development-skills#208: `start`'s wait-for-bind loop was a hardcoded 3s
+# budget (30 * 0.1s) -- under severe host load a spawned Python subprocess
+# can genuinely take longer than that just to get scheduled and bind,
+# producing a false "never bound to port" failure unrelated to any real
+# port conflict. NEURAL_VIEW_START_TIMEOUT_S (default 3.0, unchanged) makes
+# that budget configurable; this whole file's own tests (which spawn a real
+# subprocess per `start` call and run under this suite's own CPU load) opt
+# into a longer budget so they aren't flaky under load. Real end-user
+# behavior is unaffected -- the default is unchanged.
+export NEURAL_VIEW_START_TIMEOUT_S=15
 _nvroot="$(mktemp -d)"          # brains root (--dir)
 _nvstate="$(mktemp -d)"         # server state (pid/port)
 _nvscan_empty="$(mktemp -d)"    # empty scan base so real ~/Development repos never leak into these tests
@@ -301,4 +311,36 @@ if kill -0 "$_zrealpid" 2>/dev/null; then echo "FAIL lost-pidfile: zombie proces
 else echo "ok   lost-pidfile: zombie process no longer alive after stop --force"; fi
 unset NEURAL_VIEW_STATE NEURAL_VIEW_PORT
 rm -rf "$_zroot2" "$_zstate2"
+
+# (c) NEURAL_VIEW_START_TIMEOUT_S (development-skills#208) is genuinely
+# respected -- a short override makes `start` give up fast against a port
+# that's permanently held (never released), rather than waiting the
+# unconfigured ~3s default. Deterministic: the held port never frees, so
+# the ONLY thing that can make `start` return is its own timeout budget:
+# a real behavior difference between a short and the default budget proves
+# the env var is read, not just declared.
+_tostate="$(mktemp -d)"
+_toport="$(_rand_port)"
+NVBIND_PORT="$_toport" python3 - <<'PY' &
+import os, socket, time
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", int(os.environ["NVBIND_PORT"])))
+s.listen(1)
+time.sleep(20)
+PY
+_toblocker=$!
+sleep 0.3
+export NEURAL_VIEW_STATE="$_tostate" NEURAL_VIEW_PORT="$_toport" NEURAL_VIEW_START_TIMEOUT_S=0.5
+_to_start_ts=$(date +%s)
+python3 "$NV" start >/dev/null 2>&1
+_to_rc=$?
+_to_elapsed=$(( $(date +%s) - _to_start_ts ))
+check_rc "NEURAL_VIEW_START_TIMEOUT_S=0.5: start still exits non-zero (port never frees)" 1 "$_to_rc"
+if [[ "$_to_elapsed" -le 2 ]]; then _to_fast_rc=0; else _to_fast_rc=1; fi
+check_rc "NEURAL_VIEW_START_TIMEOUT_S=0.5: start returns well under the 3s default, not just under the 20s block" 0 "$_to_fast_rc"
+kill "$_toblocker" 2>/dev/null || true
+wait "$_toblocker" 2>/dev/null || true
+unset NEURAL_VIEW_STATE NEURAL_VIEW_PORT NEURAL_VIEW_START_TIMEOUT_S
+rm -rf "$_tostate"
 
