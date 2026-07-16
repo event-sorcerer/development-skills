@@ -1,7 +1,7 @@
 ---
 name: peer-review
 description: Independent, cross-vendor code review of the current diff via OpenAI's codex CLI — deliberately never Claude reviewing its own diff. Use for '/peer-review', 'peer review this', 'get a second opinion on this diff', or 'review PR <n>'.
-allowed-tools: Bash
+allowed-tools: Bash, AskUserQuestion
 ---
 
 # Peer review
@@ -13,12 +13,30 @@ review. Only run this on a diff you're comfortable leaving your machine.
 **This skill never writes.** `codex` always runs `--sandbox read-only`; nothing here edits a
 file, and the resulting findings are shown, never applied.
 
+## 1. Pick a model
+
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/run.sh" [--base <ref> | --staged | <pr-number>]
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/list-models.sh"
+```
+Prints `{"models":[{"slug","display_name","description"}, ...], "recommended":"<slug>"}` —
+every codex model currently available, sorted best-first, with `recommended` naming the top
+one. Build one `AskUserQuestion` option per model (`preview`: `<slug> — <description>`), the
+`recommended` entry first and labeled "(Recommended)". Use the human's pick as `<slug>` below.
+
+**If this script exits nonzero** (codex missing, discovery failed, or nothing came back):
+skip this step entirely — proceed straight to step 2 with no `--model` flag. Never block a
+review on a discovery hiccup.
+
+## 2. Run the review
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/run.sh" [--model <slug>] [--base <ref> | --staged | <pr-number>]
 ```
 
-- No arguments (default): reviews `git diff <mainBranch>...HEAD` (`<mainBranch>` from `git
-  config peer-review.mainBranch`, else `main`).
+- `--model <slug>`: use the model chosen in step 1 (or the discovery fallback: omit this flag
+  entirely and let codex use its own default).
+- No other arguments (default): reviews `git diff <mainBranch>...HEAD` (`<mainBranch>` from
+  `git config peer-review.mainBranch`, else `main`).
 - `--base <ref>`: reviews `git diff <ref>...HEAD`.
 - `--staged`: reviews staged changes only.
 - `<pr-number>` (bare integer): reviews `gh pr diff <pr-number>`.
