@@ -35,7 +35,23 @@ output rendering; placement `plugins/peer-review` (OQ-1, decided).
 (§6.10); no file-modifying step exists anywhere in the skill (§6.9); README tables updated.
 **DoD:** suite green; skill listed in plugin README; `claude plugin validate` passes.
 
-*(PRV-004–009 headroom for discovered E0 work.)*
+### PRV-004 · Dynamic model selection via `codex debug models` — P1 · 4 pts · §6.11 (new)
+Discover available codex models (`codex debug models`, filter `visibility: list` +
+`supported_in_api: true`, sort by `priority` ascending), present via `AskUserQuestion` with a
+preview per option, recommend the lowest-`priority` model (codex's own top pick — no
+diff-size or other custom heuristic). Pass the chosen `slug` to `codex exec -m <slug>` in
+addition to the existing `--sandbox read-only --output-schema` flags. Discovery failure or
+zero eligible models → fall back to invoking `codex exec` with no `-m` (today's behavior),
+never block the review.
+**Acceptance:** fixture tests (fake `codex debug models` JSON on PATH) cover: normal catalog
+sorted correctly; a `visibility: hide` entry excluded; a `supported_in_api: false` entry
+excluded; malformed/empty JSON triggers the no-`-m` fallback; `--sandbox read-only` remains
+unconditional regardless of model chosen (no test/code path can vary it); SKILL.md documents
+the flow and the fallback.
+**DoD:** suite green; spec delta `docs/spec-deltas/PRV-004.md` (new §6.11) written and folded
+on merge.
+
+*(PRV-005–009 headroom for discovered E0 work.)*
 
 ## E1 — Remote LLM dispatch (§7 §8)
 
