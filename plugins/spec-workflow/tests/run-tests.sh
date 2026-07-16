@@ -116,6 +116,7 @@ SECTIONS=(
     section-pagination.sh
     section-skill-contracts.sh
     section-codex-plugin-json.sh
+    section-codex-marketplace.sh
     section-changelog.sh
     section-sync-configs.sh
     section-guard-pr-create.sh

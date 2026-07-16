@@ -1,0 +1,32 @@
+{
+  "name": "development-skills",
+  "interface": {
+    "displayName": "Development Skills"
+  },
+  "plugins": [
+    {
+      "name": "spec-workflow",
+      "source": {
+        "source": "local",
+        "path": "./plugins/spec-workflow"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "scaffold-project",
+      "source": {
+        "source": "local",
+        "path": "./plugins/scaffold-project"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
