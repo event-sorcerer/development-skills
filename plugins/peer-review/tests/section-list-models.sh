@@ -59,6 +59,15 @@ JSON
 JSON
             exit 0
             ;;
+        boolean-priority)
+            cat <<'JSON'
+{"models":[
+  {"slug":"gpt-5.6-sol","display_name":"GPT-5.6-Sol","description":"real","visibility":"list","supported_in_api":true,"priority":2},
+  {"slug":"bad-entry","display_name":"Bad Entry","description":"malformed priority","visibility":"list","supported_in_api":true,"priority":true}
+]}
+JSON
+            exit 0
+            ;;
         empty-eligible)
             cat <<'JSON'
 {"models":[
@@ -99,6 +108,12 @@ out="$(CODEX_DEBUG_MODELS_FIXTURE=missing-description PATH="$FAKECODEX_DIR:$NOBI
 check "missing-description: exits 0 (model still eligible)" "rc=0" "$out"
 check "missing-description: recommended is still the slug" '"recommended": "gpt-5.6-sol"' "$out"
 check "missing-description: slug present in models array" "gpt-5.6-sol" "$out"
+
+# --- a boolean priority (Python: isinstance(True, int) is True) is rejected, not treated as 0/1 ---
+out="$(CODEX_DEBUG_MODELS_FIXTURE=boolean-priority PATH="$FAKECODEX_DIR:$NOBIN" bash "$SCRIPT" 2>&1; echo "rc=$?")"
+check "boolean-priority: exits 0 (the valid entry is still eligible)" "rc=0" "$out"
+check_absent "boolean-priority: entry with priority:true excluded" "bad-entry" "$out"
+check "boolean-priority: recommended is the entry with a real integer priority" '"recommended": "gpt-5.6-sol"' "$out"
 
 # --- a supported_in_api:false entry is excluded ---
 out="$(CODEX_DEBUG_MODELS_FIXTURE=with-non-api PATH="$FAKECODEX_DIR:$NOBIN" bash "$SCRIPT" 2>&1; echo "rc=$?")"
