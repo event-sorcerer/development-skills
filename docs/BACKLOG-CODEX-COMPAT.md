@@ -16,6 +16,19 @@ Update every script/skill currently interpolating `${CLAUDE_PLUGIN_ROOT}` direct
 **Acceptance:** zero remaining direct `${CLAUDE_PLUGIN_ROOT}` interpolations outside the resolver itself and its own Claude-fast-path branch; existing hermetic suite still green (no behavior change on the Claude fast path); a targeted test confirms at least one migrated script resolves correctly with `CLAUDE_PLUGIN_ROOT` unset and only the sentinel-based fallback available.
 **DoD:** suite green, shellcheck clean.
 
+### CDX-002b · Migrate `CLAUDE_PLUGIN_ROOT` refs in skill `references/*.md` files — P2 · 2 pts · §6.7
+2026-07-16 follow-up to CDX-002 (#174 review finding). §6.7 is worded literally as "a
+`SKILL.md`'s prose" and CDX-002 scoped to the 26 `SKILL.md` files themselves, but the same
+Codex-portability defect exists one hop deeper: 6 `${CLAUDE_PLUGIN_ROOT}` interpolations remain
+in `references/*.md` files that skills instruct the agent to read (`setup-project/references/
+github-project-setup.md:44`; `build-next/references/brains.md:9`; `build-next/references/
+auto-review.md:67,92,262,270`). Under Codex these resolve to empty since Codex never sets
+`CLAUDE_PLUGIN_ROOT`. Same fix pattern as CDX-002: relative path from the reference file's own
+location.
+**Acceptance:** zero remaining `${CLAUDE_PLUGIN_ROOT}` interpolations in any
+`skills/*/references/*.md` file across both plugins; existing hermetic suite still green.
+**DoD:** suite green, shellcheck clean.
+
 ### CDX-003 · `.codex-plugin/plugin.json` for both plugins — P0 · 3 pts · §6.1
 Author valid manifests for `spec-workflow` and `scaffold-project` per `~/.codex/skills/.system/plugin-creator/references/plugin-json-spec.md` (real `name`/`version`/`description`/`author.name` + required `interface` fields; no unsupported fields, no inline `hooks`).
 **Acceptance:** `python3 <codex plugin-creator>/scripts/validate_plugin.py <plugin-path>` passes for both; no `[TODO: ...]` placeholders; `.claude-plugin/plugin.json` untouched.
