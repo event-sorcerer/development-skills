@@ -1,6 +1,6 @@
 ---
 name: peer-review
-description: Independent, cross-vendor code review of the current diff — you pick which provider (OpenAI Codex or Claude today, more later) reviews it, deliberately never the orchestrating model reviewing its own diff. Use for '/peer-review', 'peer review this', 'get a second opinion on this diff', or 'review PR <n>'.
+description: Independent, cross-vendor code review of the current diff — you pick which provider (OpenAI Codex or Claude today, more later) reviews it, deliberately never the orchestrating model reviewing its own diff. Use for '/peer-review', 'peer review this', 'get a second opinion on this diff', or 'review PR' by number.
 allowed-tools: Bash, AskUserQuestion
 ---
 

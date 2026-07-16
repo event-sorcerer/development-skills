@@ -1,6 +1,6 @@
 ---
 name: changelog-generate
-description: Generates a changelog section from git log grouped by conventional-commit type, since the last release tag. Use for '/changelog-generate', 'generate a changelog', 'what changed since the last release', or 'summarize commits since <tag>'.
+description: Generates a changelog section from git log grouped by conventional-commit type, since the last release tag. Use for '/changelog-generate', 'generate a changelog', 'what changed since the last release', or 'summarize commits since a given tag'.
 allowed-tools: Bash
 ---
 
