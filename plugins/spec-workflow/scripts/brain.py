@@ -19,6 +19,7 @@ Python 3 standard library only (no pyyaml). Usage:
     brain.py <root> directory
     brain.py <root> entity-index
     brain.py <root> consult <consumer-role> <owner-role> <slug>
+    brain.py <root> index <role> [--rebuild]
     brain.py <root> prune <role> [--apply]
     brain.py <root> retro-mark
     brain.py <root> graduate <role> <slug>
@@ -30,9 +31,12 @@ Python 3 standard library only (no pyyaml). Usage:
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import re
+import sqlite3
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -775,6 +779,101 @@ def cmd_prune(identities, args):
         print("removed %d link(s)" % len(candidates))
 
 
+# ------------------------------------------------------------------------ index
+def index_db_path(identities, role):
+    return os.path.join(brain_dir(identities, role), "index.sqlite3")
+
+
+def _body_hash(body):
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def _embed_texts(texts):
+    """Run the embeddings capability over `texts` (one per input list entry).
+
+    Returns a list of JSON-decoded float vectors (order-preserved), or None
+    if the capability is unavailable (missing, non-zero exit, or malformed
+    output) -- callers must treat None as "leave rows untouched", per
+    SPEC-MEMORY §9.1.1's absence-degrades-gracefully contract.
+
+    Note bodies may themselves span multiple lines, but the wire contract is
+    one-text-per-stdin-line; internal newlines are flattened to spaces so
+    each text occupies exactly one line.
+    """
+    override = os.environ.get("BRAIN_EMBED_CMD")
+    if override:
+        cmd = override
+        shell = True
+    else:
+        cap_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "capability.sh")
+        cmd = ["bash", cap_path, "embed", "embeddings"]
+        shell = False
+    stdin_data = "\n".join(" ".join(t.split("\n")) for t in texts) + "\n"
+    try:
+        proc = subprocess.run(cmd, input=stdin_data, capture_output=True, text=True, shell=shell)
+    except (OSError, FileNotFoundError):
+        return None
+    if proc.returncode != 0:
+        return None
+    lines = [ln for ln in proc.stdout.split("\n") if ln != ""]
+    if len(lines) != len(texts):
+        return None
+    try:
+        return [json.loads(ln) for ln in lines]
+    except (ValueError, TypeError):
+        return None
+
+
+def cmd_index(identities, args):
+    role = args.role
+    notes = load_notes(identities, role)
+    db_path = index_db_path(identities, role)
+    os.makedirs(brain_dir(identities, role), exist_ok=True)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        if args.rebuild:
+            conn.execute("DROP TABLE IF EXISTS notes")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS notes ("
+            "slug TEXT PRIMARY KEY, content_hash TEXT NOT NULL, "
+            "vector TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+
+        existing_hashes = dict(conn.execute("SELECT slug, content_hash FROM notes"))
+
+        changed = []
+        for slug, note in notes.items():
+            h = _body_hash(note["body"])
+            if existing_hashes.get(slug) == h:
+                continue
+            changed.append((slug, h))
+
+        if changed:
+            vectors = _embed_texts([notes[slug]["body"] for slug, _h in changed])
+            if vectors is None:
+                sys.stderr.write(
+                    "index: embeddings capability unavailable, skipping %d changed note(s)\n"
+                    % len(changed)
+                )
+            else:
+                updated_at = now_iso()
+                conn.executemany(
+                    "INSERT OR REPLACE INTO notes (slug, content_hash, vector, updated_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    [(slug, h, json.dumps(vec), updated_at)
+                     for (slug, h), vec in zip(changed, vectors)],
+                )
+
+        stale = [slug for slug in existing_hashes if slug not in notes]
+        if stale:
+            conn.executemany("DELETE FROM notes WHERE slug = ?", [(s,) for s in stale])
+
+        conn.commit()
+    finally:
+        conn.close()
+
+
 # -------------------------------------------------------------------------- cli
 def main(argv):
     p = argparse.ArgumentParser(prog="brain.py", description="Per-identity zettel memory engine.")
@@ -819,6 +918,11 @@ def main(argv):
     sp.add_argument("owner")
     sp.add_argument("slug")
     sp.set_defaults(fn=cmd_consult)
+
+    sp = sub.add_parser("index")
+    sp.add_argument("role")
+    sp.add_argument("--rebuild", action="store_true")
+    sp.set_defaults(fn=cmd_index)
 
     sp = sub.add_parser("prune")
     sp.add_argument("role")
