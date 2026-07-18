@@ -34,6 +34,11 @@
     "last": null,
     "weight": 0.5
   },
+  "verify-live-system-not-just-local-artifacts->local-gate-green-doesnt-imply-ci-green-for-infra": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "worktree-isolation-when-multitasking->concurrent-gate-runs-collide": {
     "fires": 0,
     "last": null,
