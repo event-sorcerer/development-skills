@@ -224,6 +224,16 @@
     "last": "2026-07-18",
     "weight": 0.5
   },
+  "pin-external-tool-versions-in-ci->confirm-external-asset-before-ci": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "pin-external-tool-versions-in-ci->local-gate-green-doesnt-imply-ci-green-for-infra": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "poll-own-children->second-order-after-concurrency-fix": {
     "fires": 4,
     "last": "2026-07-18",

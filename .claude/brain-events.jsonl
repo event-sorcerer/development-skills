@@ -22,3 +22,17 @@
 {"key": "brief-subagents-to-report-before-idle->nudge-idle-agents-after-backgrounded-gate", "repo": "Zugruul/development-skills", "role": "orchestrator", "ts": "2026-07-18T21:15:54+00:00", "type": "LinkFormed", "v": 1}
 {"repo": "Zugruul/development-skills", "role": "orchestrator", "slug": "research-agent-before-implementation-brief", "strength": 1, "ts": "2026-07-18T21:16:03+00:00", "type": "NoteMinted", "v": 1}
 {"key": "research-agent-before-implementation-brief->parity-check-new-vs-existing-path", "repo": "Zugruul/development-skills", "role": "orchestrator", "ts": "2026-07-18T21:16:03+00:00", "type": "LinkFormed", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "reviewer", "slug": "local-gate-green-doesnt-imply-ci-green-for-infra", "strength": 1, "ts": "2026-07-18T22:30:27+00:00", "type": "NoteMinted", "v": 1}
+{"key": "local-gate-green-doesnt-imply-ci-green-for-infra->confirm-external-asset-before-ci", "repo": "Zugruul/development-skills", "role": "reviewer", "ts": "2026-07-18T22:30:27+00:00", "type": "LinkFormed", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "reviewer", "slug": "match-repo-security-baseline", "strength": 1, "ts": "2026-07-18T22:30:46+00:00", "type": "NoteMinted", "v": 1}
+{"key": "match-repo-security-baseline->verify-guard-regex-on-real-artifact", "repo": "Zugruul/development-skills", "role": "reviewer", "ts": "2026-07-18T22:30:46+00:00", "type": "LinkFormed", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "reviewer", "slug": "verify-guard-regex-on-real-artifact", "strength": 4, "ts": "2026-07-18T22:31:03+00:00", "type": "NoteMinted", "v": 1}
+{"key": "verify-guard-regex-on-real-artifact->recompute-hashes-never-eyeball", "repo": "Zugruul/development-skills", "role": "reviewer", "ts": "2026-07-18T22:31:03+00:00", "type": "LinkFormed", "v": 1}
+{"key": "verify-guard-regex-on-real-artifact->red-commit-worktree-verify", "repo": "Zugruul/development-skills", "role": "reviewer", "ts": "2026-07-18T22:31:03+00:00", "type": "LinkFormed", "v": 1}
+{"key": "verify-guard-regex-on-real-artifact->match-repo-security-baseline", "repo": "Zugruul/development-skills", "role": "reviewer", "ts": "2026-07-18T22:31:03+00:00", "type": "LinkFormed", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "dev", "slug": "pin-external-tool-versions-in-ci", "strength": 1, "ts": "2026-07-18T22:31:14+00:00", "type": "NoteMinted", "v": 1}
+{"key": "pin-external-tool-versions-in-ci->confirm-external-asset-before-ci", "repo": "Zugruul/development-skills", "role": "dev", "ts": "2026-07-18T22:31:14+00:00", "type": "LinkFormed", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "reviewer", "slug": "local-gate-green-doesnt-imply-ci-green-for-infra", "strength": 2, "ts": "2026-07-18T22:31:27+00:00", "type": "NoteMinted", "v": 1}
+{"key": "local-gate-green-doesnt-imply-ci-green-for-infra->pin-external-tool-versions-in-ci", "repo": "Zugruul/development-skills", "role": "reviewer", "ts": "2026-07-18T22:31:27+00:00", "type": "LinkFormed", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "dev", "slug": "pin-external-tool-versions-in-ci", "strength": 2, "ts": "2026-07-18T22:31:40+00:00", "type": "NoteMinted", "v": 1}
+{"key": "pin-external-tool-versions-in-ci->local-gate-green-doesnt-imply-ci-green-for-infra", "repo": "Zugruul/development-skills", "role": "dev", "ts": "2026-07-18T22:31:40+00:00", "type": "LinkFormed", "v": 1}
