@@ -49,6 +49,11 @@
     "last": "2026-07-18",
     "weight": 0.5
   },
+  "boundary-test-needs-exact-value-plus-absence-check->trace-boundary-operators-by-hand": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "capture-dont-transcribe->deterministic-repro-fast": {
     "fires": 3,
     "last": "2026-07-18",
@@ -72,6 +77,11 @@
   "claims-point-at-diff-lines->flag-safety-language-removal": {
     "fires": 4,
     "last": "2026-07-18",
+    "weight": 0.5
+  },
+  "copy-not-eyeball-format-parity->vocab-dict-fake-embedder": {
+    "fires": 0,
+    "last": null,
     "weight": 0.5
   },
   "deterministic-repro-fast->hotfix-repro-incident-sequence": {
@@ -397,6 +407,11 @@
   "worktree-loss-recovery->deterministic-repro-fast": {
     "fires": 4,
     "last": "2026-07-18",
+    "weight": 0.5
+  },
+  "write-fixtures-direct-for-read-path-tests->verify-fixture-isolates-intended-path": {
+    "fires": 0,
+    "last": null,
     "weight": 0.5
   }
 }

@@ -29,6 +29,16 @@
     "last": null,
     "weight": 0.5
   },
+  "probe-spec-silent-input-categories->trace-boundary-operators-by-hand": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "trace-boundary-operators-by-hand->equality-guards-invite-ordering-probes": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "trace-test-setup-vs-comment->verify-guard-regex-on-real-artifact": {
     "fires": 0,
     "last": null,
