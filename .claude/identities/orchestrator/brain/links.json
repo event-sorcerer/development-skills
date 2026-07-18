@@ -9,7 +9,27 @@
     "last": null,
     "weight": 0.5
   },
+  "brief-subagents-to-report-before-idle->nudge-idle-agents-after-backgrounded-gate": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "dual-independent-review-raises-confidence->independent-review-catches-self-test-blindspots": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "dual-independent-review-raises-confidence->parallel-independent-review-passes": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "parallel-independent-review-passes->concurrent-gate-runs-collide": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "research-agent-before-implementation-brief->parity-check-new-vs-existing-path": {
     "fires": 0,
     "last": null,
     "weight": 0.5

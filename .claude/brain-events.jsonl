@@ -15,3 +15,10 @@
 {"repo": "Zugruul/development-skills", "role": "dev", "slug": "audit-new-path-parity-before-writing", "strength": 1, "ts": "2026-07-18T21:13:00+00:00", "type": "NoteMinted", "v": 1}
 {"key": "audit-new-path-parity-before-writing->parity-check-new-vs-existing-path", "repo": "Zugruul/development-skills", "role": "dev", "ts": "2026-07-18T21:13:00+00:00", "type": "LinkFormed", "v": 1}
 {"key": "audit-new-path-parity-before-writing->verify-fixture-isolates-intended-path", "repo": "Zugruul/development-skills", "role": "dev", "ts": "2026-07-18T21:13:00+00:00", "type": "LinkFormed", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "orchestrator", "slug": "dual-independent-review-raises-confidence", "strength": 2, "ts": "2026-07-18T21:15:45+00:00", "type": "NoteMinted", "v": 1}
+{"key": "dual-independent-review-raises-confidence->parallel-independent-review-passes", "repo": "Zugruul/development-skills", "role": "orchestrator", "ts": "2026-07-18T21:15:45+00:00", "type": "LinkFormed", "v": 1}
+{"key": "dual-independent-review-raises-confidence->independent-review-catches-self-test-blindspots", "repo": "Zugruul/development-skills", "role": "orchestrator", "ts": "2026-07-18T21:15:45+00:00", "type": "LinkFormed", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "orchestrator", "slug": "brief-subagents-to-report-before-idle", "strength": 2, "ts": "2026-07-18T21:15:54+00:00", "type": "NoteMinted", "v": 1}
+{"key": "brief-subagents-to-report-before-idle->nudge-idle-agents-after-backgrounded-gate", "repo": "Zugruul/development-skills", "role": "orchestrator", "ts": "2026-07-18T21:15:54+00:00", "type": "LinkFormed", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "orchestrator", "slug": "research-agent-before-implementation-brief", "strength": 1, "ts": "2026-07-18T21:16:03+00:00", "type": "NoteMinted", "v": 1}
+{"key": "research-agent-before-implementation-brief->parity-check-new-vs-existing-path", "repo": "Zugruul/development-skills", "role": "orchestrator", "ts": "2026-07-18T21:16:03+00:00", "type": "LinkFormed", "v": 1}
