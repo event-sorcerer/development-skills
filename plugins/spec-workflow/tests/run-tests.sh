@@ -135,6 +135,7 @@ SECTIONS=(
     section-local-state-manifest.sh
     section-gitignore-sync.sh
     section-repo-hygiene.sh
+    section-agents-claude.sh
 )
 
 if [[ ${#SECTIONS[@]} -eq 0 ]]; then
