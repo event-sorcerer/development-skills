@@ -106,3 +106,5 @@
 {"repo": "Zugruul/development-skills", "role": "orchestrator", "slug": "one-design-doc-per-epic-not-per-task", "strength": 1, "ts": "2026-07-19T05:09:56+00:00", "type": "NoteMinted", "v": 1}
 {"key": "one-design-doc-per-epic-not-per-task->front-load-exact-mechanics-in-design-docs", "repo": "Zugruul/development-skills", "role": "orchestrator", "ts": "2026-07-19T05:09:56+00:00", "type": "LinkFormed", "v": 1}
 {"key": "one-design-doc-per-epic-not-per-task->name-reusable-infra-for-followups-explicitly", "repo": "Zugruul/development-skills", "role": "orchestrator", "ts": "2026-07-19T05:09:56+00:00", "type": "LinkFormed", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "orchestrator", "slug": "session-close-protocol", "strength": 2, "ts": "2026-07-19T07:40:24+00:00", "type": "NoteMinted", "v": 1}
+{"key": "session-close-protocol->orchestrator-cd-prefix-own-commands", "repo": "Zugruul/development-skills", "role": "orchestrator", "ts": "2026-07-19T07:40:24+00:00", "type": "LinkFormed", "v": 1}

@@ -339,6 +339,11 @@
     "last": null,
     "weight": 0.5
   },
+  "sanity-check-computed-paths-with-ls->verify-cited-paths-from-repo-root": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "second-order-after-concurrency-fix->normalize-after-load-identity-fields": {
     "fires": 3,
     "last": "2026-07-18",

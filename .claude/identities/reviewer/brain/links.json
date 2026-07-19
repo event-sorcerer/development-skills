@@ -138,5 +138,10 @@
     "fires": 0,
     "last": null,
     "weight": 0.5
+  },
+  "verify-tdd-empirically-when-log-is-thin->verify-red-test-genuinely-discriminates": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
   }
 }
