@@ -96,3 +96,10 @@
 {"key": "self-check-string-surgery-helpers-first->verify-portability-claims-in-target-environment", "repo": "Zugruul/development-skills", "role": "dev", "ts": "2026-07-19T03:06:31+00:00", "type": "LinkFormed", "v": 1}
 {"key": "self-check-string-surgery-helpers-first->verify-guard-regex-on-real-artifact", "repo": "Zugruul/development-skills", "role": "dev", "ts": "2026-07-19T03:06:31+00:00", "type": "LinkFormed", "v": 1}
 {"repo": "Zugruul/development-skills", "role": "orchestrator", "slug": "stamp-qa-even-after-a-fix-round", "strength": 1, "ts": "2026-07-19T03:07:49+00:00", "type": "NoteMinted", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "reviewer", "slug": "grep-for-known-bug-class-before-deep-analysis", "strength": 1, "ts": "2026-07-19T04:59:04+00:00", "type": "NoteMinted", "v": 1}
+{"key": "grep-for-known-bug-class-before-deep-analysis->verify-portability-claims-in-target-environment", "repo": "Zugruul/development-skills", "role": "reviewer", "ts": "2026-07-19T04:59:04+00:00", "type": "LinkFormed", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "reviewer", "slug": "name-reusable-infra-for-followups-explicitly", "strength": 1, "ts": "2026-07-19T04:59:19+00:00", "type": "NoteMinted", "v": 1}
+{"key": "name-reusable-infra-for-followups-explicitly->front-load-exact-mechanics-in-design-docs", "repo": "Zugruul/development-skills", "role": "reviewer", "ts": "2026-07-19T04:59:19+00:00", "type": "LinkFormed", "v": 1}
+{"key": "name-reusable-infra-for-followups-explicitly->separate-live-repo-state-tests-from-fixtures", "repo": "Zugruul/development-skills", "role": "reviewer", "ts": "2026-07-19T04:59:19+00:00", "type": "LinkFormed", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "dev", "slug": "copy-exact-strings-tests-assert-against", "strength": 1, "ts": "2026-07-19T04:59:32+00:00", "type": "NoteMinted", "v": 1}
+{"key": "copy-exact-strings-tests-assert-against->copy-not-eyeball-format-parity", "repo": "Zugruul/development-skills", "role": "dev", "ts": "2026-07-19T04:59:32+00:00", "type": "LinkFormed", "v": 1}

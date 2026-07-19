@@ -24,6 +24,11 @@
     "last": null,
     "weight": 0.5
   },
+  "grep-for-known-bug-class-before-deep-analysis->verify-portability-claims-in-target-environment": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "local-gate-green-doesnt-imply-ci-green-for-infra->confirm-external-asset-before-ci": {
     "fires": 0,
     "last": null,
@@ -35,6 +40,16 @@
     "weight": 0.5
   },
   "match-repo-security-baseline->verify-guard-regex-on-real-artifact": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "name-reusable-infra-for-followups-explicitly->front-load-exact-mechanics-in-design-docs": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "name-reusable-infra-for-followups-explicitly->separate-live-repo-state-tests-from-fixtures": {
     "fires": 0,
     "last": null,
     "weight": 0.5
