@@ -1,4 +1,14 @@
 {
+  "acceptance-criterion-outranks-test-spec-paraphrase->front-load-exact-mechanics-in-design-docs": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "acceptance-criterion-outranks-test-spec-paraphrase->respect-named-scope-boundaries": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "anonymous-listener-slice-eval->duplicate-with-agreement-pin": {
     "fires": 2,
     "last": "2026-07-12",
@@ -259,6 +269,11 @@
     "last": "2026-07-18",
     "weight": 0.5
   },
+  "prefer-posix-single-behavior-over-terse-idioms->pin-external-tool-versions-in-ci": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "presence-vs-value-claims->bool-excluded-before-int": {
     "fires": 3,
     "last": "2026-07-18",
@@ -327,6 +342,16 @@
   "second-order-after-concurrency-fix->pair-every-side-effect-with-undo": {
     "fires": 3,
     "last": "2026-07-18",
+    "weight": 0.5
+  },
+  "self-check-string-surgery-helpers-first->verify-guard-regex-on-real-artifact": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "self-check-string-surgery-helpers-first->verify-portability-claims-in-target-environment": {
+    "fires": 0,
+    "last": null,
     "weight": 0.5
   },
   "self-scan-first-class->circular-fixture-detector": {

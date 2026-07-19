@@ -82,3 +82,17 @@
 {"key": "read-config-live-not-hardcoded-in-tests->verify-doc-links-and-quotes-against-live-source", "repo": "Zugruul/development-skills", "role": "dev", "ts": "2026-07-19T01:20:30+00:00", "type": "LinkFormed", "v": 1}
 {"repo": "Zugruul/development-skills", "role": "dev", "slug": "verify-brief-characterizations-independently", "strength": 1, "ts": "2026-07-19T01:20:41+00:00", "type": "NoteMinted", "v": 1}
 {"key": "verify-brief-characterizations-independently->respect-named-scope-boundaries", "repo": "Zugruul/development-skills", "role": "dev", "ts": "2026-07-19T01:20:41+00:00", "type": "LinkFormed", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "reviewer", "slug": "verify-portability-claims-in-target-environment", "strength": 1, "ts": "2026-07-19T03:05:37+00:00", "type": "NoteMinted", "v": 1}
+{"key": "verify-portability-claims-in-target-environment->verify-guard-regex-on-real-artifact", "repo": "Zugruul/development-skills", "role": "reviewer", "ts": "2026-07-19T03:05:37+00:00", "type": "LinkFormed", "v": 1}
+{"key": "verify-portability-claims-in-target-environment->local-gate-green-doesnt-imply-ci-green-for-infra", "repo": "Zugruul/development-skills", "role": "reviewer", "ts": "2026-07-19T03:05:37+00:00", "type": "LinkFormed", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "reviewer", "slug": "distinguish-missed-vs-uncatchable-findings", "strength": 1, "ts": "2026-07-19T03:05:49+00:00", "type": "NoteMinted", "v": 1}
+{"key": "distinguish-missed-vs-uncatchable-findings->verify-portability-claims-in-target-environment", "repo": "Zugruul/development-skills", "role": "reviewer", "ts": "2026-07-19T03:05:49+00:00", "type": "LinkFormed", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "dev", "slug": "prefer-posix-single-behavior-over-terse-idioms", "strength": 1, "ts": "2026-07-19T03:06:03+00:00", "type": "NoteMinted", "v": 1}
+{"key": "prefer-posix-single-behavior-over-terse-idioms->pin-external-tool-versions-in-ci", "repo": "Zugruul/development-skills", "role": "dev", "ts": "2026-07-19T03:06:03+00:00", "type": "LinkFormed", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "dev", "slug": "acceptance-criterion-outranks-test-spec-paraphrase", "strength": 1, "ts": "2026-07-19T03:06:14+00:00", "type": "NoteMinted", "v": 1}
+{"key": "acceptance-criterion-outranks-test-spec-paraphrase->respect-named-scope-boundaries", "repo": "Zugruul/development-skills", "role": "dev", "ts": "2026-07-19T03:06:14+00:00", "type": "LinkFormed", "v": 1}
+{"key": "acceptance-criterion-outranks-test-spec-paraphrase->front-load-exact-mechanics-in-design-docs", "repo": "Zugruul/development-skills", "role": "dev", "ts": "2026-07-19T03:06:14+00:00", "type": "LinkFormed", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "dev", "slug": "self-check-string-surgery-helpers-first", "strength": 1, "ts": "2026-07-19T03:06:31+00:00", "type": "NoteMinted", "v": 1}
+{"key": "self-check-string-surgery-helpers-first->verify-portability-claims-in-target-environment", "repo": "Zugruul/development-skills", "role": "dev", "ts": "2026-07-19T03:06:31+00:00", "type": "LinkFormed", "v": 1}
+{"key": "self-check-string-surgery-helpers-first->verify-guard-regex-on-real-artifact", "repo": "Zugruul/development-skills", "role": "dev", "ts": "2026-07-19T03:06:31+00:00", "type": "LinkFormed", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "orchestrator", "slug": "stamp-qa-even-after-a-fix-round", "strength": 1, "ts": "2026-07-19T03:07:49+00:00", "type": "NoteMinted", "v": 1}

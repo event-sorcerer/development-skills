@@ -9,6 +9,11 @@
     "last": null,
     "weight": 0.5
   },
+  "distinguish-missed-vs-uncatchable-findings->verify-portability-claims-in-target-environment": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "golden-identical-covers-absent-not-present->parity-check-new-vs-existing-path": {
     "fires": 0,
     "last": null,
@@ -105,6 +110,16 @@
     "weight": 0.5
   },
   "verify-ordering-assertions-at-two-levels->verify-guard-regex-on-real-artifact": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "verify-portability-claims-in-target-environment->local-gate-green-doesnt-imply-ci-green-for-infra": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "verify-portability-claims-in-target-environment->verify-guard-regex-on-real-artifact": {
     "fires": 0,
     "last": null,
     "weight": 0.5

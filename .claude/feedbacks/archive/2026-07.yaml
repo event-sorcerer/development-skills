@@ -2157,3 +2157,53 @@ items:
     action: ignore
     ref: existing comment-trust discipline handled this correctly with no gap; already
       surfaced directly to the human in-session for awareness/moderation
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-19T03:10:00Z'
+iteration:
+  task: CDX-010
+  outcome: merged
+  reviewRounds: 2
+source:
+  role: orchestrator
+  model: claude-sonnet-5
+items:
+- category: friction
+  area: merge
+  severity: medium
+  summary: A real cross-platform (GNU vs BSD sed) bug in new test infrastructure passed
+    local gate, both dev and both independent reviewers' verification, and was only
+    caught by the actual CI run on the real target platform after merge.
+  detail: Neither the dev agent nor either reviewer had access to a GNU sed environment
+    in this sandbox -- a category of bug that cannot be caught by any amount of local
+    review rigor, only by testing on (or reproducing) the actual target environment.
+    The follow-up review pass fixed this by spinning up a docker container to reproduce
+    the bug and fix directly on GNU sed.
+  evidence:
+  - Zugruul/development-skills#180
+  generalized: For any new or changed shell test helper/script whose correctness could
+    plausibly differ by sed/awk/grep implementation (not just version), local-only
+    verification -- no matter how thorough -- cannot substitute for either (a) actually
+    running on the target CI platform, or (b) reproducing the specific claimed environment
+    divergence in a quick container. Worth considering whether this repo's build-next
+    protocol should call this out explicitly for shell-heavy diffs, distinct from
+    the CI-green-verification lesson already captured for infra tasks generally.
+  routing:
+    action: brain-note
+    ref: verify-portability-claims-in-target-environment
+- category: recommendation
+  area: board
+  severity: low
+  summary: The orchestrator moved a task directly from In review to Ready, skipping
+    the QA status stamp, when confirming the post-fix CI-green result.
+  evidence:
+  - Zugruul/development-skills#180
+  generalized: When a task's merge required a follow-up fix round (residual CI failure
+    found after the first merge), the orchestrator should still stamp QA as its own
+    transition before Ready, even under time pressure to close out -- the underlying
+    validation (CI green, reviews approved) was genuinely done, just not recorded
+    at the intermediate status a reader of the board history would expect.
+  routing:
+    action: brain-note
+    ref: stamp-qa-even-after-a-fix-round
