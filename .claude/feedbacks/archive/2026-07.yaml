@@ -2402,3 +2402,29 @@ items:
   routing:
     action: ignore
     ref: Zugruul/development-skills#132
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-19T00:00:00Z'
+iteration:
+  task: '183'
+  outcome: merged
+  reviewRounds: 1
+source:
+  role: orchestrator
+  model: claude-sonnet-5
+items:
+- category: worked-well
+  area: testing
+  component: build-next / implement-task
+  severity: low
+  summary: A design doc's suggested test sweep pattern was empirically checked against
+    real out-of-scope sites before being trusted, catching a false-positive collision
+    before it caused an incorrect test or an accidental scope-creep fix.
+  generalized: When a design doc proposes a specific test/grep pattern, verifying
+    that pattern against known adjacent-but-out-of-scope content (not just the in-scope
+    targets) before adopting it catches false-positive collisions early, rather than
+    after they cause an incorrect assertion or an unnecessary code change.
+  routing:
+    action: brain-note
+    ref: Zugruul/development-skills#183
