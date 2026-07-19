@@ -2469,3 +2469,30 @@ items:
   routing:
     action: brain-note
     ref: Zugruul/development-skills#184
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-19T00:00:00Z'
+iteration:
+  task: '185'
+  outcome: merged
+  reviewRounds: 1
+source:
+  role: orchestrator
+  model: claude-sonnet-5
+items:
+- category: worked-well
+  area: briefing
+  component: build-next / implement-task
+  severity: low
+  summary: A design doc that names an explicit out-of-scope boundary (what NOT to
+    touch, and which future task owns it) kept the implementer from accidentally wiring
+    a new pure function into a live code path before its consuming task was ready.
+  generalized: When a task ships infrastructure (a new function, a schema field) that
+    a LATER task will consume, stating the explicit boundary in the design doc — this
+    function exists and is tested, but nothing calls it yet, that's task X's job —
+    prevents scope creep into premature wiring and keeps each task's diff honest about
+    what actually changed.
+  routing:
+    action: ignore
+    ref: Zugruul/development-skills#185
