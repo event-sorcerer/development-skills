@@ -702,3 +702,101 @@ check "README documents feedback.py's archive verb" "emit/pending/route/status/m
 check "README documents feedback.py's archived verb" "archived" "$readme_verbs_line"
 check "README describes archived's --since filter" "--since" "$readme_verbs_line"
 check "README describes what archive does" "archive/<YYYY-MM>.yaml" "$readme_verbs_line"
+
+# --- lifecycle events (MEM-022) ---------------------------------------------
+# emit -> FeedbackEmitted (one per item), route -> FeedbackRouted (one per
+# call), archive -> FeedbackArchived (one per document, not per item), all
+# via brain.py's existing emit_event(root, obj) into
+# <root>/.claude/brain-events.jsonl (§8.1/§8.2). Payloads carry ts/idx/action/
+# itemCount refs only -- never an item's summary/detail/generalized text.
+
+# fb_events <root> <type> -- print one line per matching event, tab-separated
+# ts/idx/action/itemCount fields (blank when absent), for `check` assertions.
+fb_events() {
+    python3 - "$1" "$2" <<'PY'
+import json, os, sys
+root, want_type = sys.argv[1], sys.argv[2]
+p = os.path.join(root, ".claude", "brain-events.jsonl")
+if os.path.exists(p):
+    for ln in open(p, encoding="utf-8"):
+        ln = ln.strip()
+        if not ln:
+            continue
+        e = json.loads(ln)
+        if e.get("type") != want_type:
+            continue
+        print("%s\t%s\t%s\t%s\t%s" % (
+            e.get("role", ""), e.get("ts", ""), e.get("idx", ""),
+            e.get("action", ""), e.get("itemCount", "")))
+PY
+}
+
+# emit: one FeedbackEmitted per item, correct ts/idx, no item body text leaked.
+EV="$(mktemp -d)"; mkdir -p "$EV/.claude"
+cp "$FIX/valid.project.yaml" "$EV/.claude/project.yaml"
+python3 "$PLUGIN/scripts/config.py" "$EV" set methodology.feedback true >/dev/null
+ev_() { (cd "$EV" && python3 "$PLUGIN/scripts/feedback.py" "$EV" "$@"); }
+ev_ emit "$FIX/feedback-valid.yaml" >/dev/null
+out="$(fb_events "$EV" FeedbackEmitted)"
+check "emit: exactly 2 FeedbackEmitted lines" "2" "$(printf '%s\n' "$out" | grep -c .)"
+check "emit: item 0 event carries ts+idx" "$(printf 'dev\t2026-07-01T10:00:00Z\t0\t\t')" "$(printf '%s\n' "$out" | sed -n '1p')"
+check "emit: item 1 event carries ts+idx" "$(printf 'dev\t2026-07-01T10:00:00Z\t1\t\t')" "$(printf '%s\n' "$out" | sed -n '2p')"
+raw="$(cat "$EV/.claude/brain-events.jsonl")"
+check_absent "emit: no summary text leaked into the events feed" "Self-approval safety classifier" "$raw"
+check_absent "emit: no detail text leaked into the events feed" "Happened twice in this repo" "$raw"
+check_absent "emit: no generalized text leaked into the events feed" "Front-load the human merge check-in" "$raw"
+
+# route: exactly one FeedbackRouted per call, correct ts/idx/action.
+ev_ route "2026-07-01T10:00:00Z" 0 brain-note "friction-self-approval" >/dev/null
+out="$(fb_events "$EV" FeedbackRouted)"
+check "route: exactly 1 FeedbackRouted line" "1" "$(printf '%s\n' "$out" | grep -c .)"
+check "route: event carries ts/idx/action" "$(printf 'dev\t2026-07-01T10:00:00Z\t0\t\tbrain-note')" "$out"
+rm -rf "$EV"
+
+# archive: one FeedbackArchived PER DOCUMENT moved, not per item -- a
+# 3-item fully-routed document still yields exactly one event, itemCount=3.
+EA="$(mktemp -d)"; mkdir -p "$EA/.claude/feedbacks"
+cp "$FIX/valid.project.yaml" "$EA/.claude/project.yaml"
+python3 "$PLUGIN/scripts/config.py" "$EA" set methodology.feedback true >/dev/null
+ea_() { (cd "$EA" && python3 "$PLUGIN/scripts/feedback.py" "$EA" "$@"); }
+cat >"$EA/.claude/feedbacks/feed.yaml" <<'YAML'
+schemaVersion: 1
+kind: loop-feedback
+ts: "2026-07-01T00:00:00Z"
+iteration: {task: FX-800, outcome: merged, reviewRounds: 1}
+source: {role: dev, model: claude-sonnet-5}
+items:
+  - {category: friction, area: board, severity: low, summary: "a", generalized: "a", routing: {action: ignore, ref: "n/a"}}
+  - {category: friction, area: board, severity: low, summary: "b", generalized: "b", routing: {action: ignore, ref: "n/a"}}
+  - {category: friction, area: board, severity: low, summary: "c", generalized: "c", routing: {action: ignore, ref: "n/a"}}
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: "2026-07-02T00:00:00Z"
+iteration: {task: FX-801, outcome: merged, reviewRounds: 1}
+source: {role: dev, model: claude-sonnet-5}
+items:
+  - {category: friction, area: board, severity: low, summary: "d", generalized: "d", routing: {action: ignore, ref: "n/a"}}
+YAML
+ea_ archive >/dev/null
+out="$(fb_events "$EA" FeedbackArchived)"
+check "archive: exactly 2 FeedbackArchived lines (one per document)" "2" "$(printf '%s\n' "$out" | grep -c .)"
+check "archive: 3-item document carries itemCount=3, not 3 events" "$(printf 'dev\t2026-07-01T00:00:00Z\t\t\t3')" "$(printf '%s\n' "$out" | sed -n '1p')"
+check "archive: 1-item document carries itemCount=1" "$(printf 'dev\t2026-07-02T00:00:00Z\t\t\t1')" "$(printf '%s\n' "$out" | sed -n '2p')"
+raw="$(cat "$EA/.claude/brain-events.jsonl")"
+check_absent "archive: no item summary text leaked into the events feed" '"summary"' "$raw"
+rm -rf "$EA"
+
+# §8.1.1: an unwritable events feed target must not block emit/route/archive's
+# own primary effect -- only a warning, the real operation still succeeds.
+EF="$(mktemp -d)"; mkdir -p "$EF/.claude"
+cp "$FIX/valid.project.yaml" "$EF/.claude/project.yaml"
+python3 "$PLUGIN/scripts/config.py" "$EF" set methodology.feedback true >/dev/null
+# events-feed target is a DIRECTORY (not the file itself) so the append is
+# doomed while .claude stays fully writable for the real feedbacks/ write.
+mkdir -p "$EF/.claude/brain-events.jsonl"
+out="$(cd "$EF" && python3 "$PLUGIN/scripts/feedback.py" "$EF" emit "$FIX/feedback-valid.yaml" 2>&1)"
+check "emit: feed-unwritable -- primary emit still succeeds" "OK: emitted 2 item(s)" "$out"
+check "emit: feed-unwritable -- a warning is printed" "warning" "$out"
+check "feed.yaml written despite events-feed failure" "loop-feedback" "$(cat "$EF/.claude/feedbacks/feed.yaml" 2>/dev/null)"
+rm -rf "$EF"
