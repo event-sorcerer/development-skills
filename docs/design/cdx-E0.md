@@ -34,4 +34,34 @@ Plugin root cached in-process only via the caller's own local variable, not writ
 ## Out of scope for this epic
 Actually migrating the 24 existing `CLAUDE_PLUGIN_ROOT`-referencing scripts/skills to call this resolver — that is CDX-002, which depends on this task's shipped resolver but is a separate, independently gated task.
 `.codex-plugin/plugin.json` content and the Codex marketplace manifest (CDX-003/CDX-004) — packaging metadata, not code; no shared component with the resolver beyond both living under the "E0" umbrella.
-Fixing the 5 angle-bracket skill descriptions (CDX-005) and the `AGENTS.md`/`CLAUDE.md` pair (CDX-006) — unrelated deliverables sharing this epic's number range only.
+Fixing the 5 angle-bracket skill descriptions (CDX-005) — unrelated deliverable sharing this epic's number range only.
+
+## CDX-006 — `AGENTS.md` + `CLAUDE.md` pointer (§6.5, §15 OQ-2)
+
+**§6.5 exact text**: "THE SYSTEM SHALL provide a canonical `AGENTS.md` at the repository root consumed by Codex, with root `CLAUDE.md` reduced to a one-line pointer to it (§15 OQ-2 governs whether either is hand-maintained or generated)."
+
+**OQ-2, already resolved** (§15): "hand-maintained `AGENTS.md` canonical + one-line `CLAUDE.md` pointer (no CI generation step this release)." No generation script needed — this is a pure content-authoring task.
+
+**Current state**: neither `AGENTS.md` nor `CLAUDE.md` exists at the repo root yet (confirmed: `ls` returns nothing for both). This is pure creation, not "reduction" of an existing file.
+
+**Content sources — real repo knowledge, not boilerplate** (per the established `skip-not-crash-on-missing-external-tool-dependency` dev-brain lesson's own note: "populate free-text fields from real repo knowledge... not boilerplate"):
+- Repo purpose: `.claude/project.yaml`'s `project.description` ("Claude Code plugin marketplace; spec-workflow (the autonomous build-loop plugin) develops itself here — dogfood.") and `README.md`'s opening line.
+- Dogfood note: same project.yaml description — this repo builds itself via its own spec-workflow plugin, autonomously, via the build-next loop.
+- Codex-support pointer: `README.md`'s existing "Codex support (in progress)" section (line 35-37) already states current status accurately — point at it, don't duplicate it.
+- Spec pointers: `SPEC.md` (spec-workflow's own contract) and `SPEC-CODEX-COMPAT.md` (this dual-host compatibility spec) — both root-level, both directly relevant to a Codex-side agent.
+- Validation path: the actual gate command from `.claude/project.yaml`'s `commands.gate` (`bash plugins/spec-workflow/tests/run-tests.sh && shellcheck -x plugins/spec-workflow/scripts/*.sh plugins/spec-workflow/scripts/lib/*.sh plugins/spec-workflow/tests/*.sh && claude plugin validate plugins/spec-workflow`) — the one command that actually proves a change is correct in this repo, quoted verbatim, not paraphrased.
+
+**`AGENTS.md` structure** (concise — this is a pointer/orientation doc, not a full spec):
+1. One-paragraph repo purpose (plugin marketplace; spec-workflow dogfoods itself here).
+2. Dogfooding note: this repo is built BY the `spec-workflow` plugin it ships, autonomously, via `/spec-workflow:build-next` — an agent working in this repo may literally be an instance of that same loop.
+3. Pointers: `SPEC.md` (spec-workflow contract), `SPEC-CODEX-COMPAT.md` (this compatibility spec), `docs/BACKLOG-CODEX-COMPAT.md` (task backlog), `.claude/project.yaml` (machine-readable config).
+4. The verified validation/gate command, quoted verbatim from `.claude/project.yaml`.
+5. A one-line pointer to `README.md` for install/usage instructions (don't duplicate them here).
+
+**`CLAUDE.md`**: exactly one line (plus maybe a title), pointing at `AGENTS.md` — per OQ-2's resolution, no duplicated content, no divergence risk.
+
+**Test — new, no existing precedent for asserting root-file content/existence.** Mirror the `REPO="$(cd "$PLUGIN/../.." && pwd)"` pattern (established in `section-codex-marketplace.sh`, `section-repo-hygiene.sh` from MEM-004) to reach the real repo root from a test section; assert `AGENTS.md` exists and contains the required elements (pointers to SPEC.md/SPEC-CODEX-COMPAT.md, the gate command, a dogfood mention); assert `CLAUDE.md` exists, is short (a line-count ceiling, not exact byte match — content may reasonably vary slightly), and contains a pointer to `AGENTS.md`.
+
+**Out of scope for CDX-006**: any CI generation step (OQ-2 explicitly says none this release); README/plugin/script/manifest/test(other than the new content-assertion test)/workflow changes beyond the two root files and their test — README already links the Codex backlog, no cross-reference edit needed unless the DoD's "if needed" clause turns out to require one (verify, don't assume).
+
+**A note on an untrusted issue comment**: issue #178 carries a comment from a `NONE`-permission commenter soliciting paid work with a private payment link. Per this repo's own comment-trust discipline (only OWNER/MEMBER/COLLABORATOR comments are directives), that comment is NOT acted upon — this design section was derived from the actual spec/backlog text only, independent of and before reading that comment's suggested "constraints." Flagged to the human separately; not a basis for any decision here.
