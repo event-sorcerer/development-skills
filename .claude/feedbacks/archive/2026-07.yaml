@@ -2285,3 +2285,45 @@ items:
   routing:
     action: brain-note
     ref: one-design-doc-per-epic-not-per-task
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-19T00:00:00Z'
+iteration:
+  task: '131'
+  outcome: merged
+  reviewRounds: 1
+source:
+  role: orchestrator
+  model: claude-sonnet-5
+items:
+- category: friction
+  area: testing
+  component: scripts/telemetry.py
+  severity: low
+  summary: A python script invoked with bash instead of python3 fails with dozens
+    of confusing shell-syntax errors instead of a clear interpreter mismatch, wasting
+    a round trip diagnosing it.
+  detail: Ran telemetry.py record via `bash telemetry.py ...` (copy-paste habit from
+    the many bash scripts in this workflow) and got a wall of `command not found`
+    / `syntax error` output that looked like a tool bug before noticing the invocation
+    itself was wrong.
+  generalized: A python script invoked with the wrong interpreter (bash) fails with
+    confusing shell-syntax noise instead of a clear interpreter-mismatch message,
+    costing a diagnosis round trip in a workflow that mixes many bash and python scripts.
+  routing:
+    action: brain-note
+    ref: Zugruul/development-skills#131
+- category: worked-well
+  area: review
+  component: skills/build-next/references/auto-review.md
+  severity: low
+  summary: The reviewer independently re-verified the TDD claim by reverting the non-test
+    files and re-running the new test section, rather than trusting the PR description
+    — caught exactly the kind of thing a rubber-stamp review would miss.
+  generalized: An independent reviewer that empirically checks out pre-change files
+    against a new test (instead of trusting the PR's TDD claim) catches tests that
+    would pass even against old behavior.
+  routing:
+    action: ignore
+    ref: Zugruul/development-skills#131

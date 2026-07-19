@@ -29,6 +29,11 @@
     "last": null,
     "weight": 0.5
   },
+  "invoke-python-scripts-with-python3-not-bash->sanity-check-computed-paths-with-ls": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "one-design-doc-per-epic-not-per-task->front-load-exact-mechanics-in-design-docs": {
     "fires": 0,
     "last": null,
