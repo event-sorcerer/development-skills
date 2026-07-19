@@ -406,3 +406,85 @@ check "case l: names the rule that would apply" "ensure-peer-reviewer-identity" 
 after="$(cat "$SCL/r/work/.claude/project.yaml")"
 check_rc "case l: file untouched" 0 "$([[ "$before" == "$after" ]] && echo 0 || echo 1)"
 rm -rf "$SCL"
+
+# mem013-gitignore-managed-block -- sync-project-configs also reconciles each
+# anchored repo's .gitignore managed block to the CURRENT manifest, via
+# gitignore-sync.sh, mirroring the sw062 directory-level-rule pattern.
+SC_GS_START="# >>> spec-workflow managed"
+SC_GS_END="# <<< spec-workflow managed"
+
+echo "== sync-configs.py: mem013 gitignore rule, dry-run shows diff and writes nothing (case m) =="
+SCM="$(mktemp -d)"
+_sc_mkrepo "$SCM/r" true no
+{
+    echo "node_modules/"
+} > "$SCM/r/work/.gitignore"
+git -C "$SCM/r/work" add -A
+git -C "$SCM/r/work" commit -q -m "add divergent gitignore"
+git -C "$SCM/r/work" push -q origin main
+before="$(cat "$SCM/r/work/.gitignore")"
+before_head="$(_sc_head "$SCM/r/work")"
+out="$(python3 "$SYNCCFG" --repo "$SCM/r/work" 2>&1)"
+check "case m: reports dry-run" "dry-run" "$out"
+check "case m: mem013 rule named as applicable" "mem013-gitignore-managed-block" "$out"
+check "case m: diff message shown" "[diff] .gitignore managed block (+" "$out"
+after="$(cat "$SCM/r/work/.gitignore")"
+check_rc "case m: gitignore file untouched" 0 "$([[ "$before" == "$after" ]] && echo 0 || echo 1)"
+after_head="$(_sc_head "$SCM/r/work")"
+check_rc "case m: nothing committed" 0 "$([[ "$before_head" == "$after_head" ]] && echo 0 || echo 1)"
+rm -rf "$SCM"
+
+echo "== sync-configs.py: mem013 gitignore rule, apply syncs a stale managed block, preserving user lines (case n) =="
+SCN="$(mktemp -d)"
+_sc_mkrepo "$SCN/r" true no
+{
+    echo "node_modules/"
+    echo "$SC_GS_START"
+    echo ".claude/OBSOLETE-PATH"
+    echo "$SC_GS_END"
+    echo "*.log"
+} > "$SCN/r/work/.gitignore"
+git -C "$SCN/r/work" add -A
+git -C "$SCN/r/work" commit -q -m "add stale managed block"
+git -C "$SCN/r/work" push -q origin main
+out="$(python3 "$SYNCCFG" --repo "$SCN/r/work" --apply 2>&1)"
+check "case n: mem013 rule applied" "mem013-gitignore-managed-block" "$out"
+check "case n: reports a commit sha" "commit:" "$out"
+check "case n: reports push ok" "push: ok" "$out"
+gi_content="$(cat "$SCN/r/work/.gitignore" 2>/dev/null)"
+check "case n: user line node_modules preserved" "node_modules/" "$gi_content"
+check "case n: user line *.log preserved" "*.log" "$gi_content"
+check "case n: start marker present" "$SC_GS_START" "$gi_content"
+check "case n: end marker present" "$SC_GS_END" "$gi_content"
+check "case n: fresh manifest ignore path written" ".claude/CHECKPOINT" "$gi_content"
+check_absent "case n: stale block content removed" ".claude/OBSOLETE-PATH" "$gi_content"
+origin_yaml_dummy="$(_sc_origin_project_yaml "$SCN/r")"
+check "case n: origin still has valid project.yaml (unrelated content untouched)" "sc-fixture" "$origin_yaml_dummy"
+rm -rf "$SCN"
+
+echo "== sync-configs.py: mem013 gitignore rule, apply on a repo with no .gitignore at all (case o) =="
+SCO="$(mktemp -d)"
+_sc_mkrepo "$SCO/r" true no
+out="$(python3 "$SYNCCFG" --repo "$SCO/r/work" --apply 2>&1)"
+check "case o: mem013 rule applied" "mem013-gitignore-managed-block" "$out"
+check "case o: reports push ok" "push: ok" "$out"
+check_rc "case o: .gitignore created" 0 "$([[ -f "$SCO/r/work/.gitignore" ]] && echo 0 || echo 1)"
+gi_content="$(cat "$SCO/r/work/.gitignore" 2>/dev/null)"
+check "case o: start marker present" "$SC_GS_START" "$gi_content"
+check "case o: fresh manifest ignore path written" ".claude/CHECKPOINT" "$gi_content"
+rm -rf "$SCO"
+
+echo "== sync-configs.py: mem013 gitignore rule, already-synced -> no-op (case p) =="
+SCP="$(mktemp -d)"
+_sc_mkrepo "$SCP/r" true no
+bash "$PLUGIN/scripts/gitignore-sync.sh" "$SCP/r/work/.gitignore"
+git -C "$SCP/r/work" add -A
+git -C "$SCP/r/work" commit -q -m "pre-sync gitignore"
+git -C "$SCP/r/work" push -q origin main
+before_head="$(_sc_head "$SCP/r/work")"
+out="$(python3 "$SYNCCFG" --repo "$SCP/r/work" --apply 2>&1)"
+check "case p: reports no-op" "route: no-op" "$out"
+check_absent "case p: mem013 rule not named" "mem013-gitignore-managed-block" "$out"
+after_head="$(_sc_head "$SCP/r/work")"
+check_rc "case p: nothing committed" 0 "$([[ "$before_head" == "$after_head" ]] && echo 0 || echo 1)"
+rm -rf "$SCP"
