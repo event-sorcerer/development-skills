@@ -429,6 +429,11 @@
     "last": "2026-07-18",
     "weight": 0.5
   },
+  "trust-completion-signal-not-early-log-read->deterministic-repro-fast": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "ui-bug-may-be-upstream-data-loss->trace-state-mutation-not-named-trigger": {
     "fires": 3,
     "last": "2026-07-18",

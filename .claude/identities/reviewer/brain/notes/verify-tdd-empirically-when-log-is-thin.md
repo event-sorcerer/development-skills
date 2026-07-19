@@ -1,8 +1,8 @@
 ---
 tags: [review, tdd, verification]
 paths: ["**"]
-strength: 1
-source: "PR#223 (MEM-012, #131) review -- single dev-agent commit, no red-commit history to inspect"
+strength: 2
+source: "PR#224 (CDX-012, #182) -- re-applied successfully, this time on a red-then-green two-commit branch (still verified empirically rather than trusting the commit sequence alone)"
 graduated: false
 created: 2026-07-19
 ---
