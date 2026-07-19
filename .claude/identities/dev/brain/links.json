@@ -104,6 +104,11 @@
     "last": "2026-07-18",
     "weight": 0.5
   },
+  "edit-protocol-prose-like-code->copy-not-eyeball-format-parity": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "enumerate-state-writers->raf-rearm-first": {
     "fires": 4,
     "last": "2026-07-18",
@@ -387,6 +392,16 @@
   "vendored-split-build-import-guard->red-static-vs-wiring-checks": {
     "fires": 1,
     "last": "2026-07-08",
+    "weight": 0.5
+  },
+  "verify-design-doc-quotes-against-live-file->boundary-test-needs-exact-value-plus-absence-check": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "verify-design-doc-quotes-against-live-file->verify-ordering-assertions-at-two-levels": {
+    "fires": 0,
+    "last": null,
     "weight": 0.5
   },
   "verify-fixture-isolates-intended-path->audit-new-path-parity-before-writing": {

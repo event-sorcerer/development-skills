@@ -4,6 +4,11 @@
     "last": null,
     "weight": 0.5
   },
+  "grep-for-duplicated-protocol-text->audit-new-path-parity-before-writing": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "local-gate-green-doesnt-imply-ci-green-for-infra->confirm-external-asset-before-ci": {
     "fires": 0,
     "last": null,
@@ -55,6 +60,16 @@
     "weight": 0.5
   },
   "verify-guard-regex-on-real-artifact->red-commit-worktree-verify": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "verify-ordering-assertions-at-two-levels->trace-boundary-operators-by-hand": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "verify-ordering-assertions-at-two-levels->verify-guard-regex-on-real-artifact": {
     "fires": 0,
     "last": null,
     "weight": 0.5
