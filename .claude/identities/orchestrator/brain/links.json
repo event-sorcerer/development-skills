@@ -49,6 +49,11 @@
     "last": null,
     "weight": 0.5
   },
+  "name-reserved-baseline-keys-when-briefing-shared-emitter->check-stray-worktrees-before-branch-ops": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "one-design-doc-per-epic-not-per-task->front-load-exact-mechanics-in-design-docs": {
     "fires": 0,
     "last": null,

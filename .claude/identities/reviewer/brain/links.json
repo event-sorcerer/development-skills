@@ -99,6 +99,11 @@
     "last": null,
     "weight": 0.5
   },
+  "trace-dict-merge-for-key-collisions->verify-backcompat-claims-algebraically": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "trace-test-setup-vs-comment->verify-guard-regex-on-real-artifact": {
     "fires": 0,
     "last": null,
