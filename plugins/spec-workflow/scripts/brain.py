@@ -755,10 +755,10 @@ def cmd_verify_feed(identities, args):
     """Fold LinkFormed/LinkFired/LinkPruned events for `role` and diff the
     result against the real `links.json` (§8.4). Only keys the fold has an
     opinion about are compared -- pre-feed-history links.json entries are
-    expected drift, not a divergence. No event type currently carries
-    `weight`, so it's not compared; this diff is otherwise generic over
-    whatever fields both sides have, so weight starts comparing automatically
-    once/if some future event payload adds the field."""
+    expected drift, not a divergence. Only `fires` is diffed: no event type
+    currently carries `weight`, so there is nothing to compare it against --
+    if a future event payload adds `weight`, this function needs a matching
+    comparison added explicitly, it will not start comparing it on its own."""
     role = args.role
     p = os.path.join(args.root, ".claude", BRAIN_EVENTS_FILENAME)
     folded = {}
