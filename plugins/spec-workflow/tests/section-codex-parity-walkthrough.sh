@@ -26,17 +26,23 @@ else
 
     # Each of the 9 §9.2 invariants must have both its key phrase and a
     # verdict word present in the doc -- confirms the audit section still
-    # names every invariant and still assigns it one of the 3 verdicts,
-    # without pinning exact line adjacency (a grep-based proximity check,
-    # per the task brief).
+    # names every invariant and still assigns it one of the 3 verdicts.
+    # cdx-E3.md's own convention: one invariant per paragraph, each written
+    # as a SINGLE (unwrapped) line -- "**N. <name> -- VERDICT.** <body>".
+    # The check therefore reads only the LINE the phrase was found on, not
+    # a multi-line window: a wider window (tried first, then reverted after
+    # review) risked reaching into the NEXT invariant's own heading/verdict
+    # a couple of lines down and passing even when THIS invariant's own
+    # verdict word was missing -- a same-line check can't have that failure
+    # mode regardless of how many invariants precede or follow it.
     cpw_verdict_re="SCRIPT-ENFORCED|PROSE-ONLY|HOOK-ONLY"
 
     cpw_check_invariant() { # label  key-phrase
         local label="$1" phrase="$2"
         check "cdx-E3.md names invariant: $label" "$phrase" "$cdx_content"
-        local section
-        section="$(awk -v p="$phrase" 'index($0,p){f=1} f{print; if(++n>=6) exit}' "$CDX_E3")"
-        if grep -Eq "$cpw_verdict_re" <<<"$section"; then r=HAS_VERDICT; else r=NO_VERDICT; fi
+        local this_line
+        this_line="$(grep -F -- "$phrase" "$CDX_E3" | head -1)"
+        if grep -Eq "$cpw_verdict_re" <<<"$this_line"; then r=HAS_VERDICT; else r=NO_VERDICT; fi
         check "cdx-E3.md gives invariant a verdict: $label" "HAS_VERDICT" "$r"
     }
 
