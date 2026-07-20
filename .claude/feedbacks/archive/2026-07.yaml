@@ -2669,3 +2669,47 @@ items:
   routing:
     action: brain-note
     ref: Zugruul/development-skills#234
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-20T00:00:00Z'
+iteration:
+  task: '235'
+  outcome: merged
+  reviewRounds: 1
+source:
+  role: orchestrator
+  model: claude-sonnet-5
+items:
+- category: worked-well
+  area: review
+  component: build-next / implement-task
+  severity: low
+  summary: A reviewer proved a new compliance-check's test suite genuinely discriminates
+    by mutating the classification logic itself (not just reverting the fix), catching
+    the class of weak test suite that only exercises a happy path.
+  generalized: For a new enforcement/classification script, verifying its test suite
+    via mutation (deliberately breaking the classification logic in an obviously-wrong
+    way and confirming the RIGHT test cases flip to incorrectly passing) is a stronger
+    proof than reverting the whole fix and confirming red -- the latter only proves
+    the tests aren't trivially true, not that the internal decision logic they're
+    supposed to gate is actually being exercised.
+  routing:
+    action: brain-note
+    ref: Zugruul/development-skills#235
+- category: worked-well
+  area: briefing
+  component: build-next / implement-task
+  severity: low
+  summary: Explicitly ruling out a disproportionately expensive approach (full historical
+    test re-execution) in the design doc, in favor of a cheaper structural heuristic
+    with a clearly stated limitation, produced a fix that was both affordable to build
+    and honest about what it does and doesn't prove.
+  generalized: When a spec-level requirement (e.g. 'red-first TDD was followed') has
+    an expensive, ideal verification method and a cheap, imperfect one, deciding explicitly
+    and documenting the tradeoff (what the cheap method catches, what it doesn't)
+    is better than either skipping enforcement entirely or over-investing in a fragile,
+    costly full solution.
+  routing:
+    action: ignore
+    ref: Zugruul/development-skills#235
