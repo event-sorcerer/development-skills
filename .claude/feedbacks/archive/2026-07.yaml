@@ -2523,3 +2523,29 @@ items:
   routing:
     action: brain-note
     ref: Zugruul/development-skills#186
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-19T00:00:00Z'
+iteration:
+  task: '135'
+  outcome: merged
+  reviewRounds: 2
+source:
+  role: orchestrator
+  model: claude-sonnet-5
+items:
+- category: worked-well
+  area: review
+  component: build-next / implement-task
+  severity: low
+  summary: A reviewer's non-blocking observation about a schema field collision was
+    worth a quick fix round rather than deferring, since fixing an event schema is
+    much cheaper before anything depends on it than after.
+  generalized: When a reviewer flags a real but currently-harmless inconsistency (e.g.
+    a schema field that isn't yet read by any consumer), fixing it immediately while
+    the change is small and isolated is usually cheaper than filing a follow-up and
+    letting the inconsistency become load-bearing for some future consumer.
+  routing:
+    action: brain-note
+    ref: Zugruul/development-skills#135
