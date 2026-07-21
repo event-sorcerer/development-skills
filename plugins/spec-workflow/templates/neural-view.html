@@ -506,11 +506,25 @@ canvas.grabbing{cursor:grabbing}
    ⛶ fullscreens the window itself (element fullscreen, stays in the page) */
 .media-window{width:min(560px,60vw);max-height:80vh}
 .media-window .mw-bar{display:flex;align-items:center;gap:.4rem;margin:.1rem 0 .55rem}
+.media-window .mw-bar .iconbtn{font-size:.62rem;letter-spacing:.06em;padding:.25rem .5rem}
+/* all controls live IN the bar: neutralize .close's float so ✕/⠿ sit on the
+   same flex baseline as the New tab / Download / ⛶ buttons */
+.media-window .mw-bar .close{float:none;display:inline-flex;align-items:center;justify-content:center;
+  min-width:24px;min-height:24px;padding:0 .2rem}
 .media-window .mw-name{font-size:.6rem;color:var(--muted);letter-spacing:.08em;flex:1;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .media-window .mw-img{max-width:100%;border-radius:8px;display:block;margin:0 auto}
+/* New tab / Download live INSIDE the image, top right, revealed only while
+   hovering that corner region (top ~35% × right ~50% of the image) */
+.media-window .mw-imgwrap{position:relative}
+.media-window .mw-zone{position:absolute;top:0;right:0;width:50%;height:35%;
+  display:flex;justify-content:flex-end;align-items:flex-start;padding:.45rem}
+.media-window .mw-actions{display:flex;gap:.3rem;opacity:0;transition:opacity .15s ease}
+.media-window .mw-zone:hover .mw-actions{opacity:1}
+.media-window .mw-actions .iconbtn{background:rgba(10,20,34,.85)}
 .media-window:fullscreen{display:flex;flex-direction:column;background:var(--bg);
   border:0;border-radius:0;max-height:none;resize:none;padding:1rem 1.2rem}
+.media-window:fullscreen .mw-imgwrap{flex:1;min-height:0;display:flex;flex-direction:column}
 .media-window:fullscreen .mw-img{flex:1;min-height:0;object-fit:contain;max-height:calc(100vh - 80px)}
 .chips{display:flex;flex-wrap:wrap;gap:.3rem;margin:.6rem 0}
 .chip{font-size:.6rem;padding:.15rem .5rem;border:1px solid var(--border);border-radius:999px;color:var(--muted);letter-spacing:.06em}
@@ -4231,13 +4245,15 @@ function openMediaViewer(src, name){
   win.style.left = "24vw"; win.style.top = "16vh";
   win.style.zIndex = ++noteWinZ;
   win.innerHTML =
-    '<button class="close" aria-label="Close media window">✕</button>' +
-    '<button class="close grip" title="Drag to move window" aria-label="Drag to move window">⠿</button>' +
     '<div class="mw-bar" data-drag><span class="mw-name"></span>' +
-      '<button class="iconbtn mw-newtab" type="button">New tab</button>' +
-      '<a class="iconbtn mw-dl" download>Download</a>' +
-      '<button class="iconbtn mw-fs" type="button" title="Fullscreen" aria-label="Fullscreen">⛶</button></div>' +
-    '<img class="mw-img">';
+      '<button class="iconbtn mw-fs" type="button" title="Fullscreen" aria-label="Fullscreen">⛶</button>' +
+      '<button class="close grip" title="Drag to move window" aria-label="Drag to move window">⠿</button>' +
+      '<button class="close mw-x" aria-label="Close media window">✕</button></div>' +
+    '<div class="mw-imgwrap"><img class="mw-img">' +
+      '<div class="mw-zone"><div class="mw-actions">' +
+        '<button class="iconbtn mw-newtab" type="button">New tab</button>' +
+        '<button class="iconbtn mw-dl" type="button">Download</button>' +
+      '</div></div></div>';
   win.querySelector(".mw-name").textContent = name;
   const im = win.querySelector(".mw-img");
   im.alt = name;
@@ -4257,12 +4273,29 @@ function openMediaViewer(src, name){
   };
   im.src = src;
   win.querySelector(".mw-newtab").onclick = ()=>window.open(src, "_blank");
-  const dl = win.querySelector(".mw-dl"); dl.href = src; dl.setAttribute("download", name);
+  // the download attribute is IGNORED on cross-origin anchors, and remote
+  // hosts rarely send CORS headers — route remote URLs through the server's
+  // /fetch proxy so the bytes come back same-origin and the save dialog
+  // actually fires; only if even that fails fall back to a new tab
+  win.querySelector(".mw-dl").onclick = async ()=>{
+    try{
+      const u0 = /^https?:\/\//i.test(src) ? "/fetch?url=" + encodeURIComponent(src) : src;
+      const resp = await fetch(u0);
+      if(!resp.ok) throw new Error("fetch failed");
+      const u = URL.createObjectURL(await resp.blob());
+      const a = document.createElement("a");
+      a.href = u; a.download = name || "image";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(u), 5000);
+    }catch{
+      window.open(src, "_blank");
+    }
+  };
   win.querySelector(".mw-fs").onclick = ()=>{
     if(document.fullscreenElement === win) document.exitFullscreen();
     else win.requestFullscreen().catch(()=>{});
   };
-  win.querySelector(".close").onclick = ()=>win.remove();
+  win.querySelector(".mw-x").onclick = ()=>win.remove();
   win.addEventListener("pointerdown", ()=>{ win.style.zIndex = ++noteWinZ; });
   document.body.appendChild(win);
   wireWinDrag(win);

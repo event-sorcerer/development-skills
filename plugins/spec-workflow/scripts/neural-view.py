@@ -105,6 +105,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import urllib.request
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -1370,6 +1371,29 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/version":
             tmpl = TEMPLATE.stat().st_mtime_ns if TEMPLATE.is_file() else 0
             return self._send(200, {"boot": BOOT_ID, "template": tmpl, "dev": DEV_MODE, "branch": git_branch()})
+        if path == "/fetch":
+            # CORS-bypass download proxy for the media viewer (#289): remote
+            # note images usually lack ACAO headers, so the page can't read
+            # them into a blob for a real "save as" — this fetches server-side
+            # and returns the bytes same-origin. Guards: http(s) only, and the
+            # Referer must be this server's own page (a foreign local page
+            # can't quietly use the port as an SSRF hop — its browser-set
+            # Referer won't match). Size-capped, timeout-bounded, GET only.
+            qs = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+            url = (qs.get("url", [""])[0] or "").strip()
+            ref = self.headers.get("Referer", "")
+            host = self.headers.get("Host", "")
+            if (not url.startswith(("http://", "https://"))
+                    or not host or not ref.startswith(f"http://{host}/")):
+                return self._send(404, {"error": "not found"})
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "neural-view media proxy"})
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    data = r.read(50 * 1024 * 1024)
+                    ctype = r.headers.get("Content-Type", "application/octet-stream")
+                return self._send(200, data, ctype)
+            except Exception:  # noqa: BLE001
+                return self._send(502, {"error": "fetch failed"})
         if path.startswith("/file/"):
             # /file/<repo>/<role>/<relpath> — read-only media a note embeds or
             # links, resolved against that brain's directory. Extension
