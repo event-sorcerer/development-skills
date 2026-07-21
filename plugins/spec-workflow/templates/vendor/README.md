@@ -48,3 +48,19 @@ shasum -a 256 plugins/spec-workflow/templates/vendor/three.module.min.js \
 Then update the version/URL/sha256 for both files above and in
 `plugins/spec-workflow/tests/section-neural-view-template.sh` (the
 `NVVENDOR_SHA` / `NVCORE_SHA` integrity checks).
+
+## Note-media 3D viewers (#289)
+
+- **Files**: `GLTFLoader.js`, `BufferGeometryUtils.js`, `SkeletonUtils.js`
+- **Version**: r0.185.1 (npm `three@0.185.1`, `examples/jsm/loaders` + `examples/jsm/utils`)
+- **Source**: `https://unpkg.com/three@0.185.1/examples/jsm/...`
+- **Local change**: GLTFLoader's two relative imports (`../utils/BufferGeometryUtils.js`,
+  `../utils/SkeletonUtils.js`) are rewritten to same-dir (`./...`) so they resolve
+  under the flat `/vendor/` route. Re-vendoring must re-apply that rewrite.
+- **License**: MIT, © three.js authors.
+- **sha256** (after rewrite):
+  - `GLTFLoader.js`: `ad534a8e1545d8a4a55e4c400e22e69411a68dbcac1a8013026e56ee8ef4475d`
+  - `BufferGeometryUtils.js`: `5c552223a9309883743b80538d6e9cdb45e3227f30d3ec56fb2c39b46e78d595`
+  - `SkeletonUtils.js`: `b1632a703206c3d830de9fcbe515696770d04b71a15ee6b50afa6d2c3298c86f`
+  Loaded lazily (dynamic import) only when a note embeds a .glb/.gltf file;
+  .obj/.stl use hand-rolled parsers in the template, no addon needed.

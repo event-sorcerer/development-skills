@@ -154,8 +154,29 @@ VENDOR_DIR = Path(__file__).resolve().parent.parent / "templates" / "vendor"
 VENDOR_FILES = {
     "three.module.min.js": "text/javascript; charset=utf-8",
     "three.core.min.js": "text/javascript; charset=utf-8",
+    # note-media 3D viewers (#289): GLTFLoader + the two utils it imports
+    # (relative imports rewritten to same-dir — see vendor/README.md)
+    "GLTFLoader.js": "text/javascript; charset=utf-8",
+    "BufferGeometryUtils.js": "text/javascript; charset=utf-8",
+    "SkeletonUtils.js": "text/javascript; charset=utf-8",
 }
 WIKILINK = re.compile(r"\[\[([^\]]+)\]\]")
+# markdown media/links (#289): ![alt](path) and [text](path-or-url). The
+# client resolves relative paths against the note's brain dir via /file/.
+MDIMG = re.compile(r"!\[([^\]]*)\]\(([^()\s]+)\)")
+MDLINK = re.compile(r"(?<!!)\[([^\]]+)\]\(([^()\s]+)\)")
+# /file/ extension allowlist — media a note may embed or link. Anything else
+# 404s: this endpoint exposes brain-dir files to the browser, so the set is
+# deliberately small and read-only.
+FILE_TYPES = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+    ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
+    ".glb": "model/gltf-binary", ".gltf": "model/gltf+json", ".obj": "text/plain; charset=utf-8",
+    ".stl": "application/octet-stream",
+    ".md": "text/plain; charset=utf-8", ".txt": "text/plain; charset=utf-8",
+    ".json": "application/json", ".pdf": "application/pdf",
+}
 MARKER_NAME = ".neural-network"
 MARKER_CONTENT = "# neural-view discovery marker — repos with this file are included in the aggregated neural view\n"
 
@@ -810,14 +831,32 @@ def render_body(body):
     *italic*/_italic_, `code`, GFM pipe tables.
     Deliberately minimal — stdlib only, and it preserves plain prose verbatim."""
     def inline(s):
-        # escape wikilink labels exactly once (operate on raw text, escape each
-        # piece), so a label with HTML-special chars isn't double-escaped.
+        # escape wikilink/media labels exactly once (operate on raw text,
+        # escape each piece), so a label with HTML-special chars isn't
+        # double-escaped. Wikilinks, ![images](p) and [links](p) tokenize in
+        # one position-sorted pass; overlaps resolve to the earliest match
+        # (MDIMG before MDLINK so "![" is never read as a plain link).
+        tokens = sorted(
+            [(m.start(), m.end(), "wl", m) for m in WIKILINK.finditer(s)]
+            + [(m.start(), m.end(), "img", m) for m in MDIMG.finditer(s)]
+            + [(m.start(), m.end(), "link", m) for m in MDLINK.finditer(s)])
         out, last = [], 0
-        for m in WIKILINK.finditer(s):
-            out.append(escape(s[last:m.start()]))
-            slug = m.group(1).strip()
-            out.append(f'<a class="wl" data-slug="{escape(slug, quote=True)}">{escape(slug)}</a>')
-            last = m.end()
+        for start, end, kind, m in tokens:
+            if start < last:
+                continue
+            out.append(escape(s[last:start]))
+            if kind == "wl":
+                slug = m.group(1).strip()
+                out.append(f'<a class="wl" data-slug="{escape(slug, quote=True)}">{escape(slug)}</a>')
+            elif kind == "img":
+                out.append(f'<img class="nm" data-src="{escape(m.group(2), quote=True)}" alt="{escape(m.group(1), quote=True)}">')
+            else:
+                text, href = m.group(1), m.group(2)
+                if href.startswith(("http://", "https://")):
+                    out.append(f'<a class="ext" href="{escape(href, quote=True)}" target="_blank" rel="noopener">{escape(text)}</a>')
+                else:
+                    out.append(f'<a class="fl" data-href="{escape(href, quote=True)}">{escape(text)}</a>')
+            last = end
         out.append(escape(s[last:]))
         r = "".join(out)
         r = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", r)
@@ -1331,6 +1370,27 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/version":
             tmpl = TEMPLATE.stat().st_mtime_ns if TEMPLATE.is_file() else 0
             return self._send(200, {"boot": BOOT_ID, "template": tmpl, "dev": DEV_MODE, "branch": git_branch()})
+        if path.startswith("/file/"):
+            # /file/<repo>/<role>/<relpath> — read-only media a note embeds or
+            # links, resolved against that brain's directory. Extension
+            # allowlist (FILE_TYPES) + _within traversal guard; anything else
+            # is a 404. Mirrors /note's repo/role addressing.
+            parts = path[len("/file/"):].split("/", 2)
+            if len(parts) == 3 and parts[0] and parts[1] and parts[2]:
+                rel = urllib.parse.unquote(parts[2])
+                ext = os.path.splitext(rel)[1].lower()
+                ctype = FILE_TYPES.get(ext)
+                if ctype and ".." not in rel and not rel.startswith("/"):
+                    for name, root in REPOS:
+                        if name != urllib.parse.unquote(parts[0]):
+                            continue
+                        for r, brain in iter_brains(root):
+                            if r != urllib.parse.unquote(parts[1]):
+                                continue
+                            f = brain / rel
+                            if _within(f, brain) and f.is_file():
+                                return self._send(200, f.read_bytes(), ctype)
+            return self._send(404, {"error": "not found"})
         if path.startswith("/note/"):
             parts = path[len("/note/"):].split("/", 2)
             if len(parts) == 3 and parts[0] and parts[1] and parts[2]:

@@ -37,6 +37,11 @@
      the note/settings panels below always reclaim the space */
   --voiceh:calc(var(--colq)*.67);
   --voice-below:calc(var(--voiceh) + 12px);
+  /* --log-space mirrors --voice-below for the BOTTOM of the column: the room
+     reserved for the activation log (height + gap), live-updated by
+     applyUiState — 0 when the log is collapsed away, header-only when folded,
+     so the note/settings panels grow into whatever the log isn't using */
+  --log-space:calc(var(--colq) + 12px);
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
@@ -446,7 +451,7 @@ canvas.grabbing{cursor:grabbing}
    The two settings here duplicate the header controls on purpose — shown in
    detail, and this panel is where future voice settings accumulate. */
 #voice-settings-panel{position:fixed;top:calc(70px + var(--voice-below));right:14px;width:var(--colw);
-  max-height:calc(100vh - 100px - var(--voice-below) - var(--colq) - 12px);overflow:auto;z-index:66;padding:.8rem .9rem;display:none;
+  max-height:calc(100vh - 86px - var(--voice-below) - var(--log-space));overflow:auto;z-index:66;padding:.8rem .9rem;display:none;
   flex-direction:column;gap:.65rem}
 #voice-settings-panel.open{display:flex}
 #voice-settings-panel .vs-row{display:flex;flex-direction:column;gap:.3rem}
@@ -471,7 +476,7 @@ canvas.grabbing{cursor:grabbing}
 
 /* inspect panel (right) */
 #inspect{top:calc(70px + var(--voice-below));right:14px;width:var(--colw);
-  max-height:calc(100vh - 100px - var(--voice-below) - var(--colq) - 12px);z-index:65;   /* middle 2/4 of the right column, below #voicebar; above #search-filters-panel (60) too — the card detail sidebar always wins */
+  max-height:calc(100vh - 86px - var(--voice-below) - var(--log-space));z-index:65;   /* middle 2/4 of the right column, below #voicebar; above #search-filters-panel (60) too — the card detail sidebar always wins */
   overflow:auto;padding:.9rem 1rem;transform:translateX(120%);transition:transform .25s ease;
   opacity:0}
 #inspect.open{transform:none;opacity:1}
@@ -491,6 +496,17 @@ canvas.grabbing{cursor:grabbing}
   padding:.9rem 1rem;resize:both;min-width:250px;min-height:150px}
 .note-window.dragging{user-select:none}
 .note-window.dragging .close.grip{cursor:grabbing}
+/* media viewer window: opened by clicking an inline note image — same
+   detached-window chrome plus New tab / Download / fullscreen actions;
+   ⛶ fullscreens the window itself (element fullscreen, stays in the page) */
+.media-window{width:min(560px,60vw);max-height:80vh}
+.media-window .mw-bar{display:flex;align-items:center;gap:.4rem;margin:.1rem 0 .55rem}
+.media-window .mw-name{font-size:.6rem;color:var(--muted);letter-spacing:.08em;flex:1;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.media-window .mw-img{max-width:100%;border-radius:8px;display:block;margin:0 auto}
+.media-window:fullscreen{display:flex;flex-direction:column;background:var(--bg);
+  border:0;border-radius:0;max-height:none;resize:none;padding:1rem 1.2rem}
+.media-window:fullscreen .mw-img{flex:1;min-height:0;object-fit:contain;max-height:calc(100vh - 80px)}
 .chips{display:flex;flex-wrap:wrap;gap:.3rem;margin:.6rem 0}
 .chip{font-size:.6rem;padding:.15rem .5rem;border:1px solid var(--border);border-radius:999px;color:var(--muted);letter-spacing:.06em}
 .chip.on{color:var(--amber);border-color:rgba(255,179,71,.5)}
@@ -500,6 +516,15 @@ canvas.grabbing{cursor:grabbing}
 #body code{background:rgba(70,230,255,.1);padding:.05rem .3rem;border-radius:4px;font-size:.74rem}
 #body a.wl{color:var(--cyan);text-decoration:none;border-bottom:1px dotted var(--cyan-dim)}
 #body ul{margin:.3rem 0;padding-left:1.1rem}
+/* note media (#289): images/videos inline, file links amber, 3D blocks */
+#body img.nm{max-width:100%;border-radius:8px;display:block;margin:.4rem 0;cursor:zoom-in}
+#body video.nm{max-width:100%;border-radius:8px;display:block;margin:.4rem 0}
+#body a.fl{color:var(--amber);text-decoration:none;border-bottom:1px dotted rgba(255,179,71,.5)}
+#body a.ext{color:var(--cyan)}
+.n3d{position:relative;margin:.4rem 0;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:rgba(4,7,13,.5)}
+.n3d canvas{display:block;width:100%;height:190px}
+.n3d .n3d-label{position:absolute;left:.5rem;top:.35rem;font-size:.56rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted);pointer-events:none}
 #links{margin-top:.6rem;font-size:.66rem;color:var(--muted)}
 #links .ln{display:flex;justify-content:space-between;gap:.5rem;padding:.15rem 0}
 #links .ln b{color:var(--fg);font-weight:500}
@@ -768,6 +793,7 @@ canvas.grabbing{cursor:grabbing}
 <aside class="hud" id="inspect" aria-hidden="true" inert>
   <button class="close" id="inspect-close" aria-label="Close note">✕</button>
   <button class="close grip" id="inspect-grip" title="Drag to detach into its own window" aria-label="Drag to detach into its own window">⠿</button>
+  <button class="close" id="inspect-locate" title="Fly to this note in the 3D view" aria-label="Fly to this note in the 3D view">◎</button>
   <div class="role" id="i-role"></div>
   <h3 id="i-title"></h3>
   <div class="chips" id="i-chips"></div>
@@ -3025,9 +3051,13 @@ function saveUiState(){ try{ localStorage.setItem(UI_KEY, JSON.stringify(uiState
 function applyUiState(){
   gaugesEl.classList.toggle("collapsed", !!uiState.panel);
   gaugesTab.hidden = !uiState.panel;
-  document.getElementById("rightbar").classList.toggle("collapsed", !!uiState.rpanel);
-  document.getElementById("rightbar").classList.toggle("folded", !!uiState.log);
+  const rbar = document.getElementById("rightbar");
+  rbar.classList.toggle("collapsed", !!uiState.rpanel);
+  rbar.classList.toggle("folded", !!uiState.log);
   document.getElementById("rightbar-tab").hidden = !uiState.rpanel;
+  // reserve only the space the log actually occupies (see --log-space)
+  document.documentElement.style.setProperty("--log-space",
+    uiState.rpanel ? "0px" : (rbar.offsetHeight + 12) + "px");
   const vbar = document.getElementById("voicebar");
   vbar.classList.toggle("collapsed", !!uiState.vpanel);
   vbar.classList.toggle("folded", !!uiState.voice);
@@ -3989,6 +4019,124 @@ document.getElementById("talk-copy").onclick = async ()=>{
 
 const panel=document.getElementById("inspect");
 document.getElementById("inspect-close").onclick=()=>{ panel.classList.remove("open"); panel.setAttribute("aria-hidden","true"); panel.setAttribute("inert",""); };
+document.getElementById("inspect-locate").onclick=()=>{ if(panel.__nd) flyToNote(panel.__nd); };
+
+// ---- note media (#289): resolve a note's markdown media against /file/ ----
+// Images/videos render inline; .glb/.gltf/.obj/.stl become live 3D viewers
+// (GLTF via the vendored loader, OBJ/STL via tiny hand parsers on core
+// three); other allowed files open raw in a new tab.
+const VID_EXT = /\.(mp4|webm|mov)$/i, GLTF_EXT = /\.(glb|gltf)$/i, MESH_EXT = /\.(obj|stl)$/i;
+function fileUrl(nd, rel){
+  return `/file/${encodeURIComponent(nd.repo)}/${encodeURIComponent(nd.role)}/`
+       + rel.split("/").map(encodeURIComponent).join("/");
+}
+function hydrateNoteMedia(scope, nd){
+  if(!nd) return;
+  scope.querySelectorAll("img.nm[data-src]").forEach(img=>{
+    const src = img.dataset.src;
+    img.src = /^https?:\/\//i.test(src) ? src : fileUrl(nd, src);
+    img.onclick = ()=>openMediaViewer(img.src, img.alt || mediaName(img.src));
+  });
+  scope.querySelectorAll("a.fl[data-href]").forEach(a=>{
+    const href = a.dataset.href, url = fileUrl(nd, href);
+    if(VID_EXT.test(href)){
+      const v = document.createElement("video");
+      v.className = "nm"; v.controls = true; v.preload = "metadata"; v.src = url;
+      a.replaceWith(v);
+    }else if(GLTF_EXT.test(href) || MESH_EXT.test(href)){
+      a.replaceWith(make3dBlock(href, url));
+    }else{
+      a.href = url; a.target = "_blank"; a.rel = "noopener";
+    }
+  });
+}
+window.neuralNotes = { hydrate: hydrateNoteMedia, fileUrl };   // small public surface (also used by tests)
+function make3dBlock(name, url){
+  const box = document.createElement("div");
+  box.className = "n3d"; box.dataset.name = name; box.dataset.url = url;
+  const lab = document.createElement("span");
+  lab.className = "n3d-label"; lab.textContent = "3D · " + name.split("/").pop();
+  box.appendChild(document.createElement("canvas")); box.appendChild(lab);
+  boot3dViewer(box).catch(()=>{ lab.textContent = "3D · failed: " + name.split("/").pop(); });
+  return box;
+}
+function meshFromPositions(pos){
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return new THREE.Mesh(g, new THREE.MeshStandardMaterial({color:0x46a8cc, roughness:.55, metalness:.15}));
+}
+function parseOBJ(text){
+  const vs = [], pos = [];
+  for(const line of text.split("\n")){
+    const p = line.trim().split(/\s+/);
+    if(p[0] === "v") vs.push([+p[1], +p[2], +p[3]]);
+    else if(p[0] === "f"){
+      const idx = p.slice(1).map(t=>{ const i = parseInt(t.split("/")[0], 10); return i < 0 ? vs.length + i : i - 1; });
+      for(let k=1; k+1<idx.length; k++)
+        for(const j of [idx[0], idx[k], idx[k+1]]) if(vs[j]) pos.push(...vs[j]);
+    }
+  }
+  return meshFromPositions(pos);
+}
+function parseSTL(buf){
+  const pos = [];
+  const head = new TextDecoder().decode(buf.slice(0, Math.min(buf.byteLength, 2000)));
+  if(head.trim().toLowerCase().startsWith("solid") && head.includes("facet")){
+    const text = new TextDecoder().decode(buf);
+    for(const m of text.matchAll(/vertex\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)/g))
+      pos.push(+m[1], +m[2], +m[3]);
+  }else{
+    const dv = new DataView(buf);
+    const n = dv.getUint32(80, true);
+    for(let i=0; i<n; i++){
+      const off = 84 + i*50;
+      if(off + 50 > buf.byteLength) break;
+      for(let v=0; v<3; v++){
+        const o = off + 12 + v*12;
+        pos.push(dv.getFloat32(o, true), dv.getFloat32(o+4, true), dv.getFloat32(o+8, true));
+      }
+    }
+  }
+  return meshFromPositions(pos);
+}
+async function boot3dViewer(box){
+  const url = box.dataset.url, name = box.dataset.name;
+  const cv = box.querySelector("canvas");
+  let object;
+  if(GLTF_EXT.test(name)){
+    const {GLTFLoader} = await import("/vendor/GLTFLoader.js");
+    object = (await new GLTFLoader().loadAsync(url)).scene;
+  }else{
+    const res = await fetch(url);
+    if(!res.ok) throw new Error("fetch failed");
+    object = /\.obj$/i.test(name) ? parseOBJ(await res.text()) : parseSTL(await res.arrayBuffer());
+  }
+  const scene = new THREE.Scene();
+  const cam = new THREE.PerspectiveCamera(40, 1, .01, 1000);
+  const ren = new THREE.WebGLRenderer({canvas: cv, antialias: true, alpha: true});
+  scene.add(new THREE.HemisphereLight(0xdff2fb, 0x0a1422, 1.1));
+  const dl = new THREE.DirectionalLight(0xffffff, 1.4);
+  dl.position.set(3, 5, 4); scene.add(dl);
+  scene.add(object);
+  const bb = new THREE.Box3().setFromObject(object);
+  const size = bb.getSize(new THREE.Vector3()).length() || 1;
+  object.position.sub(bb.getCenter(new THREE.Vector3()));
+  cam.position.set(size*.8, size*.55, size*.9);
+  cam.lookAt(0, 0, 0);
+  const t0 = performance.now();
+  (function tick(){
+    if(!cv.isConnected){ ren.dispose(); return; }   // window closed / re-render
+    requestAnimationFrame(tick);
+    const w = cv.clientWidth, h = cv.clientHeight;
+    if(w && h && (cv.width !== Math.round(w*devicePixelRatio) || cv.height !== Math.round(h*devicePixelRatio))){
+      ren.setSize(w, h, false); ren.setPixelRatio(devicePixelRatio);
+      cam.aspect = w/h; cam.updateProjectionMatrix();
+    }
+    object.rotation.y = (performance.now() - t0) * .0004;
+    ren.render(scene, cam);
+  })();
+}
 // ---- detached note windows ----
 // Grabbing the docked note's grip (⠿) DETACHES it: the note becomes its own
 // fixed, resizable window, unlinked from the sidebar, and the sidebar slot is
@@ -4008,8 +4156,17 @@ function detachNote(fromRect){
     '<button class="close" aria-label="Close note window">✕</button>' +
     '<button class="close reattach" title="Re-attach to sidebar" aria-label="Re-attach to sidebar">⌖</button>' +
     '<button class="close grip" title="Drag to move window" aria-label="Drag to move window">⠿</button>' +
+    '<button class="close locate" title="Fly to this note in the 3D view" aria-label="Fly to this note in the 3D view">◎</button>' +
     ["i-role","i-title","i-chips","i-open","body","links"].map(id=>document.getElementById(id).outerHTML).join("");
   document.body.appendChild(win);
+  win.querySelector(".locate").onclick = ()=>{ if(nd) flyToNote(nd); };
+  // media in the snapshot: img/video/link attributes clone fine, but a cloned
+  // canvas is blank — re-boot each 3D block on a fresh canvas
+  win.querySelectorAll("img.nm").forEach(img=>{ img.onclick = ()=>openMediaViewer(img.src, img.alt || mediaName(img.src)); });
+  win.querySelectorAll(".n3d").forEach(box=>{
+    box.querySelector("canvas").replaceWith(document.createElement("canvas"));
+    boot3dViewer(box).catch(()=>{});
+  });
   win.addEventListener("pointerdown", ()=>{ win.style.zIndex = ++noteWinZ; });
   win.querySelector(".close").onclick = ()=>win.remove();
   win.querySelector(".reattach").onclick = ()=>{ win.remove(); if(nd) openNote(nd); };
@@ -4021,14 +4178,18 @@ function detachNote(fromRect){
   });
   const viewBtn = win.querySelector('[id="i-open"] button');
   if(viewBtn && nd) viewBtn.onclick = ()=>openExternal(nd);
-  // window drag by its own grip
+  wireWinDrag(win);
+  return win;
+}
+// shared window-drag: any .note-window moves by its ⠿ grip
+function wireWinDrag(win){
   const grip = win.querySelector(".grip");
   let off = null;
   grip.addEventListener("pointerdown", ev=>{
     const r = win.getBoundingClientRect();
     off = {dx: ev.clientX - r.left, dy: ev.clientY - r.top};
     win.classList.add("dragging");
-    grip.setPointerCapture(ev.pointerId);
+    try{ grip.setPointerCapture(ev.pointerId); }catch{}
     ev.preventDefault(); ev.stopPropagation();
   });
   grip.addEventListener("pointermove", ev=>{
@@ -4039,8 +4200,38 @@ function detachNote(fromRect){
   const end = ev=>{ if(!off) return; off = null; win.classList.remove("dragging"); try{ grip.releasePointerCapture(ev.pointerId); }catch{} };
   grip.addEventListener("pointerup", end);
   grip.addEventListener("pointercancel", end);
+}
+// media viewer: clicking an inline note image opens the image as its own
+// detached window with New tab / Download / in-page fullscreen (⛶) actions
+function openMediaViewer(src, name){
+  const win = document.createElement("aside");
+  win.className = "hud note-window media-window";
+  win.style.left = "24vw"; win.style.top = "16vh";
+  win.style.zIndex = ++noteWinZ;
+  win.innerHTML =
+    '<button class="close" aria-label="Close media window">✕</button>' +
+    '<button class="close grip" title="Drag to move window" aria-label="Drag to move window">⠿</button>' +
+    '<div class="mw-bar"><span class="mw-name"></span>' +
+      '<button class="iconbtn mw-newtab" type="button">New tab</button>' +
+      '<a class="iconbtn mw-dl" download>Download</a>' +
+      '<button class="iconbtn mw-fs" type="button" title="Fullscreen" aria-label="Fullscreen">⛶</button></div>' +
+    '<img class="mw-img">';
+  win.querySelector(".mw-name").textContent = name;
+  win.querySelector(".mw-img").src = src;
+  win.querySelector(".mw-img").alt = name;
+  win.querySelector(".mw-newtab").onclick = ()=>window.open(src, "_blank");
+  const dl = win.querySelector(".mw-dl"); dl.href = src; dl.setAttribute("download", name);
+  win.querySelector(".mw-fs").onclick = ()=>{
+    if(document.fullscreenElement === win) document.exitFullscreen();
+    else win.requestFullscreen().catch(()=>{});
+  };
+  win.querySelector(".close").onclick = ()=>win.remove();
+  win.addEventListener("pointerdown", ()=>{ win.style.zIndex = ++noteWinZ; });
+  document.body.appendChild(win);
+  wireWinDrag(win);
   return win;
 }
+function mediaName(src){ try{ return decodeURIComponent(src.split("/").pop().split("?")[0]) || "image"; }catch{ return "image"; } }
 {
   // grabbing the docked grip detaches immediately and the new window rides
   // the same pointer until release (the docked grip keeps pointer capture)
@@ -4053,7 +4244,7 @@ function detachNote(fromRect){
     document.getElementById("inspect-close").click();
     off = {dx: ev.clientX - r.left, dy: ev.clientY - r.top};
     win.classList.add("dragging");
-    grip.setPointerCapture(ev.pointerId);
+    try{ grip.setPointerCapture(ev.pointerId); }catch{}
     ev.preventDefault();
   });
   grip.addEventListener("pointermove", ev=>{
@@ -4102,6 +4293,7 @@ async function openNote(nd){
   document.getElementById("body").querySelectorAll("a.wl").forEach(a=>a.onclick=e=>{
     e.preventDefault(); const tgt=nodeById.get(nd.repo+"/"+nd.role+"/"+a.dataset.slug); if(tgt) openNote(tgt);
   });
+  hydrateNoteMedia(document.getElementById("body"), nd);
   panel.classList.add("open"); panel.setAttribute("aria-hidden","false"); panel.removeAttribute("inert");
   // the note card and the voice settings panel share the same slot — opening
   // one closes the other (the cog handler does the reverse)
