@@ -1022,3 +1022,9 @@
 {"outcome": "useful", "repo": "Zugruul/development-skills", "role": "dev", "slug": "single-cause-fixtures", "task": "Zugruul/development-skills#249", "ts": "2026-07-21T09:56:34+00:00", "type": "RecallOutcome", "v": 1}
 {"repo": "Zugruul/development-skills", "role": "dev", "slug": "gate-sh-records-suite-does-not", "strength": 1, "ts": "2026-07-21T09:57:04+00:00", "type": "NoteMinted", "v": 1}
 {"key": "gate-sh-records-suite-does-not->gate-runs-outlive-agent-turns", "repo": "Zugruul/development-skills", "role": "dev", "ts": "2026-07-21T09:57:04+00:00", "type": "LinkFormed", "v": 1}
+{"outcome": "useful", "repo": "Zugruul/development-skills", "role": "dev", "slug": "verify-fixture-isolates-intended-path", "task": "Zugruul/development-skills#251", "ts": "2026-07-21T16:13:35+00:00", "type": "RecallOutcome", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "dev", "slug": "tiebreak-slugs-must-oppose-assertion", "strength": 1, "ts": "2026-07-21T16:14:20+00:00", "type": "NoteMinted", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "dev", "slug": "neutralize-confounding-multipliers-in-fixtures", "strength": 1, "ts": "2026-07-21T16:14:20+00:00", "type": "NoteMinted", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "dev", "slug": "await-backgrounded-verification-results", "strength": 2, "ts": "2026-07-21T16:14:20+00:00", "type": "NoteMinted", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "reviewer", "slug": "mutation-test-ranking-diffs", "strength": 1, "ts": "2026-07-21T16:14:29+00:00", "type": "NoteMinted", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "reviewer", "slug": "backup-before-mutate-in-job-tmp", "strength": 1, "ts": "2026-07-21T16:14:29+00:00", "type": "NoteMinted", "v": 1}
