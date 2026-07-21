@@ -69,6 +69,16 @@
     "last": "2026-07-20",
     "weight": 0.5
   },
+  "block-capture-regex-spans-breaks->apply-blocks-guard-empty-candidates": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "block-capture-regex-spans-breaks->type-validate-jsonl-reads": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "bool-excluded-before-int->stdlib-vs-enrichment-split": {
     "fires": 15,
     "last": "2026-07-20",
