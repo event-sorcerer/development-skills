@@ -1,0 +1,8 @@
+{
+    "items": [
+        { "status": "QA", "priority": "P0", "title": "FX-002: auth model", "content": { "number": 2, "title": "FX-002: auth model" } },
+        { "status": "Ready", "priority": "P0", "title": "FX-003: sessions", "content": { "number": 3, "title": "FX-003: sessions" } },
+        { "status": "Deployed", "priority": "P0", "title": "FX-090: infra", "content": { "number": 90, "title": "FX-090: infra" } },
+        { "status": "Backlog", "priority": "P0", "title": "FX-001: scaffold", "content": { "number": 1, "title": "FX-001: scaffold" } }
+    ]
+}
