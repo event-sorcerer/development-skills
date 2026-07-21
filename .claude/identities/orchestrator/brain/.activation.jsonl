@@ -1,0 +1,2 @@
+{"event": "seed", "note": "squash-subject-needs-issue-ref", "activation": 1.1, "ts": "2026-07-21T04:44:07+00:00", "role": "orchestrator"}
+{"event": "inject", "note": "squash-subject-needs-issue-ref", "activation": 1.1, "ts": "2026-07-21T04:44:07+00:00", "role": "orchestrator"}
