@@ -535,7 +535,7 @@ canvas.grabbing{cursor:grabbing}
 #body h3,#body h4,#body h5{color:var(--cyan);font-size:.82rem;margin:.7rem 0 .2rem}
 #body p{margin:.4rem 0}
 #body code{background:rgba(70,230,255,.1);padding:.05rem .3rem;border-radius:4px;font-size:.74rem}
-#body a.wl{color:var(--cyan);text-decoration:none;border-bottom:1px dotted var(--cyan-dim)}
+#body a.wl{color:var(--cyan);text-decoration:none;border-bottom:1px dotted var(--cyan-dim);cursor:pointer}
 #body ul{margin:.3rem 0;padding-left:1.1rem}
 /* note media (#289): images/videos inline, file links amber, 3D blocks */
 #body img.nm{max-width:100%;border-radius:8px;display:block;margin:.4rem 0;cursor:zoom-in}
@@ -4377,17 +4377,20 @@ function renderNoteInto(root, nd, d){
   // synapse rows open the linked note — through openNote, so the pin rule
   // applies (pinned sidebar → detached card, otherwise into the sidebar)
   q("links").querySelectorAll(".ln-click").forEach(row=>{
-    const go = ()=>{
+    const go = ev=>{
       const slug = row.dataset.slug;
       const tgt = nodeById.get(nd.repo+"/"+nd.role+"/"+slug) || {repo: nd.repo, role: nd.role, slug};
-      openNote(tgt);
+      if(ev && ev.shiftKey) openNoteDetachedNow(tgt); else openNote(tgt);
     };
     row.onclick = go;
-    row.onkeydown = ev=>{ if(ev.key==="Enter" || ev.key===" "){ ev.preventDefault(); go(); } };
+    row.onkeydown = ev=>{ if(ev.key==="Enter" || ev.key===" "){ ev.preventDefault(); go(ev); } };
   });
-  // clicking a wikilink jumps to that note in the same brain
+  // clicking a wikilink jumps to that note in the same brain;
+  // shift+click always opens it as a detached card (pin state irrelevant)
   q("body").querySelectorAll("a.wl").forEach(a=>a.onclick=e=>{
-    e.preventDefault(); const tgt=nodeById.get(nd.repo+"/"+nd.role+"/"+a.dataset.slug); if(tgt) openNote(tgt);
+    e.preventDefault();
+    const tgt = nodeById.get(nd.repo+"/"+nd.role+"/"+a.dataset.slug) || {repo: nd.repo, role: nd.role, slug: a.dataset.slug};
+    if(e.shiftKey) openNoteDetachedNow(tgt); else openNote(tgt);
   });
   hydrateNoteMedia(q("body"), nd);
 }
@@ -4420,6 +4423,12 @@ function spawnDetachedNote(nd, d){
   win.querySelector(".locate").onclick = ()=>flyToNote(nd);
   wireWinDrag(win);
   return win;
+}
+// shift+click on wikilinks/synapses: open the note as a detached card
+// unconditionally, without touching the sidebar or consulting the pin
+async function openNoteDetachedNow(nd){
+  let d; try{ d=await (await fetch(`/note/${encodeURIComponent(nd.repo)}/${encodeURIComponent(nd.role)}/${encodeURIComponent(nd.slug)}`)).json(); }catch{ return; }
+  spawnDetachedNote(nd, d);
 }
 async function openNote(nd, opts){
   let d; try{ d=await (await fetch(`/note/${encodeURIComponent(nd.repo)}/${encodeURIComponent(nd.role)}/${encodeURIComponent(nd.slug)}`)).json(); }catch{ return; }
