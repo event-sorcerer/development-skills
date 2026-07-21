@@ -1,18 +1,12 @@
 ---
-tags: [gate, delivery]
+tags: [gate, delivery, background]
 paths: []
-strength: 1
-source: "retro"
-learned-from: tasks 154/158 close
+strength: 2
+source: "Zugruul/development-skills#251"
+learned-from: GL-010 retro (re-mint)
 graduated: false
 created: 2026-07-12
+last-touched: 2026-07-21
 ---
 
-
-# Never go idle on a backgrounded verification — wait for it and act
-
-When a gate/test run auto-backgrounds under the harness, ending the turn means
-the result is never acted on: the pass sits unrecorded, the branch unpushed,
-the PR unopened, until someone nudges. Either wait the run out in-session, or
-arm an explicit completion signal and treat the notification as your cue to
-finish delivery (record → push → PR → report) in the same wake-up.
+When a long gate run gets auto-backgrounded by the Bash timeout, keep polling/waiting on that SAME background task id rather than pkill-ing and relaunching: a long-but-passing run looks identical to a hung one until you check, and killing it produces overlapping output files plus a false 'failed' status from your own kill.
