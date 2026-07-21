@@ -115,3 +115,116 @@ print("VALID=%d" % valid)
 check "concurrency: 20 parallel appends all valid JSON" "VALID=$((5 + BO_N))" "$out"
 
 rm -rf "$BO"
+
+echo "== brain outcome event emission (GL-002/SPEC-GRAPHIFY §7 R7.2: RecallOutcome -> brain-events.jsonl) =="
+
+# oe_summary <feed> -- print RecallOutcome line count + field snapshot of the
+# LAST such line, so tests can assert shape without hand-parsing JSON inline.
+oe_summary() {
+    python3 - "$1" <<'PY'
+import json, os, sys
+feed = sys.argv[1]
+n = 0
+last = None
+lines = []
+if os.path.exists(feed):
+    for ln in open(feed, encoding="utf-8"):
+        ln = ln.strip()
+        if not ln:
+            continue
+        lines.append(ln)
+        e = json.loads(ln)   # raises on any torn/malformed line
+        if e.get("type") == "RecallOutcome":
+            n += 1
+            last = e
+print("N=%d" % n)
+print("TOTAL_LINES=%d" % len(lines))
+if last is not None:
+    for k in ("role", "slug", "outcome", "task"):
+        print("%s=%s" % (k.upper(), last.get(k)))
+    print("HAS_TS=%s" % ("ts" in last))
+PY
+}
+
+# ------------------------------------------------------------- happy path: event shape
+OE="$(mktemp -d)"
+mkdir -p "$OE/.claude"
+cat >"$OE/.claude/project.yaml" <<'YAML'
+schemaVersion: 2
+project:
+    name: acme/widgets
+    mainBranch: main
+YAML
+oe_brain() { python3 "$BO_SCRIPTS/brain.py" "$OE" "$@"; }
+OE_FEED="$OE/.claude/brain-events.jsonl"
+printf 'Some lesson body.\n' | oe_brain mint dev evt-note --tags x --paths "x/**" --source "PR#1" >/dev/null
+: >"$OE_FEED"   # isolate from the NoteMinted/LinkFormed events minting just emitted
+
+oe_brain outcome dev evt-note useful --task "#7" >/dev/null
+out="$(oe_summary "$OE_FEED")"
+check "happy path: exactly one RecallOutcome line"   "N=1"                    "$out"
+check "happy path: role carried through"             "ROLE=dev"               "$out"
+check "happy path: slug carried through"              "SLUG=evt-note"          "$out"
+check "happy path: outcome carried through"           "OUTCOME=useful"         "$out"
+check "happy path: task carried through (qualified)"  "TASK=acme/widgets#7"    "$out"
+check "happy path: ts field present"                  "HAS_TS=True"            "$out"
+
+# ------------------------------------------------ outcomes.jsonl still lands too
+check "happy path: outcomes.jsonl still got its line" "1" "$(wc -l <"$OE/.claude/identities/dev/brain/outcomes.jsonl" | tr -d ' ')"
+
+rm -rf "$OE"
+
+# ---------------------------------------- pre-existing event lines parse unchanged
+OE="$(mktemp -d)"
+mkdir -p "$OE/.claude"
+oe_brain() { python3 "$BO_SCRIPTS/brain.py" "$OE" "$@"; }
+OE_FEED="$OE/.claude/brain-events.jsonl"
+printf 'body\n' | oe_brain mint dev pre-note --tags x --paths "x/**" >/dev/null
+preexisting_line='{"v":1,"ts":"2020-01-01T00:00:00Z","repo":"acme/widgets","role":"dev","type":"LinkPruned","key":"a->b","reason":"target missing"}'
+printf '%s\n' "$preexisting_line" >>"$OE_FEED"
+before_hash="$(shasum "$OE_FEED" | awk '{print $1}')"
+
+oe_brain outcome dev pre-note useful >/dev/null
+after_first_lines="$(sed '$d' "$OE_FEED")"
+check "pre-existing lines: byte-unchanged after a new emission" "$before_hash" "$(printf '%s\n' "$after_first_lines" | shasum | awk '{print $1}')"
+check "pre-existing lines: LinkPruned line still parses"        "OK" "$(python3 -c '
+import json, sys
+json.loads(sys.argv[1])
+print("OK")
+' "$preexisting_line")"
+out="$(oe_summary "$OE_FEED")"
+check "pre-existing lines: new RecallOutcome appended after"    "N=1" "$out"
+check "pre-existing lines: total feed lines is two"             "TOTAL_LINES=2" "$out"
+
+rm -rf "$OE"
+
+# --------------------------------------------------- feed-write failure never load-bearing
+OE="$(mktemp -d)"
+mkdir -p "$OE/.claude"
+oe_brain() { python3 "$BO_SCRIPTS/brain.py" "$OE" "$@"; }
+printf 'body\n' | oe_brain mint dev fail-note --tags x --paths "x/**" >/dev/null
+rm -f "$OE/.claude/brain-events.jsonl"      # mint's NoteMinted emit already created it as a file
+mkdir -p "$OE/.claude/brain-events.jsonl"   # feed target is a directory -> append is doomed
+
+out="$(oe_brain outcome dev fail-note useful 2>&1)"; rc=$?
+check_rc "feed-write failure: outcome command still exits 0" 0 "$rc"
+check "feed-write failure: outcome command still reports success" "recorded outcome: dev/fail-note useful" "$out"
+check "feed-write failure: a warning is printed"              "warning"     "$out"
+check_absent "feed-write failure: no traceback"                "Traceback"   "$out"
+check "feed-write failure: outcomes.jsonl line still lands"    "1" "$(wc -l <"$OE/.claude/identities/dev/brain/outcomes.jsonl" | tr -d ' ')"
+
+rm -rf "$OE"
+
+# --------------------------------------------------------- missing .claude root: skip cleanly
+OE="$(mktemp -d)"                      # root has NO .claude at all
+OE_IDENT="$(mktemp -d)/identities"     # identities dir lives entirely outside root/.claude
+mkdir -p "$OE_IDENT/dev/brain/notes"
+printf 'standalone body\n' >"$OE_IDENT/dev/brain/notes/standalone.md"
+oe_brain_nodir() { python3 "$BO_SCRIPTS/brain.py" "$OE" --dir "$OE_IDENT" "$@"; }
+
+out="$(oe_brain_nodir outcome dev standalone useful 2>&1)"; rc=$?
+check_rc "missing .claude root: outcome command still exits 0" 0 "$rc"
+check "missing .claude root: outcomes.jsonl line still lands" "1" "$(wc -l <"$OE_IDENT/dev/brain/outcomes.jsonl" | tr -d ' ')"
+check "missing .claude root: no .claude dir is created under root" "ABSENT" "$([ -d "$OE/.claude" ] && echo PRESENT || echo ABSENT)"
+
+rm -rf "$OE" "$(dirname "$OE_IDENT")"
