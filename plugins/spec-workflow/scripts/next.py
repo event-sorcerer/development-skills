@@ -24,9 +24,24 @@ def main(cfg_path, bid, items_path, only_spec=""):
     specs = [s for s in cfg["specs"] if s["board"] == board["id"] and (not only_spec or s["id"] == only_spec)]
     max_wip = cfg.get("methodology", {}).get("maxInProgress", 1)
     wip_status = flow[1] if len(flow) > 1 else flow[0]
+    serial_delivery = bool(cfg.get("methodology", {}).get("serialDelivery", False))
 
     def title_of(it):
         return it.get("title") or it.get("content", {}).get("title", "")
+
+    # #272: serialDelivery is stricter than and orthogonal to the maxInProgress
+    # WIP-limit resume guard below — it blocks on ANY task not yet merged (In
+    # progress OR In review; a task leaves In review only by merging), not just
+    # a WIP-limit count. Checked first so it preempts the resume guard's own
+    # (narrower, In-progress-only) message.
+    if serial_delivery:
+        blocking_statuses = set(flow[1:3])  # In progress, In review (config-driven, not hardcoded)
+        blockers = [it for it in data["items"] if it.get("status") in blocking_statuses]
+        if blockers:
+            for it in blockers:
+                num = it.get("content", {}).get("number")
+                print(f'WAIT: serial delivery — #{num} {title_of(it)} is {it.get("status")}; merge it before picking')
+            return
 
     def classify(title):
         """title -> (spec, epic, epic_rank, tasknum) or None for untagged (bugs)."""

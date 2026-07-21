@@ -288,6 +288,11 @@
                     "default": false,
                     "description": "When true, build-next skips human PR approval: an autonomous reviewer agent (a suitable model from delegation.identities.reviewer.models) reviews the PR, dialogues fixes with the orchestrator until it approves, then the orchestrator merges and announces the merge. Protocol: build-next skill, references/auto-review.md."
                 },
+                "serialDelivery": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "When true, no new task may be picked (or manually moved to In progress) while ANY board task sits In progress or In review — a task leaves In review only by merging, so this gates strictly on merge. Stricter than and orthogonal to maxInProgress (which caps how many parallel lanes may run at once): maxInProgress limits width, serialDelivery limits how far ahead of the last merge the loop may get. Enforced by next.py's picker (prints WAIT, not PICK) and, as defense in depth, by guard-board-move.sh blocking a manual `board.sh move <n> \"In progress\"` — override with the SERIAL_DELIVERY_OVERRIDE=1 env var. Motivated by issue #272 (a 5-deep PR stack that required per-child rebases and lost one PR when GitHub deleted its unmerged base branch)."
+                },
                 "mergeMethod": {
                     "type": "string",
                     "enum": ["squash", "merge", "rebase"],
