@@ -79,7 +79,13 @@ cat >"$OUT_JSONL" <<'EOF'
 {"schemaVersion": 1, "ts": "2026-04-15T00:00:00+00:00", "slug": "conflicted", "outcome": "corrected", "task": null, "note": "wrong path"}
 EOF
 out="$(orc recall dev --paths "con/x.sh" --keywords "")"
-check "contested: within-window 1x useful + 1x corrected renders the marker" "⚠ contested" "$out"
+check "contested: within-window 1x useful + 1x corrected renders the marker (full tier)" "⚠ contested" "$out"
+
+# same fixture, but a budget too small for the full tier to fit forces the
+# one-liner tier -- the marker must still render there (R7.5: "both tiers").
+out_oneliner="$(orc recall dev --paths "con/x.sh" --keywords "" --budget 15)"
+check_absent "contested: budget forces the one-liner tier (no full body)" "Contested lesson body." "$out_oneliner"
+check "contested: one-liner tier also renders the marker" "⚠ contested" "$out_oneliner"
 
 # same history, but BOTH outcomes predate the window cutoff (2026-03-01)
 cat >"$OUT_JSONL" <<'EOF'
@@ -121,6 +127,44 @@ else
 fi
 rm -rf "$OR_MAL" "$OR_BASE"
 
+# ------------------------------------------------- (4b) wrong-type malformed lines
+# JSON-valid lines that pass presence checks but carry the WRONG TYPE for
+# ts/slug must not crash recall: ts must be comparable to the retros.log
+# cutoff string (a non-str ts raises TypeError at `ts < cutoff`) and slug
+# must be hashable (a list/dict slug raises TypeError at
+# tallies.setdefault()). Needs >=3 retros marked so _retro_window_cutoff()
+# resolves to a real string and the `ts < cutoff` comparison actually runs
+# (with cutoff=None the comparison is short-circuited and never crashes).
+OR_TYP="$(mktemp -d)"
+ory() { python3 "$OR_SCRIPTS/brain.py" "$OR_TYP" "$@"; }
+printf 'Wrong-type lesson body.\n' | ory mint dev typ-note --tags typ --paths "typ/**" --source x >/dev/null
+ory retro-mark >/dev/null; ory retro-mark >/dev/null; ory retro-mark >/dev/null
+TYP_JSONL="$OR_TYP/.claude/identities/dev/brain/outcomes.jsonl"
+mkdir -p "$(dirname "$TYP_JSONL")"
+cat >"$TYP_JSONL" <<'EOF'
+{"schemaVersion": 1, "ts": 5, "slug": "typ-note", "outcome": "useful", "task": null, "note": null}
+{"schemaVersion": 1, "ts": "2026-04-01T00:00:00+00:00", "slug": ["typ-note"], "outcome": "useful", "task": null, "note": null}
+EOF
+
+OR_TYPBASE="$(mktemp -d)"
+oryb() { python3 "$OR_SCRIPTS/brain.py" "$OR_TYPBASE" "$@"; }
+printf 'Wrong-type lesson body.\n' | oryb mint dev typ-note --tags typ --paths "typ/**" --source x >/dev/null
+
+err="$(ory recall dev --paths "typ/x.sh" --keywords "" 2>&1 >/dev/null)"; rc=$?
+check_rc "wrong-type outcomes: exit 0 (no crash on ts-as-int/slug-as-list)" 0 "$rc"
+check_absent "wrong-type outcomes: no traceback" "Traceback" "$err"
+warn_count="$(grep -c "malformed" <<<"$err")"
+check "wrong-type outcomes: exactly one warning" "1" "$warn_count"
+out_typ="$(ory recall dev --paths "typ/x.sh" --keywords "" 2>/dev/null)"
+out_typbase="$(oryb recall dev --paths "typ/x.sh" --keywords "" 2>/dev/null)"
+if [[ "$out_typ" == "$out_typbase" ]]; then
+    echo "ok   wrong-type outcomes: ranking identical to no-outcomes baseline"
+else
+    echo "FAIL wrong-type outcomes: ranking identical to no-outcomes baseline"
+    fails=$((fails + 1))
+fi
+rm -rf "$OR_TYP" "$OR_TYPBASE"
+
 # ------------------------------------------------------------- (5) determinism
 OR_DET="$(mktemp -d)"
 ord() { python3 "$OR_SCRIPTS/brain.py" "$OR_DET" "$@"; }
@@ -138,27 +182,44 @@ fi
 rm -rf "$OR_DET"
 
 # --------------------------------------------------------------- (6) latency
-# 200-note fixture; outcome parsing must add <200ms vs a no-outcomes baseline
-# of the SAME corpus (outcomes are parsed once per invocation, per §14).
-OR_LAT="$(mktemp -d)"
-orl() { python3 "$OR_SCRIPTS/brain.py" "$OR_LAT" "$@"; }
+# 200-note fixture, twice: one dir with NO outcomes.jsonl (baseline), one
+# with a 40-line outcomes.jsonl (outcome-weighted). Outcome parsing must add
+# <200ms at the MEDIAN of 3 timed runs each side -- median-of-3 kills the
+# single-shot CI-stall flake window a lone before/after pair is exposed to.
+OR_LAT_BASE="$(mktemp -d)"
+OR_LAT_WITH="$(mktemp -d)"
+orlb() { python3 "$OR_SCRIPTS/brain.py" "$OR_LAT_BASE" "$@"; }
+orlw() { python3 "$OR_SCRIPTS/brain.py" "$OR_LAT_WITH" "$@"; }
 for i in $(seq 1 200); do
-    printf 'body %s\n' "$i" | orl mint dev "lat-$i" --tags lat --paths "lat/**" --source x >/dev/null
+    printf 'body %s\n' "$i" | orlb mint dev "lat-$i" --tags lat --paths "lat/**" --source x >/dev/null
+    printf 'body %s\n' "$i" | orlw mint dev "lat-$i" --tags lat --paths "lat/**" --source x >/dev/null
 done
-t0=$(python3 -c 'import time; print(time.time())')
-orl recall dev --paths "lat/x.sh" --keywords "" >/dev/null
-t1=$(python3 -c 'import time; print(time.time())')
 for i in $(seq 1 40); do
-    orl outcome dev "lat-$i" useful >/dev/null
+    orlw outcome dev "lat-$i" useful >/dev/null
 done
-t2=$(python3 -c 'import time; print(time.time())')
-orl recall dev --paths "lat/x.sh" --keywords "" >/dev/null
-t3=$(python3 -c 'import time; print(time.time())')
-delta_ms="$(python3 -c "print(int((($t3 - $t2) - ($t1 - $t0)) * 1000))")"
+_median3() { # three-timing helper: prints ms elapsed for the MIDDLE of 3 runs
+    python3 -c "
+import sys
+vals = sorted(float(x) for x in sys.argv[1:])
+print(int(vals[1] * 1000))
+" "$1" "$2" "$3"
+}
+_time_recall() { # prints elapsed seconds for one recall invocation of "$1"
+    local t0 t1
+    t0=$(python3 -c 'import time; print(time.time())')
+    "$1" recall dev --paths "lat/x.sh" --keywords "" >/dev/null
+    t1=$(python3 -c 'import time; print(time.time())')
+    python3 -c "print($t1 - $t0)"
+}
+base1="$(_time_recall orlb)"; base2="$(_time_recall orlb)"; base3="$(_time_recall orlb)"
+with1="$(_time_recall orlw)"; with2="$(_time_recall orlw)"; with3="$(_time_recall orlw)"
+base_med_ms="$(_median3 "$base1" "$base2" "$base3")"
+with_med_ms="$(_median3 "$with1" "$with2" "$with3")"
+delta_ms="$(( with_med_ms - base_med_ms ))"
 if [[ "$delta_ms" -lt 200 ]]; then
-    echo "ok   latency: outcome weighting adds <200ms on a 200-note fixture (${delta_ms}ms)"
+    echo "ok   latency: outcome weighting adds <200ms (median of 3) on a 200-note fixture (${delta_ms}ms)"
 else
     echo "FAIL latency: outcome weighting adds <200ms on a 200-note fixture (${delta_ms}ms)"
     fails=$((fails + 1))
 fi
-rm -rf "$OR_LAT"
+rm -rf "$OR_LAT_BASE" "$OR_LAT_WITH"
