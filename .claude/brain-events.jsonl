@@ -1028,3 +1028,10 @@
 {"repo": "Zugruul/development-skills", "role": "dev", "slug": "await-backgrounded-verification-results", "strength": 2, "ts": "2026-07-21T16:14:20+00:00", "type": "NoteMinted", "v": 1}
 {"repo": "Zugruul/development-skills", "role": "reviewer", "slug": "mutation-test-ranking-diffs", "strength": 1, "ts": "2026-07-21T16:14:29+00:00", "type": "NoteMinted", "v": 1}
 {"repo": "Zugruul/development-skills", "role": "reviewer", "slug": "backup-before-mutate-in-job-tmp", "strength": 1, "ts": "2026-07-21T16:14:29+00:00", "type": "NoteMinted", "v": 1}
+{"outcome": "useful", "repo": "Zugruul/development-skills", "role": "dev", "slug": "verify-fixture-isolates-intended-path", "task": "Zugruul/development-skills#252", "ts": "2026-07-21T19:52:04+00:00", "type": "RecallOutcome", "v": 1}
+{"outcome": "useful", "repo": "Zugruul/development-skills", "role": "dev", "slug": "await-backgrounded-verification-results", "task": "Zugruul/development-skills#252", "ts": "2026-07-21T19:52:04+00:00", "type": "RecallOutcome", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "dev", "slug": "git-introspection-must-test-linked-worktrees", "strength": 1, "ts": "2026-07-21T19:52:04+00:00", "type": "NoteMinted", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "dev", "slug": "commit-early-in-shared-clone", "strength": 1, "ts": "2026-07-21T19:52:04+00:00", "type": "NoteMinted", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "reviewer", "slug": "fail-silent-hides-valid-layouts", "strength": 1, "ts": "2026-07-21T19:52:17+00:00", "type": "NoteMinted", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "reviewer", "slug": "copy-fixture-setup-not-spec-prose", "strength": 1, "ts": "2026-07-21T19:52:18+00:00", "type": "NoteMinted", "v": 1}
+{"repo": "Zugruul/development-skills", "role": "reviewer", "slug": "background-flag-not-inline-ampersand", "strength": 1, "ts": "2026-07-21T19:52:18+00:00", "type": "NoteMinted", "v": 1}

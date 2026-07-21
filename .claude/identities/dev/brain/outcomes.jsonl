@@ -5,3 +5,5 @@
 {"note": null, "outcome": "useful", "schemaVersion": 1, "slug": "stderr-suppression-hides-evidence", "task": "Zugruul/development-skills#246", "ts": "2026-07-21T09:56:34+00:00"}
 {"note": null, "outcome": "useful", "schemaVersion": 1, "slug": "single-cause-fixtures", "task": "Zugruul/development-skills#249", "ts": "2026-07-21T09:56:34+00:00"}
 {"note": null, "outcome": "useful", "schemaVersion": 1, "slug": "verify-fixture-isolates-intended-path", "task": "Zugruul/development-skills#251", "ts": "2026-07-21T16:13:35+00:00"}
+{"note": null, "outcome": "useful", "schemaVersion": 1, "slug": "verify-fixture-isolates-intended-path", "task": "Zugruul/development-skills#252", "ts": "2026-07-21T19:52:04+00:00"}
+{"note": null, "outcome": "useful", "schemaVersion": 1, "slug": "await-backgrounded-verification-results", "task": "Zugruul/development-skills#252", "ts": "2026-07-21T19:52:04+00:00"}
