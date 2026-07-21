@@ -52,7 +52,8 @@ MAX_HOPS = 2
 CHARS_PER_TOKEN = 4
 DEFAULT_GRADUATION_THRESHOLD = 3  # methodology.graduationThreshold override in project.yaml
 # frontmatter keys in deterministic write order
-KEY_ORDER = ["tags", "paths", "entities", "strength", "source", "learned-from", "source-note", "graduated", "created"]
+KEY_ORDER = ["tags", "paths", "entities", "strength", "source", "learned-from", "source-note", "graduated",
+             "created", "last-touched"]
 
 
 # ---------------------------------------------------------------- small helpers
@@ -382,16 +383,25 @@ DEFAULT_OUTCOME_MULTIPLIER_STEP = 0.1  # methodology.outcomeMultiplierStep
 _MIN_OUTCOME_MULTIPLIER = 0.1
 
 
+def _load_retros(identities):
+    """The retros.log clock as an ordered list of date strings (oldest
+    first), one per `retro-mark`. [] when the file is missing or empty --
+    the single place both the outcome window (_retro_window_cutoff) and
+    recency decay (GL-010) read this file, so "no retro clock yet" means
+    the exact same thing to both features."""
+    rp = os.path.join(identities, "retros.log")
+    if not os.path.isfile(rp):
+        return []
+    return [ln.strip() for ln in open(rp, encoding="utf-8") if ln.strip()]
+
+
 def _retro_window_cutoff(identities, n):
     """The retros.log timestamp marking the start of the "last N retros"
     window (retros.log clock, NOT wall time) -- generalizes cmd_prune's
     3rd-from-last-retro cutoff to arbitrary N. None means fewer than N
     retros have EVER been marked, so there is no boundary yet and the whole
     history counts as within-window (nothing to exclude)."""
-    rp = os.path.join(identities, "retros.log")
-    if not os.path.isfile(rp):
-        return None
-    retros = [ln.strip() for ln in open(rp, encoding="utf-8") if ln.strip()]
+    retros = _load_retros(identities)
     if len(retros) < n:
         return None
     return retros[-n]
@@ -557,6 +567,86 @@ def _load_outcome_tallies_or_warn(identities, role, label):
     return tallies
 
 
+# ------------------------------------------------------------ recency decay
+# GL-010: a note untouched for K "grace" retros (methodology.
+# recencyDecayGraceRetros) decays multiplicatively by `factor`
+# (methodology.recencyDecayFactor) per retro elapsed BEYOND K -- measured on
+# the retros.log clock (via _load_retros, shared with the outcome window),
+# never wall time. Applied at SEED computation in cmd_recall, composing
+# multiplicatively with strength and GL-003's outcome multiplier.
+DEFAULT_RECENCY_DECAY_GRACE_RETROS = 3   # methodology.recencyDecayGraceRetros (K)
+DEFAULT_RECENCY_DECAY_FACTOR = 0.85      # methodology.recencyDecayFactor
+
+
+def _recency_decay_config(args):
+    cfg = C.load_config(root=args.root, warn=False) or {}
+    k = C.dig(cfg, "methodology.recencyDecayGraceRetros")
+    factor = C.dig(cfg, "methodology.recencyDecayFactor")
+    return (
+        int(k) if k is not None else DEFAULT_RECENCY_DECAY_GRACE_RETROS,
+        float(factor) if factor is not None else DEFAULT_RECENCY_DECAY_FACTOR,
+    )
+
+
+def _useful_touch_dates(identities, role):
+    """slug -> latest `useful`-outcome date (YYYY-MM-DD), FULL history -- a
+    useful outcome resets the recency-decay touch clock (GL-010) regardless
+    of the outcomeWindow the outcome multiplier uses, since decay measures
+    recency directly off the retro clock rather than a fixed window. Reuses
+    _read_outcomes' malformed-line tolerance (bad lines dropped, never
+    raises); callers combine the returned `malformed` flag with the one
+    already computed for the outcome multiplier -- both read the same file,
+    so they always agree."""
+    records, malformed = _read_outcomes(identities, role)
+    dates = {}
+    for obj in records:
+        if obj.get("outcome") != "useful":
+            continue
+        slug = obj["slug"]
+        d = obj["ts"][:10]
+        if d > dates.get(slug, ""):
+            dates[slug] = d
+    return dates, malformed
+
+
+def _note_touch_date(slug, fm, links, useful_dates):
+    """Latest date `slug` was touched: frontmatter last-touched (falling
+    back to created, for notes minted before GL-010 that never got a
+    last-touched stamp), any link's `last` where slug is source OR target,
+    or the latest recorded `useful` outcome date. None only if the note
+    somehow has neither created nor last-touched (mint always writes one)."""
+    candidates = []
+    touched = fm.get("last-touched") or fm.get("created")
+    if touched:
+        candidates.append(str(touched))
+    for key, meta in links.items():
+        src, _, target = key.partition("->")
+        if slug != src and slug != target:
+            continue
+        last = meta.get("last")
+        if last:
+            candidates.append(str(last))
+    useful = useful_dates.get(slug)
+    if useful:
+        candidates.append(useful)
+    return max(candidates) if candidates else None
+
+
+def _recency_decay_multiplier(retros, k, factor, touch_date):
+    """Multiplicative decay: factor ** max(0, elapsed - k), where `elapsed`
+    is the count of retros strictly AFTER `touch_date`. No retros.log (or a
+    note with no resolvable touch date) means zero decay -- 1.0, the
+    byte-identical default (AC5). At exactly K elapsed retros, overshoot is
+    0 so the multiplier is still exactly 1.0 (no decay yet, per AC2)."""
+    if not retros or touch_date is None:
+        return 1.0
+    elapsed = sum(1 for r in retros if r > touch_date)
+    overshoot = elapsed - k
+    if overshoot <= 0:
+        return 1.0
+    return factor ** overshoot
+
+
 # ------------------------------------------------------------------------- mint
 def cmd_mint(identities, args):
     body = sys.stdin.read().rstrip("\n") + "\n"
@@ -578,6 +668,9 @@ def cmd_mint(identities, args):
         "source": args.source or "",
         "graduated": False,
         "created": created,
+        # GL-010: every mint -- first or re-mint (the strength-bump path) --
+        # touches the note, resetting its recency-decay clock.
+        "last-touched": today(),
     }
     entities = _split(args.entities)
     if entities:
@@ -700,6 +793,18 @@ def cmd_recall(identities, args):
         )
         tallies = {}
 
+    # recency decay (GL-010): parsed ONCE per invocation, same latency
+    # budget as the outcome weighting above. A malformed outcomes.jsonl was
+    # already warned about once (above) -- reuse that verdict instead of
+    # parsing again and warning a second time for the exact same file.
+    retros = _load_retros(identities)
+    decay_k, decay_factor = _recency_decay_config(args)
+    useful_dates = {} if outcomes_malformed else _useful_touch_dates(identities, role)[0]
+
+    def _decay(slug, fm):
+        touch_date = _note_touch_date(slug, fm, links, useful_dates)
+        return _recency_decay_multiplier(retros, decay_k, decay_factor, touch_date)
+
     activation = {}   # slug -> float
     events = []       # collected, written after link bumps
 
@@ -712,6 +817,7 @@ def cmd_recall(identities, args):
         if hit:
             act = 1.0 * (1 + int(fm.get("strength", DEFAULT_STRENGTH)) / 10)
             act *= _outcome_multiplier(tallies.get(slug, {}), mult_step)
+            act *= _decay(slug, fm)
             if act > activation.get(slug, 0):
                 activation[slug] = act
             events.append({"event": "seed", "note": slug, "activation": round(act, 4)})
@@ -733,6 +839,7 @@ def cmd_recall(identities, args):
                     fm = notes[slug]["fm"]
                     act = 1.0 * (1 + int(fm.get("strength", DEFAULT_STRENGTH)) / 10)
                     act *= _outcome_multiplier(tallies.get(slug, {}), mult_step)
+                    act *= _decay(slug, fm)
                     if act > activation.get(slug, 0):
                         activation[slug] = act
                         events.append({"event": "seed", "note": slug,

@@ -278,6 +278,19 @@
                     "maximum": 1,
                     "description": "SPEC-GRAPHIFY \u00a713 shrink guard (lesson from graphify #2053/#2056/#2012): the fraction of a brain's notes/links a single brain.py invocation may remove before it must refuse without --force. Every destructive verb routes through the shared _shrink_guard helper (currently wired into `prune --apply`, its link removal path). The guard only engages when the removal ALSO exceeds an absolute floor (5 items, a code constant) \u2014 so e.g. pruning 2 of 3 links in a tiny brain never needs --force. Over threshold without --force: refuses non-zero, prints counts + a sample of the keys that would be removed, writes nothing. Over threshold with --force: proceeds and prints a loud removal summary; LinkPruned events are still emitted either way removal happens."
                 },
+                "recencyDecayGraceRetros": {
+                    "type": "integer",
+                    "default": 3,
+                    "minimum": 0,
+                    "description": "GL-010: number of retros (retros.log clock, NOT wall time) a note may go untouched before brain.py recall's seed activation starts decaying it. 'Touched' = frontmatter last-touched/created, a links.json per-link `last`, or a recorded `useful` outcome for the note. 0 means decay begins after the very first retro the note goes untouched."
+                },
+                "recencyDecayFactor": {
+                    "type": "number",
+                    "default": 0.85,
+                    "exclusiveMinimum": 0,
+                    "maximum": 1,
+                    "description": "GL-010: multiplicative decay applied per retro elapsed beyond recencyDecayGraceRetros to a note's seed activation in brain.py recall (composes with strength and the outcome multiplier, GL-003). Must be in (0, 1]; 1.0 disables decay entirely."
+                },
                 "iterativeUI": {
                     "type": "boolean",
                     "default": true,

@@ -229,6 +229,22 @@ def main(path):
             elif val < 1:
                 errs.append(f"methodology.{key}: must be >= 1 (got {val})")
 
+    # methodology.recencyDecayGraceRetros / recencyDecayFactor (GL-010):
+    # mirrors schemas/project-config.schema.json's {minimum: 0} / {exclusiveMinimum: 0, maximum: 1}.
+    if isinstance(methodology, dict):
+        if "recencyDecayGraceRetros" in methodology:
+            val = methodology["recencyDecayGraceRetros"]
+            if isinstance(val, bool) or not isinstance(val, int):
+                errs.append(f"methodology.recencyDecayGraceRetros: must be an integer >= 0 (got {val!r})")
+            elif val < 0:
+                errs.append(f"methodology.recencyDecayGraceRetros: must be >= 0 (got {val})")
+        if "recencyDecayFactor" in methodology:
+            val = methodology["recencyDecayFactor"]
+            if isinstance(val, bool) or not isinstance(val, (int, float)):
+                errs.append(f"methodology.recencyDecayFactor: must be a number in (0, 1] (got {val!r})")
+            elif not (0 < val <= 1):
+                errs.append(f"methodology.recencyDecayFactor: must be in (0, 1] (got {val})")
+
     # methodology.entityKinds: object mapping kind -> role, both strings (#163).
     if isinstance(methodology, dict) and "entityKinds" in methodology:
         ek = methodology["entityKinds"]

@@ -73,6 +73,34 @@ check "neuralView.entityEdgeColor must be a string" "neuralView.entityEdgeColor"
 out="$(python3 "$PLUGIN/scripts/validate-config.py" "$FIX/entity-kinds-good.project.yaml")"
 check "entityKinds + entityEdgeColor together still validate" "VALID: " "$out"
 
+echo "== validate-config: methodology.recencyDecayGraceRetros / recencyDecayFactor (GL-010) =="
+RDC="$(mktemp -d)"
+sed '/^    maxInProgress: 1/a\
+    recencyDecayGraceRetros: -1
+' "$FIX/valid.project.yaml" > "$RDC/negative-grace.project.yaml"
+out="$(python3 "$PLUGIN/scripts/validate-config.py" "$RDC/negative-grace.project.yaml" || true)"
+check "negative recencyDecayGraceRetros rejected" "methodology.recencyDecayGraceRetros: must be >= 0 (got -1)" "$out"
+
+sed '/^    maxInProgress: 1/a\
+    recencyDecayFactor: 1.5
+' "$FIX/valid.project.yaml" > "$RDC/over-factor.project.yaml"
+out="$(python3 "$PLUGIN/scripts/validate-config.py" "$RDC/over-factor.project.yaml" || true)"
+check "recencyDecayFactor > 1 rejected" "methodology.recencyDecayFactor: must be in (0, 1] (got 1.5)" "$out"
+
+sed '/^    maxInProgress: 1/a\
+    recencyDecayFactor: 0
+' "$FIX/valid.project.yaml" > "$RDC/zero-factor.project.yaml"
+out="$(python3 "$PLUGIN/scripts/validate-config.py" "$RDC/zero-factor.project.yaml" || true)"
+check "recencyDecayFactor == 0 rejected (must be > 0)" "methodology.recencyDecayFactor: must be in (0, 1] (got 0)" "$out"
+
+sed '/^    maxInProgress: 1/a\
+    recencyDecayGraceRetros: 5\
+    recencyDecayFactor: 0.9
+' "$FIX/valid.project.yaml" > "$RDC/valid-decay.project.yaml"
+out="$(python3 "$PLUGIN/scripts/validate-config.py" "$RDC/valid-decay.project.yaml")"
+check "valid recencyDecayGraceRetros/recencyDecayFactor pass" "VALID: " "$out"
+rm -rf "$RDC"
+
 echo "== validate-config: models.codex.capability (additive, CDX-020, #185) =="
 check "this repo's own .claude/project.yaml (flat models arrays) still validates unmodified -- additivity proof" "VALID: " \
     "$(python3 "$PLUGIN/scripts/validate-config.py" "$PLUGIN/../../.claude/project.yaml")"
