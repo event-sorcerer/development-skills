@@ -24,24 +24,29 @@ def main(cfg_path, bid, items_path, only_spec=""):
     specs = [s for s in cfg["specs"] if s["board"] == board["id"] and (not only_spec or s["id"] == only_spec)]
     max_wip = cfg.get("methodology", {}).get("maxInProgress", 1)
     wip_status = flow[1] if len(flow) > 1 else flow[0]
+    review_status = flow[2] if len(flow) > 2 else None
     serial_delivery = bool(cfg.get("methodology", {}).get("serialDelivery", False))
 
     def title_of(it):
         return it.get("title") or it.get("content", {}).get("title", "")
 
-    # #272: serialDelivery is stricter than and orthogonal to the maxInProgress
-    # WIP-limit resume guard below — it blocks on ANY task not yet merged (In
-    # progress OR In review; a task leaves In review only by merging), not just
-    # a WIP-limit count. Checked first so it preempts the resume guard's own
-    # (narrower, In-progress-only) message.
-    if serial_delivery:
-        blocking_statuses = set(flow[1:3])  # In progress, In review (config-driven, not hardcoded)
-        blockers = [it for it in data["items"] if it.get("status") in blocking_statuses]
-        if blockers:
-            for it in blockers:
-                num = it.get("content", {}).get("number")
-                print(f'WAIT: serial delivery — #{num} {title_of(it)} is {it.get("status")}; merge it before picking')
-            return
+    wip = [it for it in data["items"] if it.get("status") == wip_status]
+    review_wip = [it for it in data["items"] if review_status and it.get("status") == review_status]
+
+    # #272 (review round 1 MUST FIX #1): serialDelivery is stricter than and
+    # orthogonal to the maxInProgress resume guard below, but it must never
+    # print WAIT while something is In progress — resuming/finishing that IS
+    # the correct next action, and a WAIT with nothing In progress to work on
+    # would deadlock the loop (a task can only leave In review by merging).
+    # So: In progress present -> always RESUME (folded into the ordinary
+    # resume guard below, which a bare serialDelivery now also triggers even
+    # under maxInProgress); an In-review blocker with NOTHING In progress ->
+    # WAIT, since only a merge can unblock it and there is nothing to resume.
+    if serial_delivery and not wip and review_wip:
+        for it in review_wip:
+            num = it.get("content", {}).get("number")
+            print(f'WAIT: serial delivery — #{num} {title_of(it)} is {it.get("status")}; merge it before picking')
+        return
 
     def classify(title):
         """title -> (spec, epic, epic_rank, tasknum) or None for untagged (bugs)."""
@@ -62,13 +67,17 @@ def main(cfg_path, bid, items_path, only_spec=""):
         except ValueError:
             return False
 
-    # resume guard: WIP at/over the configured limit -> finish that work first
-    wip = [it for it in data["items"] if it.get("status") == wip_status]
-    if len(wip) >= max_wip:
+    # resume guard: WIP at/over the configured limit -- or, under serialDelivery,
+    # ANY WIP at all (#272 review round 1 MUST FIX #1) -- finish that work first.
+    if len(wip) >= max_wip or (serial_delivery and wip):
         print(f"Work already {wip_status} (limit {max_wip}) — finish or move it before starting new work:")
         for it in wip:
             print(f'  #{it.get("content", {}).get("number")}  {title_of(it)}')
         print(f'\n=> RESUME: #{wip[0].get("content", {}).get("number")}  {title_of(wip[0])}')
+        if serial_delivery and review_wip:
+            for it in review_wip:
+                num = it.get("content", {}).get("number")
+                print(f'NOTE: serial delivery — #{num} {title_of(it)} is also In review; merge it too before picking new work.')
         return
 
     # epic completion map: (spec_id, epic_id) -> [statuses of its tasks]

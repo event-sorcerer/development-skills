@@ -156,8 +156,9 @@ rm -rf "$T"
 
 echo "== docs-with-behavior: WAIT protocol documented (review round 1 MUST FIX #2) =="
 BUILD_NEXT_SKILL="$(cat "$PLUGIN/skills/build-next/SKILL.md")"
+# shellcheck disable=SC2016  # literal backticked markdown text being asserted against, not a shell expansion
 check "build-next SKILL.md Operating Rule 1 adds WAIT to the decision vocabulary" '`PICK` / `RESUME` / `WAIT` / `BLOCKED` / `PREFLIGHT FAIL` lines are decisions already made' "$BUILD_NEXT_SKILL"
 NEXT_TASK_SKILL="$(cat "$PLUGIN/skills/next-task/SKILL.md")"
-check "next-task SKILL.md documents WAIT" "=> WAIT:" "$NEXT_TASK_SKILL"
+check "next-task SKILL.md documents WAIT" "WAIT: serial delivery" "$NEXT_TASK_SKILL"
 check "next-task SKILL.md's WAIT protocol checks the named PR's merge state" "gh pr view" "$NEXT_TASK_SKILL"
 check "next-task SKILL.md's WAIT protocol: a merged PR moves the item to QA and re-runs next" "QA" "$NEXT_TASK_SKILL"

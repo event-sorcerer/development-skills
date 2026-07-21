@@ -38,6 +38,8 @@
 # hatch for an intentional manual override).
 set -uo pipefail
 
+# shellcheck disable=SC2016  # this is Python source in single quotes, not a
+# shell expansion.
 RESULT="$(python3 -c '
 import json, re, shlex, sys
 
@@ -58,56 +60,73 @@ def is_c_flag(tok):
         and "c" in tok[1:]
     )
 
+# #272 review round 1 MUST FIX #3: evaluate() used to return on the FIRST
+# board.sh match found, so a compound command whose first segment was a
+# review-move (e.g. `move 5 "In review" && move 7 "In progress"`) never even
+# looked at the second segment -- an unrelated review-move earlier on the
+# line silently shadowed the progress-move check for its own serial-delivery status.
+# Collect EVERY match instead (review-move can repeat, progress-move can
+# repeat with different issue numbers) and let the caller act on all of
+# them. "unparseable" still short-circuits immediately -- if any part of the
+# command cannot be proven safe, nothing else about it can be trusted either.
 def evaluate(command, depth):
     if depth > MAX_DEPTH:
-        return "unparseable"
+        return ["unparseable"]
     try:
         tokens = shlex.split(command, posix=True)
     except ValueError:
         if "board.sh" in command and "move" in command:
-            return "unparseable"
-        return "allow"
+            return ["unparseable"]
+        return []
 
+    results = []
     i, n = 0, len(tokens)
     while i < n:
         base = tokens[i].rsplit("/", 1)[-1]
         if base in INTERPRETERS and i + 2 < n and is_c_flag(tokens[i + 1]):
-            result = evaluate(tokens[i + 2], depth + 1)
-            if result != "allow":
-                return result
+            sub = evaluate(tokens[i + 2], depth + 1)
+            if "unparseable" in sub:
+                return ["unparseable"]
+            results.extend(sub)
             i += 3
             continue
         if base == "board.sh" and i + 3 < n:
             subcmd, num, status = tokens[i + 1], tokens[i + 2], tokens[i + 3]
             if subcmd == "move" and norm(status) == REVIEW_STATUS:
-                return "review-move"
-            if subcmd == "move" and norm(status) == PROGRESS_STATUS:
-                return "progress-move:" + num
+                results.append("review-move")
+            elif subcmd == "move" and norm(status) == PROGRESS_STATUS:
+                results.append("progress-move:" + num)
         i += 1
-    return "allow"
+    return results
 
 try:
     command = json.load(sys.stdin).get("tool_input", {}).get("command", "")
 except Exception:
     command = ""
 
-print(evaluate(command, 0))
+matches = evaluate(command, 0)
+if "unparseable" in matches:
+    print("unparseable")
+elif matches:
+    for m in matches:
+        print(m)
+else:
+    print("allow")
 ' 2>/dev/null)" || exit 0
 
-case "$RESULT" in
-    allow) exit 0 ;;
-    unparseable)
-        echo "BLOCKED: could not safely parse this command to confirm it isn't a move to 'In review'. Simplify it (avoid nesting board.sh inside quotes/heredocs) and retry." >&2
-        exit 2
-        ;;
-esac
+if [[ -z "$RESULT" || "$RESULT" == "allow" ]]; then
+    exit 0
+fi
+if [[ "$RESULT" == "unparseable" ]]; then
+    echo "BLOCKED: could not safely parse this command to confirm it isn't a move to 'In review'. Simplify it (avoid nesting board.sh inside quotes/heredocs) and retry." >&2
+    exit 2
+fi
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
-if [[ "$RESULT" == progress-move:* ]]; then
-    NUM="${RESULT#progress-move:}"
-    ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-    SERIAL="$(PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}" python3 -c '
+_serial_check() { # $1=issue-number-being-moved to "In progress" -> "allow"/"override"/"fail-open"/"block:..."
+    PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}" python3 -c '
 import json, os, sys
 import config as C
 
@@ -141,26 +160,43 @@ if blockers:
     print("block:" + ";".join(f"#{n} is {s}" for n, s in blockers))
 else:
     print("allow")
-' "$ROOT" "$NUM" 2>/dev/null)" || SERIAL="fail-open"
+' "$ROOT" "$1" 2>/dev/null
+}
 
-    case "$SERIAL" in
-        allow|override) exit 0 ;;
-        fail-open)
-            echo "WARNING: serialDelivery is on but .claude/board-cache.json is missing/unreadable -- cannot confirm no other task is In progress/In review. Allowing the move (fail-open: an offline-cache problem must never wedge the loop)." >&2
-            exit 0
+# Every match found anywhere in the (possibly compound) command is evaluated
+# on its own merits: EACH progress-move gets its own serial check (a block
+# on any one of them blocks the whole command), and a review-move anywhere
+# on the line still routes through gate-preflight below.
+HAS_REVIEW=0
+while IFS= read -r LINE; do
+    case "$LINE" in
+        review-move)
+            HAS_REVIEW=1
             ;;
-        block:*)
-            echo "BLOCKED: serial delivery mode (methodology.serialDelivery) — ${SERIAL#block:} — merge it before moving #$NUM to In progress. Override with SERIAL_DELIVERY_OVERRIDE=1 if this is intentional." >&2
-            exit 2
+        progress-move:*)
+            NUM="${LINE#progress-move:}"
+            SERIAL="$(_serial_check "$NUM")" || SERIAL="fail-open"
+            case "$SERIAL" in
+                allow|override) ;;
+                fail-open)
+                    echo "WARNING: serialDelivery is on but .claude/board-cache.json is missing/unreadable -- cannot confirm no other task is In progress/In review. Allowing the move (fail-open: an offline-cache problem must never wedge the loop)." >&2
+                    ;;
+                block:*)
+                    echo "BLOCKED: serial delivery mode (methodology.serialDelivery) — ${SERIAL#block:} — merge it before moving #$NUM to In progress. Override with SERIAL_DELIVERY_OVERRIDE=1 if this is intentional." >&2
+                    exit 2
+                    ;;
+            esac
             ;;
-        *)
-            exit 0 ;;
     esac
+done <<<"$RESULT"
+
+if [[ "$HAS_REVIEW" -eq 1 ]]; then
+    # CDX-030: delegate to the shared, hook-independent preflight -- single
+    # source of truth for "is the gate green for this tree" (docs/design/cdx-E3.md
+    # Decisions). Defense in depth: this hook still intercepts before board.sh
+    # even starts, but the actual marker+fingerprint check lives in one place.
+    bash "$HERE/gate-preflight.sh"
+    exit $?
 fi
 
-# CDX-030: delegate to the shared, hook-independent preflight -- single
-# source of truth for "is the gate green for this tree" (docs/design/cdx-E3.md
-# Decisions). Defense in depth: this hook still intercepts before board.sh
-# even starts, but the actual marker+fingerprint check lives in one place.
-bash "$HERE/gate-preflight.sh"
-exit $?
+exit 0
