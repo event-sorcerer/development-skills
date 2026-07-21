@@ -23,6 +23,25 @@
   --amber:#ffb347; --slate:#8fa6bd;
   --fg:#dff2fb; --muted:#a9c6d8;
   --mono:"SFMono-Regular",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+  /* right column quarter: the right sidebar area (below the 70px top chrome,
+     14px bottom margin) splits 1/4 voice · 2/4 note inspect · 1/4 log */
+  --colq:calc((100vh - 100px)/4);
+  /* one uniform sidebar width — the note inspect panel's width is the base;
+     every sidebar panel (left BRAINS, filters, talk, voice, inspect, log)
+     uses it so the columns read as one aligned system */
+  --colw:min(340px,42vw);
+  /* voice panel runs slimmer than a full quarter (33% shorter); the note
+     inspect panel absorbs the freed space. --voice-below is the panel's LIVE
+     footprint (height + gap) kept current by applyUiState — it shrinks to the
+     bare header when the section is folded and to 0 when collapsed away, so
+     the note/settings panels below always reclaim the space */
+  --voiceh:calc(var(--colq)*.67);
+  --voice-below:calc(var(--voiceh) + 12px);
+  /* --log-space mirrors --voice-below for the BOTTOM of the column: the room
+     reserved for the activation log (height + gap), live-updated by
+     applyUiState — 0 when the log is collapsed away, header-only when folded,
+     so the note/settings panels grow into whatever the log isn't using */
+  --log-space:calc(var(--colq) + 12px);
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
@@ -96,8 +115,8 @@ canvas.grabbing{cursor:grabbing}
 #search-filters-btn{display:inline-flex;align-items:center;justify-content:center;border:0;background:none}
 #search-filters-wrap{position:relative}
 /* position:fixed, anchored at the SAME top-left corner as #gauges (the left
-   BRAINS sidebar: top:70px;left:14px;width:296px) and sized to match it
-   (slightly wider) — while filters are open they replace that sidebar in
+   BRAINS sidebar: top:70px;left:14px;width:var(--colw)) and identically
+   sized — while filters are open they replace that sidebar in
    place rather than float off elsewhere as a separate, disconnected panel.
    HEIGHT (not just max-height): the panel's content is often shorter than
    #gauges (e.g. no brain has a schema selected yet, so no Filters section),
@@ -106,7 +125,7 @@ canvas.grabbing{cursor:grabbing}
    multi-column content (BRAINS/FILTERS groups) auto-collapses to one column
    at this width since column-width:150px can't fit a second one. */
 #search-filters-panel{position:fixed;top:70px;left:14px;
-  width:320px;height:calc(100vh - 100px);overflow-y:scroll;padding:.65rem .75rem;display:none;
+  width:var(--colw);height:calc(100vh - 100px);overflow-y:scroll;padding:.65rem .75rem;display:none;
   flex-direction:column;gap:.6rem;z-index:60;background:var(--panel-solid);backdrop-filter:none;
   -webkit-backdrop-filter:none;scrollbar-gutter:stable;
   scrollbar-width:thin;scrollbar-color:rgba(90,190,255,.4) rgba(255,255,255,.05)}
@@ -270,7 +289,7 @@ canvas.grabbing{cursor:grabbing}
 #settings-panel .hint{font-size:.58rem;color:var(--muted);line-height:1.4}
 
 /* Talk panel (left bar → deep-link a new session, see docs.claude.com/en/deep-links) */
-.hud#talk-panel{top:70px;left:324px;width:320px;max-height:calc(100vh - 100px);overflow:auto;
+.hud#talk-panel{top:70px;left:calc(28px + var(--colw));width:var(--colw);max-height:calc(100vh - 100px);overflow:auto;
   padding:.75rem .85rem;display:none;flex-direction:column;gap:.55rem;z-index:60;
   background:var(--panel-solid);backdrop-filter:none;-webkit-backdrop-filter:none}
 .hud#talk-panel.open{display:flex}
@@ -298,7 +317,7 @@ canvas.grabbing{cursor:grabbing}
 #talk-panel .hint{font-size:.58rem;color:var(--muted);line-height:1.4}
 
 /* gauges (top-left, below topbar) */
-#gauges{top:70px;left:14px;width:296px;max-height:calc(100vh - 130px);overflow:auto;
+#gauges{top:70px;left:14px;width:var(--colw);max-height:calc(100vh - 130px);overflow:auto;
   padding:.7rem 1rem;transition:transform .25s ease,opacity .25s ease}
 #gauges.collapsed{transform:translateX(calc(-100% - 24px));opacity:0;pointer-events:none}
 #gauges-head{display:flex;justify-content:space-between;align-items:center;gap:.5rem;margin-bottom:.5rem}
@@ -362,11 +381,14 @@ canvas.grabbing{cursor:grabbing}
 .tt-loop{color:var(--amber)}
 
 /* ticker (bottom) */
-/* activation log — right sidebar, mirroring the left panel's collapse UX */
-#rightbar{top:70px;right:14px;width:300px;max-height:calc(100vh - 100px);overflow:auto;
+/* activation log — bottom quarter of the right column, mirroring the left
+   panel's collapse UX. Always fills its quarter; folding the section (▸)
+   shrinks it to the bare header. */
+#rightbar{bottom:16px;right:14px;width:var(--colw);height:var(--colq);overflow:auto;
   padding:.7rem 1rem;transition:transform .25s ease,opacity .25s ease;
   scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:rgba(90,190,255,.4) rgba(255,255,255,.05)}
 #rightbar.collapsed{transform:translateX(calc(100% + 24px));opacity:0;pointer-events:none}
+#rightbar.folded{height:auto}
 /* explicit (non-overlay) scrollbar, same convention as #search-filters-panel/
    #search-results-list — a bare overflow:auto defers to the OS's auto-hide
    overlay scrollbar (invisible until you scroll on macOS), which read as "no
@@ -378,12 +400,66 @@ canvas.grabbing{cursor:grabbing}
 /* sticky header: pulled flush to the scrolling container's edges via negative
    margins that cancel #rightbar's own padding, then re-padded internally so
    it still lines up with the log entries below once scrolled under it. */
-#rightbar-head{position:sticky;top:0;z-index:2;background:var(--panel-solid);
+#rightbar-head{position:sticky;top:0;z-index:2;background:var(--panel);
+  backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);
   display:flex;justify-content:space-between;align-items:center;gap:.5rem;
   margin:-.7rem -1rem 0;padding:.7rem 1rem .5rem}
-#rightbar-tab{position:fixed;top:70px;right:0;z-index:20;border-right:0;border-radius:8px 0 0 8px;
+#rightbar-tab{position:fixed;bottom:16px;right:0;z-index:20;border-right:0;border-radius:8px 0 0 8px;
   padding:.55rem .4rem;cursor:pointer;color:var(--muted);font-family:var(--mono);font-size:.8rem}
 #rightbar-tab:hover{color:var(--cyan)}
+
+/* voice visualizer — top quarter of the right column. Same collapse UX as the
+   log (edge tab restores); the IN/OUT segmented toggle picks the direction the
+   visualizer represents (outbound TTS is the default). The body is a stub
+   until the visualizer style is decided (iterative UI round in flight). */
+#voicebar{top:70px;right:14px;width:var(--colw);height:var(--voiceh);display:flex;flex-direction:column;
+  padding:.7rem 1rem;transition:transform .25s ease,opacity .25s ease}
+#voicebar.collapsed{transform:translateX(calc(100% + 24px));opacity:0;pointer-events:none}
+#voicebar-head{display:flex;justify-content:space-between;align-items:center;gap:.5rem}
+#voicebar-tab{position:fixed;top:70px;right:0;z-index:20;border-right:0;border-radius:8px 0 0 8px;
+  padding:.55rem .4rem;cursor:pointer;color:var(--muted);font-family:var(--mono);font-size:.8rem}
+#voicebar-tab:hover{color:var(--cyan)}
+#voice-dir{display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+#voice-dir .iconbtn{border:0;border-radius:0;font-size:.62rem;letter-spacing:.12em;padding:.3rem .5rem}
+/* direction colors: OUT keeps the HUD cyan, IN is amber, BOTH neutral-bright —
+   applied both to the header toggle and its settings-panel duplicate */
+#voice-dir .iconbtn.on-in,#voice-settings-panel .iconbtn.on-in{
+  color:var(--amber);border-color:rgba(255,179,71,.5);background:rgba(255,179,71,.12)}
+#voice-dir .iconbtn.on-out,#voice-settings-panel .iconbtn.on-out{
+  color:var(--cyan);border-color:var(--cyan-dim);background:rgba(70,230,255,.1)}
+#voice-dir .iconbtn.on-both,#voice-settings-panel .iconbtn.on-both{
+  color:var(--fg);border-color:rgba(144,200,255,.5);background:rgba(144,200,255,.14)}
+#voice-viz{flex:1;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+/* the explicit display:flex above would defeat the hidden attribute the
+   section fold sets — restate it; .folded lets the panel shrink to its head */
+#voice-viz[hidden]{display:none}
+#voicebar.folded{height:auto}
+#voice-viz canvas{position:absolute;inset:0;width:100%;height:100%}
+#voice-viz-status{position:relative;font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:var(--amber)}
+/* cog rides directly right of the VOICE heading, sized as a real target */
+#voice-settings{font-size:1rem;line-height:1;padding:.25rem .5rem}
+/* mic-mode dot: press-to-speak = dark red with a slash; always-on = solid red;
+   .talking (Space held / mic hot) lights it regardless of mode */
+#voice-mic{display:inline-flex;align-items:center;justify-content:center}
+#voice-mic .micdot{position:relative;width:9px;height:9px;border-radius:50%;background:#7a2a24;display:block}
+#voice-mic.ptt .micdot::after{content:"";position:absolute;left:-2px;right:-2px;top:50%;height:1.5px;
+  background:#c96a5e;transform:rotate(-45deg)}
+#voice-mic.always .micdot,#voice-mic.talking .micdot{background:#e0453a;box-shadow:0 0 8px rgba(224,69,58,.7)}
+#voice-mic.talking .micdot::after{display:none}
+/* voice settings context panel (cog) — REPLACES the note preview slot: same
+   geometry as #inspect, one z above it; opening it closes the note card.
+   The two settings here duplicate the header controls on purpose — shown in
+   detail, and this panel is where future voice settings accumulate. */
+#voice-settings-panel{position:fixed;top:calc(70px + var(--voice-below));right:14px;width:var(--colw);
+  max-height:calc(100vh - 86px - var(--voice-below) - var(--log-space));overflow:auto;z-index:66;padding:.8rem .9rem;display:none;
+  flex-direction:column;gap:.65rem}
+#voice-settings-panel.open{display:flex}
+#voice-settings-panel .vs-row{display:flex;flex-direction:column;gap:.3rem}
+#voice-settings-panel .vs-opts{display:flex;gap:.3rem;flex-wrap:wrap}
+#voice-settings-panel .vs-hint{font-size:.58rem;color:var(--muted);line-height:1.4}
+#voice-settings-panel .vs-line{display:flex;justify-content:space-between;align-items:baseline;gap:.5rem}
+#voice-settings-panel .vs-val{font-size:.6rem;color:var(--cyan)}
+#voice-settings-panel input[type=range]{width:100%;accent-color:var(--cyan);background:transparent;margin:.1rem 0}
 #tickerlog{font-size:.62rem;line-height:1.5;color:var(--slate)}
 #tickerlog .ev{padding:.28rem 0;border-top:1px solid rgba(90,190,255,.1)}
 #tickerlog .ev:first-child{border-top:0}
@@ -399,21 +475,57 @@ canvas.grabbing{cursor:grabbing}
 #tickerlog .t{color:#7c92a6}
 
 /* inspect panel (right) */
-#inspect{top:70px;right:14px;width:min(340px,42vw);max-height:calc(100vh - 150px);z-index:65;   /* above #search-filters-panel (60) too — the card detail sidebar always wins */
+#inspect{top:calc(70px + var(--voice-below));right:14px;width:var(--colw);
+  max-height:calc(100vh - 86px - var(--voice-below) - var(--log-space));z-index:65;   /* middle 2/4 of the right column, below #voicebar; above #search-filters-panel (60) too — the card detail sidebar always wins */
   overflow:auto;padding:.9rem 1rem;transform:translateX(120%);transition:transform .25s ease;
   opacity:0}
 #inspect.open{transform:none;opacity:1}
 /* user-dragged position: left/top set inline; the docked slide-in animation
    is relative to the docked spot, so fall back to a small fade instead.
    .dragging suspends the transition so the panel tracks the pointer 1:1. */
-#inspect.custom{right:auto}
-#inspect.custom:not(.open){transform:translateY(-8px)}
-#inspect.dragging{transition:none;user-select:none}
-#inspect .close{float:right;cursor:pointer;color:var(--muted);border:0;background:none;font-size:1rem;font-family:var(--mono)}
-#inspect .close.grip{cursor:grab;touch-action:none}
-#inspect.dragging .close.grip{cursor:grabbing}
-#inspect h3{margin:.1rem 0 .1rem;font-size:.9rem;color:var(--cyan);letter-spacing:.04em;word-break:break-word}
-#inspect .role{font-size:.6rem;letter-spacing:.22em;text-transform:uppercase;color:var(--muted)}
+#inspect .close,.note-window .close{float:right;cursor:pointer;color:var(--muted);border:0;background:none;font-size:1rem;font-family:var(--mono)}
+/* pin: dimmed/grayscale until active (emoji glyph ignores color) */
+#inspect-pin{filter:grayscale(1);opacity:.55;font-size:.85rem}
+#inspect-pin.on{filter:none;opacity:1}
+#inspect .close.grip,.note-window .close.grip{cursor:grab;touch-action:none}
+#inspect h3,.note-window h3{margin:.1rem 0 .1rem;font-size:.9rem;color:var(--cyan);letter-spacing:.04em;word-break:break-word}
+#inspect .role,.note-window .role{font-size:.6rem;letter-spacing:.22em;text-transform:uppercase;color:var(--muted)}
+/* detached note windows: dragging the docked note's grip (⠿) UNLINKS it from
+   the sidebar into its own fixed, resizable window — the sidebar slot frees
+   up, so any number of notes can stay on screen. ⌖ re-attaches the window's
+   note to the sidebar (replacing whatever note it shows), ✕ just closes it.
+   Window content is a snapshot; wikilinks inside open in the sidebar. */
+.note-window{position:fixed;z-index:70;width:var(--colw);max-height:70vh;overflow:auto;
+  padding:.9rem 1rem;resize:both;min-width:250px;min-height:150px}
+.note-window.dragging{user-select:none}
+.note-window.dragging .close.grip{cursor:grabbing}
+.note-window [data-drag]{cursor:grab}
+.note-window.dragging [data-drag]{cursor:grabbing}
+/* media viewer window: opened by clicking an inline note image — same
+   detached-window chrome plus New tab / Download / fullscreen actions;
+   ⛶ fullscreens the window itself (element fullscreen, stays in the page) */
+.media-window{width:min(560px,60vw);max-height:80vh}
+.media-window .mw-bar{display:flex;align-items:center;gap:.4rem;margin:.1rem 0 .55rem}
+.media-window .mw-bar .iconbtn{font-size:.62rem;letter-spacing:.06em;padding:.25rem .5rem}
+/* all controls live IN the bar: neutralize .close's float so ✕/⠿ sit on the
+   same flex baseline as the New tab / Download / ⛶ buttons */
+.media-window .mw-bar .close{float:none;display:inline-flex;align-items:center;justify-content:center;
+  min-width:24px;min-height:24px;padding:0 .2rem}
+.media-window .mw-name{font-size:.6rem;color:var(--muted);letter-spacing:.08em;flex:1;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.media-window .mw-img{max-width:100%;border-radius:8px;display:block;margin:0 auto}
+/* New tab / Download live INSIDE the image, top right, revealed only while
+   hovering that corner region (top ~35% × right ~50% of the image) */
+.media-window .mw-imgwrap{position:relative}
+.media-window .mw-zone{position:absolute;top:0;right:0;width:50%;height:35%;
+  display:flex;justify-content:flex-end;align-items:flex-start;padding:.45rem}
+.media-window .mw-actions{display:flex;gap:.3rem;opacity:0;transition:opacity .15s ease}
+.media-window .mw-zone:hover .mw-actions{opacity:1}
+.media-window .mw-actions .iconbtn{background:rgba(10,20,34,.85);font-size:.56rem;padding:.2rem .4rem}
+.media-window:fullscreen{display:flex;flex-direction:column;background:var(--bg);
+  border:0;border-radius:0;max-height:none;resize:none;padding:1rem 1.2rem}
+.media-window:fullscreen .mw-imgwrap{flex:1;min-height:0;display:flex;flex-direction:column}
+.media-window:fullscreen .mw-img{flex:1;min-height:0;object-fit:contain;max-height:calc(100vh - 80px)}
 .chips{display:flex;flex-wrap:wrap;gap:.3rem;margin:.6rem 0}
 .chip{font-size:.6rem;padding:.15rem .5rem;border:1px solid var(--border);border-radius:999px;color:var(--muted);letter-spacing:.06em}
 .chip.on{color:var(--amber);border-color:rgba(255,179,71,.5)}
@@ -423,6 +535,15 @@ canvas.grabbing{cursor:grabbing}
 #body code{background:rgba(70,230,255,.1);padding:.05rem .3rem;border-radius:4px;font-size:.74rem}
 #body a.wl{color:var(--cyan);text-decoration:none;border-bottom:1px dotted var(--cyan-dim)}
 #body ul{margin:.3rem 0;padding-left:1.1rem}
+/* note media (#289): images/videos inline, file links amber, 3D blocks */
+#body img.nm{max-width:100%;border-radius:8px;display:block;margin:.4rem 0;cursor:zoom-in}
+#body video.nm{max-width:100%;border-radius:8px;display:block;margin:.4rem 0}
+#body a.fl{color:var(--amber);text-decoration:none;border-bottom:1px dotted rgba(255,179,71,.5)}
+#body a.ext{color:var(--cyan)}
+.n3d{position:relative;margin:.4rem 0;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:rgba(4,7,13,.5)}
+.n3d canvas{display:block;width:100%;height:190px}
+.n3d .n3d-label{position:absolute;left:.5rem;top:.35rem;font-size:.56rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted);pointer-events:none}
 #links{margin-top:.6rem;font-size:.66rem;color:var(--muted)}
 #links .ln{display:flex;justify-content:space-between;gap:.5rem;padding:.15rem 0}
 #links .ln b{color:var(--fg);font-weight:500}
@@ -596,6 +717,86 @@ canvas.grabbing{cursor:grabbing}
     Enter in that session.</div>
 </div>
 
+<div class="hud" id="voicebar">
+  <div id="voicebar-head">
+    <div style="display:flex;align-items:center;gap:.35rem">
+      <button class="secthead" id="sect-voice" aria-expanded="true">Voice</button>
+      <button class="iconbtn" id="voice-settings" title="Voice settings" aria-label="Voice settings" aria-expanded="false">⚙</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:.3rem">
+      <button class="iconbtn" id="voice-mic" aria-pressed="false"
+        aria-label="Microphone mode: press to speak — click for always on"
+        title="Press to speak (hold Space) — click for mic always on"><span class="micdot"></span></button>
+      <span id="voice-dir" role="group" aria-label="Voice direction">
+        <button class="iconbtn" id="voice-in" aria-pressed="false" title="Inbound — microphone">IN</button>
+        <button class="iconbtn" id="voice-out" aria-pressed="true" title="Outbound — speech synthesis">OUT</button>
+        <button class="iconbtn" id="voice-both" aria-pressed="false" title="Both directions">BOTH</button>
+      </span>
+      <button class="iconbtn" id="voicebar-collapse" title="Hide voice" aria-label="Hide voice">⟩</button>
+    </div>
+  </div>
+  <div id="voice-viz"><canvas id="voice-viz-canvas"></canvas><span id="voice-viz-status" hidden></span></div>
+</div>
+<button class="hud" id="voicebar-tab" title="Show voice" aria-label="Show voice" hidden>⟨</button>
+
+<div class="hud" id="voice-settings-panel" role="dialog" aria-label="Voice settings">
+  <div class="label">Voice settings</div>
+  <div class="vs-row"><span class="label">Direction</span>
+    <div class="vs-opts" role="group" aria-label="Direction, in detail">
+      <button class="iconbtn" id="vs-dir-in" aria-pressed="false">IN — microphone</button>
+      <button class="iconbtn" id="vs-dir-out" aria-pressed="false">OUT — speech</button>
+      <button class="iconbtn" id="vs-dir-both" aria-pressed="false">BOTH</button>
+    </div>
+    <div class="vs-hint">What the visualizer represents: the inbound microphone, outbound speech synthesis, or both at once. Same control as the header toggle.</div>
+  </div>
+  <div class="vs-row"><span class="label">Microphone</span>
+    <div class="vs-opts" role="group" aria-label="Microphone mode">
+      <button class="iconbtn" id="vs-mic-ptt" aria-pressed="false">Press to speak</button>
+      <button class="iconbtn" id="vs-mic-always" aria-pressed="false">Mic always on</button>
+    </div>
+    <div class="vs-hint">Press to speak: hold Space in the 3D view to keep the mic open. Always on: the mic stays live whenever inbound is shown. Shift+Space toggles between the two. Same control as the red dot in the header.</div>
+  </div>
+  <div class="vs-row"><span class="label">Echo guard</span>
+    <div class="vs-opts" role="group" aria-label="Echo guard">
+      <button class="iconbtn" id="vs-echo-on" aria-pressed="false">Duck mic while speaking</button>
+      <button class="iconbtn" id="vs-echo-off" aria-pressed="false">Off</button>
+    </div>
+    <div class="vs-hint">Mutes the inbound bars while speech output is playing, so the notebook speaker doesn't feed back into the mic (on top of the stream's echo cancellation).</div>
+  </div>
+  <div class="vs-row">
+    <div class="vs-line"><span class="label">Noise suppression</span><span class="vs-val" id="vs-gate-val"></span></div>
+    <input type="range" id="vs-gate" min="0" max="80" step="1" aria-label="Noise suppression threshold">
+    <div class="vs-hint">Mic energy at or below this floor reads as silence — raise it until idle room noise stops moving the bars, without clipping soft speech.</div>
+  </div>
+  <div class="vs-row">
+    <div class="vs-line"><span class="label">Shimmer</span><span class="vs-val" id="vs-shimmer-val"></span></div>
+    <input type="range" id="vs-shimmer" min="0" max="2" step="0.05" aria-label="Shimmer randomness power">
+    <div class="vs-hint">Power of the per-column randomness riding on the bars. 0% = raw spectrum only.</div>
+  </div>
+  <div class="vs-row">
+    <div class="vs-line"><span class="label">Inbound feedback</span><span class="vs-val" id="vs-gain-in-val"></span></div>
+    <input type="range" id="vs-gain-in" min="0.25" max="3" step="0.05" aria-label="Inbound feedback gain">
+    <div class="vs-hint">How strongly the microphone drives the amber bars.</div>
+  </div>
+  <div class="vs-row">
+    <div class="vs-line"><span class="label">Outbound feedback</span><span class="vs-val" id="vs-gain-out-val"></span></div>
+    <input type="range" id="vs-gain-out" min="0.25" max="3" step="0.05" aria-label="Outbound feedback gain">
+    <div class="vs-hint">How strongly speech output drives the cyan bars.</div>
+  </div>
+  <div class="vs-row"><span class="label">Speech test</span>
+    <div class="vs-opts">
+      <button class="iconbtn" id="vs-say-1">“Neural view online”</button>
+      <button class="iconbtn" id="vs-say-2">“Recall complete”</button>
+      <button class="iconbtn" id="vs-say-3">“All brains nominal”</button>
+    </div>
+    <div class="vs-hint">Speaks the phrase through the active outbound adapter (native system voice) and drives the visualizer's outbound half.</div>
+  </div>
+  <div class="vs-row">
+    <button class="iconbtn" id="vs-reset" aria-live="polite">Reset settings</button>
+    <div class="vs-hint">Back to defaults: direction OUT, press to speak, echo guard on, suppression/shimmer/gains at stock. Asks to confirm first.</div>
+  </div>
+</div>
+
 <div class="hud" id="rightbar">
   <div id="rightbar-head">
     <button class="secthead" id="sect-log" aria-expanded="true">Activation log</button>
@@ -610,8 +811,9 @@ canvas.grabbing{cursor:grabbing}
 
 <aside class="hud" id="inspect" aria-hidden="true" inert>
   <button class="close" id="inspect-close" aria-label="Close note">✕</button>
-  <button class="close" id="inspect-reset" title="Reset panel position" aria-label="Reset panel position" hidden>⌖</button>
-  <button class="close grip" id="inspect-grip" title="Drag to move panel" aria-label="Drag to move panel">⠿</button>
+  <button class="close grip" id="inspect-grip" title="Drag to detach into its own window" aria-label="Drag to detach into its own window">⠿</button>
+  <button class="close" id="inspect-locate" title="Fly to this note in the 3D view" aria-label="Fly to this note in the 3D view">◎</button>
+  <button class="close" id="inspect-pin" title="Pin — while pinned, new notes open as detached windows instead of replacing this one" aria-label="Pin sidebar note" aria-pressed="false">📌</button>
   <div class="role" id="i-role"></div>
   <h3 id="i-title"></h3>
   <div class="chips" id="i-chips"></div>
@@ -2869,9 +3071,23 @@ function saveUiState(){ try{ localStorage.setItem(UI_KEY, JSON.stringify(uiState
 function applyUiState(){
   gaugesEl.classList.toggle("collapsed", !!uiState.panel);
   gaugesTab.hidden = !uiState.panel;
-  document.getElementById("rightbar").classList.toggle("collapsed", !!uiState.rpanel);
+  const rbar = document.getElementById("rightbar");
+  rbar.classList.toggle("collapsed", !!uiState.rpanel);
+  rbar.classList.toggle("folded", !!uiState.log);
   document.getElementById("rightbar-tab").hidden = !uiState.rpanel;
-  for(const [sect, bodyId] of [["brains","gauge-list"], ["boards","project-list"], ["log","tickerlog"]]){
+  // reserve only the space the log actually occupies (see --log-space)
+  document.documentElement.style.setProperty("--log-space",
+    uiState.rpanel ? "0px" : (rbar.offsetHeight + 12) + "px");
+  const vbar = document.getElementById("voicebar");
+  vbar.classList.toggle("collapsed", !!uiState.vpanel);
+  vbar.classList.toggle("folded", !!uiState.voice);
+  document.getElementById("voicebar-tab").hidden = !uiState.vpanel;
+  // publish the voice panel's live footprint so the note/settings panels
+  // below start right under it — whether full, folded to its header, or gone
+  document.documentElement.style.setProperty("--voice-below",
+    uiState.vpanel ? "0px" : (vbar.offsetHeight + 12) + "px");
+  applyVoiceState();
+  for(const [sect, bodyId] of [["brains","gauge-list"], ["boards","project-list"], ["log","tickerlog"], ["voice","voice-viz"]]){
     document.getElementById("sect-"+sect).setAttribute("aria-expanded", uiState[sect] ? "false" : "true");
     document.getElementById(bodyId).hidden = !!uiState[sect];
   }
@@ -2884,6 +3100,277 @@ gaugesTab.onclick = ()=>{ uiState.panel = false; saveUiState(); applyUiState(); 
 document.getElementById("rightbar-collapse").onclick = ()=>{ uiState.rpanel = true; saveUiState(); applyUiState(); };
 document.getElementById("rightbar-tab").onclick = ()=>{ uiState.rpanel = false; saveUiState(); applyUiState(); };
 document.getElementById("rightbar-clear").onclick = ()=>{ LOG.innerHTML = ""; };
+document.getElementById("sect-voice").onclick = ()=>{ uiState.voice = !uiState.voice; saveUiState(); applyUiState(); };
+document.getElementById("voicebar-collapse").onclick = ()=>{ uiState.vpanel = true; saveUiState(); applyUiState(); };
+document.getElementById("voicebar-tab").onclick = ()=>{ uiState.vpanel = false; saveUiState(); applyUiState(); };
+// voice state: direction (in/out/both, outbound default) + mic mode
+// (press-to-speak default / always-on). Both live in the header AND, in
+// detail, in the settings context panel — deliberately duplicated.
+function applyVoiceState(){
+  const vdir = ["in","out","both"].includes(uiState.vdir) ? uiState.vdir : "out";
+  for(const d of ["in","out","both"]){
+    for(const b of [document.getElementById("voice-"+d), document.getElementById("vs-dir-"+d)]){
+      b.classList.toggle("on-"+d, d===vdir);
+      b.setAttribute("aria-pressed", String(d===vdir));
+    }
+  }
+  const mic = uiState.micMode === "always" ? "always" : "ptt";
+  const micBtn = document.getElementById("voice-mic");
+  micBtn.classList.toggle("always", mic==="always");
+  micBtn.classList.toggle("ptt", mic==="ptt");
+  micBtn.setAttribute("aria-pressed", String(mic==="always"));
+  micBtn.title = mic==="always" ? "Mic always on — click for press to speak"
+                                : "Press to speak (hold Space) — click for mic always on";
+  for(const [id,m] of [["vs-mic-ptt","ptt"],["vs-mic-always","always"]]){
+    const b = document.getElementById(id);
+    b.classList.toggle("active", m===mic);
+    b.setAttribute("aria-pressed", String(m===mic));
+  }
+}
+for(const d of ["in","out","both"]){
+  const set = ()=>{ uiState.vdir = d; saveUiState(); applyUiState(); };
+  document.getElementById("voice-"+d).onclick = set;
+  document.getElementById("vs-dir-"+d).onclick = set;
+}
+document.getElementById("voice-mic").onclick = ()=>{ uiState.micMode = uiState.micMode==="always" ? "ptt" : "always"; saveUiState(); applyUiState(); };
+document.getElementById("vs-mic-ptt").onclick = ()=>{ uiState.micMode = "ptt"; saveUiState(); applyUiState(); };
+document.getElementById("vs-mic-always").onclick = ()=>{ uiState.micMode = "always"; saveUiState(); applyUiState(); };
+// cog: the settings context panel REPLACES the note preview slot while open
+document.getElementById("voice-settings").onclick = ()=>{
+  const p = document.getElementById("voice-settings-panel");
+  const open = !p.classList.contains("open");
+  p.classList.toggle("open", open);
+  document.getElementById("voice-settings").setAttribute("aria-expanded", String(open));
+  if(open) document.getElementById("inspect-close").click();
+};
+// press-to-speak: holding Space in the 3D view keeps the mic open;
+// Shift+Space toggles between press-to-speak and mic-always-on
+window.voicePTT = false;
+addEventListener("keydown", ev=>{
+  if(ev.code!=="Space" || ev.repeat) return;
+  const t = ev.target;
+  if(t && (t.tagName==="INPUT" || t.tagName==="TEXTAREA" || t.tagName==="BUTTON" || t.isContentEditable)) return;
+  if(ev.shiftKey){
+    uiState.micMode = uiState.micMode==="always" ? "ptt" : "always";
+    saveUiState(); applyUiState();
+    return;
+  }
+  window.voicePTT = true;
+  document.getElementById("voice-mic").classList.add("talking");
+});
+addEventListener("keyup", ev=>{
+  if(ev.code!=="Space") return;
+  window.voicePTT = false;
+  document.getElementById("voice-mic").classList.remove("talking");
+});
+
+// ---- voice visualizer: Split Halves — outbound cyan grows up from the axis,
+// inbound amber grows down; a single direction fills the whole mirror in its
+// one color. Audio comes from PLUGGABLE sources: anything implementing
+// {start():Promise, stop(), getBins(Uint8Array)} can be swapped in via
+// window.neuralVoice.setSource("inbound"|"outbound", src). Defaults:
+// MicSource (Web Audio analyser over getUserMedia) and SpeechSynthSource
+// (native system TTS via speechSynthesis — the browser exposes no audio tap
+// for it, so bins carry a synthesized speech-like envelope while an
+// utterance is live; plug a capturable backend for real outbound spectra). ----
+// odd count: with center-out frequency mapping an even count has TWO center
+// columns sharing the lowest band (a visibly twinned pair when speaking)
+const VIZ_BARS = 25;
+class MicSource{
+  async start(){
+    if(this.analyser) return;
+    // echoCancellation is the first line of defense against the notebook
+    // speaker's TTS output re-entering through the mic (plus the half-duplex
+    // duck below, see echo guard)
+    this.stream = await navigator.mediaDevices.getUserMedia(
+      {audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true}});
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    this.ctx.createMediaStreamSource(this.stream).connect(
+      this.analyser = Object.assign(this.ctx.createAnalyser(), {fftSize:256, smoothingTimeConstant:.6}));
+    this.buf = new Uint8Array(this.analyser.frequencyBinCount);
+  }
+  stop(){
+    if(this.stream) this.stream.getTracks().forEach(t=>t.stop());
+    if(this.ctx) this.ctx.close();
+    this.stream = this.ctx = this.analyser = null;
+  }
+  getBins(out){
+    if(!this.analyser){ out.fill(0); return; }
+    this.analyser.getByteFrequencyData(this.buf);
+    // log-spaced bands over the voice range (skip DC, ignore the dead top
+    // half of the spectrum) with a rising tilt so the quieter high bands
+    // still register — linear mapping left the outer bars flat even when
+    // speaking loudly, since voice energy sits almost entirely down low
+    const lo = 1, hi = Math.floor(this.buf.length*.5);
+    const GATE = voiceTune().gate;   // noise gate: energy below it reads as silence
+    for(let i=0;i<out.length;i++){
+      const f0 = Math.floor(lo*Math.pow(hi/lo, i/out.length));
+      const f1 = Math.max(f0+1, Math.floor(lo*Math.pow(hi/lo, (i+1)/out.length)));
+      let s = 0;
+      for(let k=f0;k<f1;k++) s += this.buf[k];
+      const v = (s/(f1-f0)) * (1 + 1.6*i/out.length);
+      out[i] = v <= GATE ? 0 : Math.min(255, (v-GATE) * 255/(255-GATE));
+    }
+  }
+}
+class SpeechSynthSource{
+  constructor(){ this.speaking = false; this.t = 0; }
+  async start(){}
+  stop(){ speechSynthesis.cancel(); this.speaking = false; }
+  speak(text){
+    const u = new SpeechSynthesisUtterance(text);
+    u.onstart = ()=>{ this.speaking = true; };
+    u.onend = u.onerror = ()=>{ this.speaking = false; };
+    speechSynthesis.speak(u);
+  }
+  getBins(out){
+    if(!this.speaking){ out.fill(0); return; }
+    this.t += .16;
+    const level = .4 + .5*Math.abs(Math.sin(this.t*.9))*(.6+.4*Math.random());
+    for(let i=0;i<out.length;i++){
+      const falloff = Math.exp(-i/(out.length*.55));
+      out[i] = Math.max(0, Math.min(255, 255*level*falloff*(.6+.5*Math.abs(Math.sin(this.t*1.7+i*1.3)))));
+    }
+  }
+}
+const voiceSources = { inbound: new MicSource(), outbound: new SpeechSynthSource() };
+window.neuralVoice = {
+  setSource(dir, src){ const old = voiceSources[dir]; if(old && old.stop) old.stop(); voiceSources[dir] = src; },
+  speak(text){ const s = voiceSources.outbound; if(s && s.speak) s.speak(text); }
+};
+for(const [id, phrase] of [["vs-say-1","Neural view online"],["vs-say-2","Recall complete"],["vs-say-3","All brains nominal"]])
+  document.getElementById(id).onclick = ()=>window.neuralVoice.speak(phrase);
+
+// visualizer tuning — noise gate, shimmer power, in/out feedback gains;
+// persisted in uiState, edited via the sliders in the settings panel
+function voiceTune(){
+  return {
+    gate:    Number.isFinite(uiState.vGate)    ? uiState.vGate    : 34,
+    shimmer: Number.isFinite(uiState.vShimmer) ? uiState.vShimmer : 1,
+    gainIn:  Number.isFinite(uiState.vGainIn)  ? uiState.vGainIn  : 1,
+    gainOut: Number.isFinite(uiState.vGainOut) ? uiState.vGainOut : 1,
+  };
+}
+const TUNE_SLIDERS = [
+  ["vs-gate","vGate","gate", v=>String(Math.round(v))],
+  ["vs-shimmer","vShimmer","shimmer", v=>Math.round(v*100)+"%"],
+  ["vs-gain-in","vGainIn","gainIn", v=>"×"+v.toFixed(2)],
+  ["vs-gain-out","vGainOut","gainOut", v=>"×"+v.toFixed(2)],
+];
+function applyVoiceTuneUi(){
+  const t = voiceTune();
+  for(const [id, , key, fmt] of TUNE_SLIDERS){
+    document.getElementById(id).value = t[key];
+    document.getElementById(id+"-val").textContent = fmt(t[key]);
+  }
+}
+for(const [id, stateKey] of TUNE_SLIDERS)
+  document.getElementById(id).oninput = ev=>{ uiState[stateKey] = +ev.target.value; saveUiState(); applyVoiceTuneUi(); };
+// echo guard (default ON): duck the inbound bars while outbound speech plays
+function echoGuardOn(){ return uiState.vEchoGuard !== false; }
+function applyEchoUi(){
+  for(const [id, on] of [["vs-echo-on", true], ["vs-echo-off", false]]){
+    const b = document.getElementById(id);
+    b.classList.toggle("active", echoGuardOn()===on);
+    b.setAttribute("aria-pressed", String(echoGuardOn()===on));
+  }
+}
+document.getElementById("vs-echo-on").onclick = ()=>{ uiState.vEchoGuard = true; saveUiState(); applyEchoUi(); };
+document.getElementById("vs-echo-off").onclick = ()=>{ uiState.vEchoGuard = false; saveUiState(); applyEchoUi(); };
+applyVoiceTuneUi();
+applyEchoUi();
+// reset (two-step: click arms "Confirm?", second click within 4s resets)
+let resetArmed = null;
+const resetBtn = document.getElementById("vs-reset");
+resetBtn.onclick = ()=>{
+  if(resetArmed === null){
+    resetBtn.textContent = "Confirm?";
+    resetArmed = setTimeout(()=>{ resetArmed = null; resetBtn.textContent = "Reset settings"; }, 4000);
+    return;
+  }
+  clearTimeout(resetArmed); resetArmed = null;
+  resetBtn.textContent = "Reset settings";
+  for(const k of ["vdir","micMode","vEchoGuard","vGate","vShimmer","vGainIn","vGainOut"]) delete uiState[k];
+  saveUiState(); applyUiState(); applyVoiceTuneUi(); applyEchoUi();
+};
+
+const vizCanvas = document.getElementById("voice-viz-canvas");
+const vizCtx2d = vizCanvas.getContext("2d");
+const vizStatus = document.getElementById("voice-viz-status");
+const inBins = new Uint8Array(VIZ_BARS), outBins = new Uint8Array(VIZ_BARS);
+let micWanted = false, micBusy = false;
+function voiceDir(){ return ["in","out","both"].includes(uiState.vdir) ? uiState.vdir : "out"; }
+function micHot(){
+  if(voiceDir()==="out") return false;
+  return uiState.micMode==="always" || window.voicePTT;
+}
+async function syncMic(){
+  const want = micHot();
+  if(want === micWanted || micBusy) return;
+  micBusy = true;
+  try{
+    if(want) await voiceSources.inbound.start(); else voiceSources.inbound.stop();
+    micWanted = want;
+    vizStatus.hidden = true;
+  }catch(e){
+    vizStatus.textContent = "mic unavailable"; vizStatus.hidden = false;
+  }finally{ micBusy = false; }
+}
+function vbar(x, y, bw, bh, fill, glow){
+  vizCtx2d.fillStyle = fill; vizCtx2d.shadowColor = glow; vizCtx2d.shadowBlur = 6;
+  vizCtx2d.fillRect(x, y, bw, Math.max(2, bh));
+  vizCtx2d.shadowBlur = 0;
+}
+const VIZ_CYAN = ["#46e6ff","rgba(70,230,255,.5)"], VIZ_AMBER = ["#ffb347","rgba(255,179,71,.5)"];
+function drawViz(){
+  requestAnimationFrame(drawViz);
+  if(uiState.vpanel || uiState.voice) return;      // panel collapsed / section folded
+  const w = vizCanvas.clientWidth, h = vizCanvas.clientHeight;
+  if(!w || !h) return;
+  const dpr = devicePixelRatio || 1;
+  if(vizCanvas.width !== Math.round(w*dpr) || vizCanvas.height !== Math.round(h*dpr)){
+    vizCanvas.width = Math.round(w*dpr); vizCanvas.height = Math.round(h*dpr);
+  }
+  vizCtx2d.setTransform(dpr,0,0,dpr,0,0);
+  vizCtx2d.clearRect(0,0,w,h);
+  syncMic();
+  voiceSources.inbound.getBins(inBins);
+  voiceSources.outbound.getBins(outBins);
+  // echo guard: while the outbound adapter reports it is speaking, the
+  // inbound half goes quiet so speaker output can't masquerade as voice input
+  if(echoGuardOn() && voiceSources.outbound.speaking) inBins.fill(0);
+  const vdir = voiceDir(), mid = h/2, half = h*.44;
+  const gap = 3, bw = Math.max(2, (w - 28 - gap*(VIZ_BARS-1))/VIZ_BARS);
+  vizCtx2d.fillStyle = "rgba(90,190,255,.25)";
+  vizCtx2d.fillRect(10, mid-.5, w-20, 1);
+  for(let i=0;i<VIZ_BARS;i++){
+    const x = 14 + i*(bw+gap);
+    // center-out frequency mapping: the middle columns carry the low bands
+    // (where voice energy lives) and higher bands fan out toward both edges,
+    // so speech blooms from the center instead of piling up on the left
+    const b = Math.round(Math.abs(i-(VIZ_BARS-1)/2)/((VIZ_BARS-1)/2)*(VIZ_BARS-1));
+    // per-column shimmer: slow phase-offset wave + a pinch of noise so the
+    // two mirrored halves never read as perfectly rigid copies; its power
+    // (and the in/out gains) come from the settings-panel sliders
+    const t = voiceTune();
+    const sh = 1 - .2*t.shimmer + (.16*Math.sin(performance.now()*.006 + b*1.7) + .08*Math.random())*t.shimmer;
+    const inV = Math.min(255, inBins[b]*t.gainIn), outV = Math.min(255, outBins[b]*t.gainOut);
+    if(vdir==="out"){
+      const v = outV/255*half*sh;
+      vbar(x, mid-v, bw, v*2, ...VIZ_CYAN);
+    }else if(vdir==="in"){
+      const v = inV/255*half*sh;
+      vbar(x, mid-v, bw, v*2, ...VIZ_AMBER);
+    }else{
+      const up = outV/255*half*sh, dn = inV/255*half*sh;
+      // 1px standoff on each side of the axis: touching stubs blend their
+      // cyan/amber glows into a green-ish smear at idle
+      vbar(x, mid-1-Math.max(2,up), bw, up, ...VIZ_CYAN);
+      vbar(x, mid+1, bw, dn, ...VIZ_AMBER);
+    }
+  }
+}
+drawViz();
 applyUiState();
 
 // ---- search bar: wire the button/input/clear + the filters popover ----
@@ -3552,56 +4039,312 @@ document.getElementById("talk-copy").onclick = async ()=>{
 
 const panel=document.getElementById("inspect");
 document.getElementById("inspect-close").onclick=()=>{ panel.classList.remove("open"); panel.setAttribute("aria-hidden","true"); panel.setAttribute("inert",""); };
-// ---- draggable inspect panel (grip ⠿) with remembered position ----
-// uiState.inspectPos = {x, y} in px; absent = docked (top-right CSS default).
-// The reset button (⌖) only shows while a custom position is active.
-const inspectResetBtn = document.getElementById("inspect-reset");
-function applyInspectPos(){
-  const pos = uiState.inspectPos;
-  if(pos && Number.isFinite(pos.x) && Number.isFinite(pos.y)){
-    // clamp into the viewport so a stale position (smaller window, detached
-    // monitor) can never strand the panel off-screen.
-    const x = Math.min(Math.max(pos.x, 0), Math.max(0, innerWidth - 80));
-    const y = Math.min(Math.max(pos.y, 0), Math.max(0, innerHeight - 60));
-    panel.style.left = x + "px"; panel.style.top = y + "px";
-    panel.classList.add("custom"); inspectResetBtn.hidden = false;
+document.getElementById("inspect-locate").onclick=()=>{ if(panel.__nd) flyToNote(panel.__nd); };
+document.getElementById("inspect-pin").onclick=()=>{
+  panel.__pinned = !panel.__pinned;
+  const b = document.getElementById("inspect-pin");
+  b.classList.toggle("on", panel.__pinned);
+  b.setAttribute("aria-pressed", String(panel.__pinned));
+};
+
+// ---- note media (#289): resolve a note's markdown media against /file/ ----
+// Images/videos render inline; .glb/.gltf/.obj/.stl become live 3D viewers
+// (GLTF via the vendored loader, OBJ/STL via tiny hand parsers on core
+// three); other allowed files open raw in a new tab.
+const VID_EXT = /\.(mp4|webm|mov)$/i, GLTF_EXT = /\.(glb|gltf)$/i, MESH_EXT = /\.(obj|stl)$/i;
+function fileUrl(nd, rel){
+  return `/file/${encodeURIComponent(nd.repo)}/${encodeURIComponent(nd.role)}/`
+       + rel.split("/").map(encodeURIComponent).join("/");
+}
+function hydrateNoteMedia(scope, nd){
+  if(!nd) return;
+  scope.querySelectorAll("img.nm[data-src]").forEach(img=>{
+    const src = img.dataset.src;
+    img.src = /^https?:\/\//i.test(src) ? src : fileUrl(nd, src);
+    img.onclick = ()=>openMediaViewer(img.src, img.alt || mediaName(img.src));
+  });
+  scope.querySelectorAll("a.fl[data-href]").forEach(a=>{
+    const href = a.dataset.href, url = fileUrl(nd, href);
+    if(VID_EXT.test(href)){
+      const v = document.createElement("video");
+      v.className = "nm"; v.controls = true; v.preload = "metadata"; v.src = url;
+      a.replaceWith(v);
+    }else if(GLTF_EXT.test(href) || MESH_EXT.test(href)){
+      a.replaceWith(make3dBlock(href, url));
+    }else{
+      a.href = url; a.target = "_blank"; a.rel = "noopener";
+    }
+  });
+}
+window.neuralNotes = { hydrate: hydrateNoteMedia, fileUrl, open: (...a)=>openNote(...a) };   // small public surface (also used by tests)
+function make3dBlock(name, url){
+  const box = document.createElement("div");
+  box.className = "n3d"; box.dataset.name = name; box.dataset.url = url;
+  const lab = document.createElement("span");
+  lab.className = "n3d-label"; lab.textContent = "3D · " + name.split("/").pop();
+  box.appendChild(document.createElement("canvas")); box.appendChild(lab);
+  boot3dViewer(box).catch(()=>{ lab.textContent = "3D · failed: " + name.split("/").pop(); });
+  return box;
+}
+function meshFromPositions(pos){
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return new THREE.Mesh(g, new THREE.MeshStandardMaterial({color:0x46a8cc, roughness:.55, metalness:.15}));
+}
+function parseOBJ(text){
+  const vs = [], pos = [];
+  for(const line of text.split("\n")){
+    const p = line.trim().split(/\s+/);
+    if(p[0] === "v") vs.push([+p[1], +p[2], +p[3]]);
+    else if(p[0] === "f"){
+      const idx = p.slice(1).map(t=>{ const i = parseInt(t.split("/")[0], 10); return i < 0 ? vs.length + i : i - 1; });
+      for(let k=1; k+1<idx.length; k++)
+        for(const j of [idx[0], idx[k], idx[k+1]]) if(vs[j]) pos.push(...vs[j]);
+    }
+  }
+  return meshFromPositions(pos);
+}
+function parseSTL(buf){
+  const pos = [];
+  const head = new TextDecoder().decode(buf.slice(0, Math.min(buf.byteLength, 2000)));
+  if(head.trim().toLowerCase().startsWith("solid") && head.includes("facet")){
+    const text = new TextDecoder().decode(buf);
+    for(const m of text.matchAll(/vertex\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)/g))
+      pos.push(+m[1], +m[2], +m[3]);
   }else{
-    panel.classList.remove("custom");
-    panel.style.left = ""; panel.style.top = "";
-    inspectResetBtn.hidden = true;
+    const dv = new DataView(buf);
+    const n = dv.getUint32(80, true);
+    for(let i=0; i<n; i++){
+      const off = 84 + i*50;
+      if(off + 50 > buf.byteLength) break;
+      for(let v=0; v<3; v++){
+        const o = off + 12 + v*12;
+        pos.push(dv.getFloat32(o, true), dv.getFloat32(o+4, true), dv.getFloat32(o+8, true));
+      }
+    }
+  }
+  return meshFromPositions(pos);
+}
+async function boot3dViewer(box){
+  const url = box.dataset.url, name = box.dataset.name;
+  const cv = box.querySelector("canvas");
+  let object;
+  if(GLTF_EXT.test(name)){
+    const {GLTFLoader} = await import("/vendor/GLTFLoader.js");
+    object = (await new GLTFLoader().loadAsync(url)).scene;
+  }else{
+    const res = await fetch(url);
+    if(!res.ok) throw new Error("fetch failed");
+    object = /\.obj$/i.test(name) ? parseOBJ(await res.text()) : parseSTL(await res.arrayBuffer());
+  }
+  const scene = new THREE.Scene();
+  const cam = new THREE.PerspectiveCamera(40, 1, .01, 1000);
+  const ren = new THREE.WebGLRenderer({canvas: cv, antialias: true, alpha: true});
+  scene.add(new THREE.HemisphereLight(0xdff2fb, 0x0a1422, 1.1));
+  const dl = new THREE.DirectionalLight(0xffffff, 1.4);
+  dl.position.set(3, 5, 4); scene.add(dl);
+  scene.add(object);
+  const bb = new THREE.Box3().setFromObject(object);
+  const size = bb.getSize(new THREE.Vector3()).length() || 1;
+  object.position.sub(bb.getCenter(new THREE.Vector3()));
+  cam.position.set(size*.8, size*.55, size*.9);
+  cam.lookAt(0, 0, 0);
+  const t0 = performance.now();
+  (function tick(){
+    if(!cv.isConnected){ ren.dispose(); return; }   // window closed / re-render
+    requestAnimationFrame(tick);
+    const w = cv.clientWidth, h = cv.clientHeight;
+    if(w && h && (cv.width !== Math.round(w*devicePixelRatio) || cv.height !== Math.round(h*devicePixelRatio))){
+      ren.setSize(w, h, false); ren.setPixelRatio(devicePixelRatio);
+      cam.aspect = w/h; cam.updateProjectionMatrix();
+    }
+    object.rotation.y = (performance.now() - t0) * .0004;
+    ren.render(scene, cam);
+  })();
+}
+// ---- detached note windows ----
+// Grabbing the docked note's grip (⠿) DETACHES it: the note becomes its own
+// fixed, resizable window, unlinked from the sidebar, and the sidebar slot is
+// freed — click another note (and detach again) to keep any number open at
+// once. On a window: ⌖ re-attaches its note to the sidebar (replacing the
+// note the sidebar currently shows, if any), ✕ closes it. Content is a
+// snapshot; wikilinks inside a window open in the docked sidebar panel.
+let noteWinZ = 70;
+function detachNote(fromRect){
+  const nd = panel.__nd;
+  const win = document.createElement("aside");
+  win.className = "hud note-window";
+  win.style.left = fromRect.left + "px"; win.style.top = fromRect.top + "px";
+  win.style.width = fromRect.width + "px";
+  win.style.zIndex = ++noteWinZ;
+  win.innerHTML =
+    '<button class="close" aria-label="Close note window">✕</button>' +
+    '<button class="close reattach" title="Re-attach to sidebar" aria-label="Re-attach to sidebar">⌖</button>' +
+    '<button class="close grip" title="Drag to move window" aria-label="Drag to move window">⠿</button>' +
+    '<button class="close locate" title="Fly to this note in the 3D view" aria-label="Fly to this note in the 3D view">◎</button>' +
+    ["i-role","i-title","i-chips","i-open","body","links"].map(id=>document.getElementById(id).outerHTML).join("");
+  document.body.appendChild(win);
+  win.querySelector(".locate").onclick = ()=>{ if(nd) flyToNote(nd); };
+  // media in the snapshot: img/video/link attributes clone fine, but a cloned
+  // canvas is blank — re-boot each 3D block on a fresh canvas
+  win.querySelectorAll("img.nm").forEach(img=>{ img.onclick = ()=>openMediaViewer(img.src, img.alt || mediaName(img.src)); });
+  win.querySelectorAll(".n3d").forEach(box=>{
+    box.querySelector("canvas").replaceWith(document.createElement("canvas"));
+    boot3dViewer(box).catch(()=>{});
+  });
+  // capture phase: the drag surfaces stopPropagation on pointerdown, so a
+  // bubble listener would miss header clicks — raise-to-front must win first
+  win.addEventListener("pointerdown", ()=>{ win.style.zIndex = ++noteWinZ; }, true);
+  win.querySelector(".close").onclick = ()=>win.remove();
+  win.querySelector(".reattach").onclick = ()=>{ win.remove(); if(nd) openNote(nd); };
+  win.querySelectorAll("a.wl").forEach(a=>a.onclick=e=>{
+    e.preventDefault();
+    if(!nd) return;
+    const tgt = nodeById.get(nd.repo+"/"+nd.role+"/"+a.dataset.slug);
+    if(tgt) openNote(tgt);
+  });
+  const viewBtn = win.querySelector('[id="i-open"] button');
+  if(viewBtn && nd) viewBtn.onclick = ()=>openExternal(nd);
+  // header strip (role line + title) doubles as the drag surface
+  for(const sel of ['[id="i-role"]', "h3"]){
+    const el = win.querySelector(sel);
+    if(el) el.setAttribute("data-drag", "");
+  }
+  wireWinDrag(win);
+  return win;
+}
+// shared window-drag: a .note-window moves by its ⠿ grip AND by any element
+// marked data-drag (the whole header strip) — pointerdowns on buttons/links
+// inside a surface still click through, everything else starts the drag
+function wireWinDrag(win){
+  const surfaces = [win.querySelector(".grip"), ...win.querySelectorAll("[data-drag]")].filter(Boolean);
+  let off = null;
+  for(const surf of surfaces){
+    surf.addEventListener("pointerdown", ev=>{
+      if(ev.target !== surf && ev.target.closest("button, a, input, select, textarea") && !ev.target.closest(".grip")) return;
+      const r = win.getBoundingClientRect();
+      off = {dx: ev.clientX - r.left, dy: ev.clientY - r.top};
+      win.classList.add("dragging");
+      try{ surf.setPointerCapture(ev.pointerId); }catch{}
+      ev.preventDefault(); ev.stopPropagation();
+    });
+    surf.addEventListener("pointermove", ev=>{
+      if(!off) return;
+      win.style.left = Math.max(0, ev.clientX - off.dx) + "px";
+      win.style.top = Math.max(0, ev.clientY - off.dy) + "px";
+    });
+    const end = ev=>{ if(!off) return; off = null; win.classList.remove("dragging"); try{ surf.releasePointerCapture(ev.pointerId); }catch{} };
+    surf.addEventListener("pointerup", end);
+    surf.addEventListener("pointercancel", end);
   }
 }
-inspectResetBtn.onclick = ()=>{ delete uiState.inspectPos; saveUiState(); applyInspectPos(); };
+// media viewer: clicking an inline note image opens the image as its own
+// detached window with New tab / Download / in-page fullscreen (⛶) actions
+function openMediaViewer(src, name){
+  const win = document.createElement("aside");
+  win.className = "hud note-window media-window";
+  win.style.left = "24vw"; win.style.top = "16vh";
+  win.style.zIndex = ++noteWinZ;
+  win.innerHTML =
+    '<div class="mw-bar" data-drag>' +
+      '<button class="close grip" title="Drag to move window" aria-label="Drag to move window">⠿</button>' +
+      '<span class="mw-name"></span>' +
+      '<button class="iconbtn mw-fs" type="button" title="Fullscreen" aria-label="Fullscreen">⛶</button>' +
+      '<button class="close mw-x" aria-label="Close media window">✕</button></div>' +
+    '<div class="mw-imgwrap"><img class="mw-img">' +
+      '<div class="mw-zone"><div class="mw-actions">' +
+        '<button class="iconbtn mw-newtab" type="button">New tab</button>' +
+        '<button class="iconbtn mw-dl" type="button">Download</button>' +
+      '</div></div></div>';
+  win.querySelector(".mw-name").textContent = name;
+  const im = win.querySelector(".mw-img");
+  im.alt = name;
+  // fit the WINDOW to the image's aspect ratio once its size is known: scale
+  // to at most 70vw × (80vh − chrome) so the full image is visible with no
+  // internal scroll/crop, never upscaled past natural size, then nudge the
+  // window back on-screen if the new size pushed it off an edge
+  im.onload = ()=>{
+    if(!im.naturalWidth || !im.naturalHeight) return;
+    const maxW = Math.min(innerWidth*.7, 900), maxH = innerHeight*.8 - 70;
+    const s = Math.min(maxW/im.naturalWidth, maxH/im.naturalHeight, 1);
+    win.style.width = Math.max(260, Math.round(im.naturalWidth*s) + 34) + "px";
+    im.style.maxHeight = Math.round(im.naturalHeight*s) + "px";
+    const r = win.getBoundingClientRect();
+    if(r.right > innerWidth) win.style.left = Math.max(8, innerWidth - r.width - 16) + "px";
+    if(r.bottom > innerHeight) win.style.top = Math.max(8, innerHeight - r.height - 16) + "px";
+  };
+  im.src = src;
+  win.querySelector(".mw-newtab").onclick = ()=>window.open(src, "_blank");
+  // the download attribute is IGNORED on cross-origin anchors, and remote
+  // hosts rarely send CORS headers — route remote URLs through the server's
+  // /fetch proxy so the bytes come back same-origin and the save dialog
+  // actually fires; only if even that fails fall back to a new tab
+  win.querySelector(".mw-dl").onclick = async ()=>{
+    try{
+      const u0 = /^https?:\/\//i.test(src) ? "/fetch?url=" + encodeURIComponent(src) : src;
+      const resp = await fetch(u0);
+      if(!resp.ok) throw new Error("fetch failed");
+      const u = URL.createObjectURL(await resp.blob());
+      const a = document.createElement("a");
+      a.href = u; a.download = name || "image";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(u), 5000);
+    }catch{
+      window.open(src, "_blank");
+    }
+  };
+  win.querySelector(".mw-fs").onclick = ()=>{
+    if(document.fullscreenElement === win) document.exitFullscreen();
+    else win.requestFullscreen().catch(()=>{});
+  };
+  win.querySelector(".mw-x").onclick = ()=>win.remove();
+  // capture phase: the drag surfaces stopPropagation on pointerdown, so a
+  // bubble listener would miss header clicks — raise-to-front must win first
+  win.addEventListener("pointerdown", ()=>{ win.style.zIndex = ++noteWinZ; }, true);
+  document.body.appendChild(win);
+  wireWinDrag(win);
+  return win;
+}
+function mediaName(src){ try{ return decodeURIComponent(src.split("/").pop().split("?")[0]) || "image"; }catch{ return "image"; } }
 {
+  // grabbing the docked grip detaches immediately and the new window rides
+  // the same pointer until release (the docked grip keeps pointer capture)
   const grip = document.getElementById("inspect-grip");
-  let dragOff = null;   // pointer offset inside the panel while dragging
+  let off = null, win = null;
   grip.addEventListener("pointerdown", ev=>{
+    if(!panel.classList.contains("open")) return;
     const r = panel.getBoundingClientRect();
-    dragOff = {dx: ev.clientX - r.left, dy: ev.clientY - r.top};
-    panel.classList.add("dragging");
-    grip.setPointerCapture(ev.pointerId);
+    win = detachNote(r);
+    document.getElementById("inspect-close").click();
+    off = {dx: ev.clientX - r.left, dy: ev.clientY - r.top};
+    win.classList.add("dragging");
+    try{ grip.setPointerCapture(ev.pointerId); }catch{}
     ev.preventDefault();
   });
   grip.addEventListener("pointermove", ev=>{
-    if(!dragOff) return;
-    uiState.inspectPos = {x: ev.clientX - dragOff.dx, y: ev.clientY - dragOff.dy};
-    applyInspectPos();
+    if(!off || !win) return;
+    win.style.left = Math.max(0, ev.clientX - off.dx) + "px";
+    win.style.top = Math.max(0, ev.clientY - off.dy) + "px";
   });
   const end = ev=>{
-    if(!dragOff) return;
-    dragOff = null; panel.classList.remove("dragging");
+    if(!off) return;
+    off = null;
+    if(win) win.classList.remove("dragging");
+    win = null;
     try{ grip.releasePointerCapture(ev.pointerId); }catch{}
-    saveUiState();
   };
   grip.addEventListener("pointerup", end);
   grip.addEventListener("pointercancel", end);
 }
-applyInspectPos();
-async function openNote(nd){
-  let d; try{ d=await (await fetch(`/note/${encodeURIComponent(nd.repo)}/${encodeURIComponent(nd.role)}/${encodeURIComponent(nd.slug)}`)).json(); }catch{ return; }
-  document.getElementById("i-role").textContent = repoList.length>1 ? `${nd.repo} · ${nd.role}` : nd.role;
-  document.getElementById("i-title").textContent = nd.slug;
-  const chips=document.getElementById("i-chips"); chips.innerHTML="";
+// render a fetched note into `root` — the docked panel, or a detached window
+// carrying the same slot markup (ids duplicate there on purpose: the CSS is
+// id-scoped and JS lookups always resolve the docked panel first in the DOM)
+function renderNoteInto(root, nd, d){
+  const q = id=>root.querySelector('[id="'+id+'"]');
+  q("i-role").textContent = repoList.length>1 ? `${nd.repo} · ${nd.role}` : nd.role;
+  q("i-title").textContent = nd.slug;
+  const chips=q("i-chips"); chips.innerHTML="";
   const fm=d.frontmatter||{};
   const addChip=(txt,on)=>{ const s=document.createElement("span"); s.className="chip"+(on?" on":""); s.textContent=txt; chips.appendChild(s); };
   addChip("strength "+(fm.strength ?? nd.strength ?? "?"));
@@ -3610,7 +4353,7 @@ async function openNote(nd){
   for(const p of (Array.isArray(fm.paths)?fm.paths:[])) addChip(p);
   // "View in ..." — labeled with the viewer the server detected (GET /viewer
   // at boot); external opening is deliberate (this button), never click-implied.
-  const openDiv = document.getElementById("i-open"); openDiv.innerHTML = "";
+  const openDiv = q("i-open"); openDiv.innerHTML = "";
   if(window.__viewer){
     const VIEWER_LABEL = {obsidian:"Obsidian", vscode:"VS Code", terminal:"Terminal"};
     const b = document.createElement("button");
@@ -3618,16 +4361,65 @@ async function openNote(nd){
     b.onclick = ()=>openExternal(nd);
     openDiv.appendChild(b);
   }
-  document.getElementById("body").innerHTML = d.bodyHtml||"<p class='label'>empty note</p>";
-  const lk=document.getElementById("links");
-  lk.innerHTML = (d.links&&d.links.length)
+  q("body").innerHTML = d.bodyHtml||"<p class='label'>empty note</p>";
+  q("links").innerHTML = (d.links&&d.links.length)
     ? '<div class="label">Synapses</div>'+d.links.map(l=>`<div class="ln"><span>${l.dir==="out"?"→":"←"} <b>${escapeHtml(l.target)}</b></span><span>w ${l.weight} · ×${l.fires}</span></div>`).join("")
     : '<div class="label">no synapses</div>';
   // clicking a wikilink jumps to that note in the same brain
-  document.getElementById("body").querySelectorAll("a.wl").forEach(a=>a.onclick=e=>{
+  q("body").querySelectorAll("a.wl").forEach(a=>a.onclick=e=>{
     e.preventDefault(); const tgt=nodeById.get(nd.repo+"/"+nd.role+"/"+a.dataset.slug); if(tgt) openNote(tgt);
   });
+  hydrateNoteMedia(q("body"), nd);
+}
+// pinned sidebar (📌 distinct from detach/unlink): while the docked note is
+// pinned, a note that would REPLACE it opens as a detached window instead
+let detachStagger = 0;
+function spawnDetachedNote(nd, d){
+  const r = panel.getBoundingClientRect();
+  const off = (detachStagger++ % 5) * 28;
+  const win = document.createElement("aside");
+  win.className = "hud note-window";
+  win.style.left = Math.max(8, r.left - 40 - off) + "px";
+  win.style.top = Math.min(innerHeight - 200, r.top + off) + "px";
+  win.style.width = r.width + "px";
+  win.style.zIndex = ++noteWinZ;
+  win.innerHTML =
+    '<button class="close" aria-label="Close note window">✕</button>' +
+    '<button class="close reattach" title="Re-attach to sidebar" aria-label="Re-attach to sidebar">⌖</button>' +
+    '<button class="close grip" title="Drag to move window" aria-label="Drag to move window">⠿</button>' +
+    '<button class="close locate" title="Fly to this note in the 3D view" aria-label="Fly to this note in the 3D view">◎</button>' +
+    '<div class="role" id="i-role" data-drag></div><h3 id="i-title" data-drag></h3><div class="chips" id="i-chips"></div>' +
+    '<div id="i-open"></div><div id="body"></div><div id="links"></div>';
+  document.body.appendChild(win);
+  renderNoteInto(win, nd, d);
+  // capture phase: the drag surfaces stopPropagation on pointerdown, so a
+  // bubble listener would miss header clicks — raise-to-front must win first
+  win.addEventListener("pointerdown", ()=>{ win.style.zIndex = ++noteWinZ; }, true);
+  win.querySelector(".close").onclick = ()=>win.remove();
+  win.querySelector(".reattach").onclick = ()=>{ win.remove(); openNote(nd, {force:true}); };
+  win.querySelector(".locate").onclick = ()=>flyToNote(nd);
+  wireWinDrag(win);
+  return win;
+}
+async function openNote(nd, opts){
+  let d; try{ d=await (await fetch(`/note/${encodeURIComponent(nd.repo)}/${encodeURIComponent(nd.role)}/${encodeURIComponent(nd.slug)}`)).json(); }catch{ return; }
+  // pinned docked note holds its slot: different notes open detached instead
+  // (⌖ re-attach passes force to deliberately take the slot back)
+  if(panel.__pinned && panel.classList.contains("open") && !(opts && opts.force)
+     && panel.__nd && (panel.__nd.repo!==nd.repo || panel.__nd.role!==nd.role || panel.__nd.slug!==nd.slug)){
+    spawnDetachedNote(nd, d);
+    return;
+  }
+  panel.__nd = nd;   // remembered so detachNote/⌖/◎ can re-open this note
+  renderNoteInto(panel, nd, d);
   panel.classList.add("open"); panel.setAttribute("aria-hidden","false"); panel.removeAttribute("inert");
+  // the note card and the voice settings panel share the same slot — opening
+  // one closes the other (the cog handler does the reverse)
+  const vsp = document.getElementById("voice-settings-panel");
+  if(vsp && vsp.classList.contains("open")){
+    vsp.classList.remove("open");
+    document.getElementById("voice-settings").setAttribute("aria-expanded","false");
+  }
 }
 
 // ---- picking self-check (?hoverprobe) ----
