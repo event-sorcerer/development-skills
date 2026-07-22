@@ -526,6 +526,7 @@ canvas.grabbing{cursor:grabbing}
 .mw-actions{display:flex;gap:.3rem;opacity:0;transition:opacity .15s ease}
 .mw-zone:hover .mw-actions{opacity:1}
 .mw-actions .iconbtn{background:rgba(10,20,34,.85);font-size:.56rem;padding:.2rem .4rem}
+.n3d-spin.off{text-decoration:line-through;opacity:.75}
 /* a 3D block promoted into its own window: the window is a flex column and
    the canvas fills it, so RESIZING the window resizes the viewport (the
    render loop tracks clientWidth/Height and updates the camera aspect every
@@ -4110,7 +4111,9 @@ function make3dBlock(name, url){
   // hover-revealed detach action, mirroring the image experience
   const zone = document.createElement("div");
   zone.className = "mw-zone";
-  zone.innerHTML = '<div class="mw-actions"><button class="iconbtn n3d-pop" type="button">Detach</button></div>';
+  zone.innerHTML = '<div class="mw-actions">' +
+    '<button class="iconbtn n3d-spin" type="button" title="Toggle auto-rotation" aria-pressed="true">Spin</button>' +
+    '<button class="iconbtn n3d-pop" type="button">Detach</button></div>';
   zone.querySelector(".n3d-pop").onclick = ()=>open3dWindow(name, url);
   box.appendChild(zone);
   boot3dViewer(box).catch(err=>{
@@ -4193,6 +4196,13 @@ async function boot3dViewer(box){
   const FIT = (size*.5) / Math.tan(cam.fov*Math.PI/360) * 1.35;
   const target = new THREE.Vector3();
   let yaw = .8, pitch = .32, dist = FIT, auto = true;
+  // "Spin" chip mirrors + toggles the auto-rotation; strikethrough = paused
+  const spinBtn = box.querySelector(".n3d-spin");
+  function setAuto(v){
+    auto = v;
+    if(spinBtn){ spinBtn.classList.toggle("off", !auto); spinBtn.setAttribute("aria-pressed", String(auto)); }
+  }
+  if(spinBtn) spinBtn.onclick = ()=>setAuto(!auto);
   function applyCam(){
     const cp = Math.cos(pitch);
     cam.position.set(target.x + dist*cp*Math.sin(yaw),
@@ -4204,7 +4214,7 @@ async function boot3dViewer(box){
   cv.style.touchAction = "none";
   cv.addEventListener("pointerdown", ev=>{
     drag = {x: ev.clientX, y: ev.clientY, pan: ev.button===2 || ev.shiftKey};
-    auto = false;
+    setAuto(false);
     cv.setPointerCapture(ev.pointerId);
     ev.preventDefault();
   });
@@ -4229,7 +4239,7 @@ async function boot3dViewer(box){
     // zoom deliberately does NOT pause the auto-spin — only rotate/pan do
     dist = Math.max(size*.15, Math.min(size*10, dist*Math.exp(ev.deltaY*.0015)));
   }, {passive: false});
-  cv.addEventListener("dblclick", ()=>{ target.set(0,0,0); yaw=.8; pitch=.32; dist=FIT; auto=true; });
+  cv.addEventListener("dblclick", ()=>{ target.set(0,0,0); yaw=.8; pitch=.32; dist=FIT; setAuto(true); });
   cv.addEventListener("contextmenu", ev=>ev.preventDefault());
   cv.title = "drag: rotate · right/shift-drag: pan · wheel: zoom · double-click: reset";
   (function tick(){
@@ -4406,7 +4416,7 @@ function open3dWindow(name, url){
       '<button class="close mw-x" aria-label="Close 3D window">✕</button></div>';
   win.querySelector(".mw-name").textContent = "3D · " + name.split("/").pop();
   const box = make3dBlock(name, url);
-  box.querySelector(".mw-zone").remove();   // no detach-from-detached recursion
+  box.querySelector(".n3d-pop").remove();   // no detach-from-detached recursion; Spin stays
   win.appendChild(box);
   win.querySelector(".mw-fs").onclick = ()=>{
     if(document.fullscreenElement === win) document.exitFullscreen();
