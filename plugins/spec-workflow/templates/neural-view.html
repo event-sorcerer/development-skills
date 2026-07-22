@@ -525,7 +525,14 @@ canvas.grabbing{cursor:grabbing}
   display:flex;justify-content:flex-end;align-items:flex-start;padding:.45rem}
 .mw-actions{display:flex;gap:.3rem;opacity:0;transition:opacity .15s ease}
 .mw-zone:hover .mw-actions{opacity:1}
-.mw-actions .iconbtn{background:rgba(10,20,34,.85);font-size:.56rem;padding:.2rem .4rem}
+.mw-actions .iconbtn{background:rgba(10,20,34,.85);font-size:.56rem;padding:.2rem .4rem;white-space:nowrap}
+/* narrow hosts (inline note blocks): shrink the chips so the row stays one
+   line — the media box is a size container, chips respond to ITS width */
+.n3d,.mw-imgwrap{container-type:inline-size}
+@container (max-width:460px){
+  .mw-actions .iconbtn{font-size:.48rem;padding:.14rem .28rem}
+  .mw-actions{gap:.2rem}
+}
 .n3d-spin.off{text-decoration:line-through;opacity:.75}
 /* a 3D block promoted into its own window: the window is a flex column and
    the canvas fills it, so RESIZING the window resizes the viewport (the
