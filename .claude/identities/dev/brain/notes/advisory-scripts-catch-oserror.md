@@ -1,12 +1,10 @@
 ---
-tags: [python, robustness, preflight, errors]
+tags: [python, robustness, errors, http]
 paths: ["plugins/spec-workflow/scripts/**"]
-strength: 1
-source: "PR-close #306 review r2"
+strength: 2
+source: "PR-close #312 (3rd recurrence)"
 graduated: false
 created: 2026-07-22
 ---
 
-Advisory-only scripts (preflight, status probes) must catch the OSError CLASS around every filesystem read and every state write — ConfigError-style domain exceptions do not cover PermissionError/read-only mounts, and an uncaught traceback in a skill-load hook is worse than the failure it hides. Pattern: reads → enumerated FAIL line; state/cache writes → degrade silently, still report the verdict.
-
-Related: [[tracked-config-atomic-writes]] [[lock-key-canonicalize]]
+Advisory-only scripts (preflight, status probes, HTTP read endpoints) must catch the OSError CLASS around every filesystem read and every state write. THIRD recurrence: history() caught only FileNotFoundError, so a chmod-000 transcript propagated PermissionError and dropped the whole HTTP response. The pattern to grep in review: any  on a read path is a smell — the broad-but-honest form is  + a warning field. Reads → enumerated warning/FAIL line; writes → degrade, still report.
