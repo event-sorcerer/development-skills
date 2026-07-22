@@ -1356,3 +1356,67 @@ items:
   routing:
     action: brain-note
     ref: reviewer/fixture-must-reach-fixed-path
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-22T22:15:00Z'
+iteration:
+  task: AST-016
+  outcome: merged
+  reviewRounds: 2
+source:
+  role: orchestrator
+  model: claude-fable-5
+items:
+- category: worked-well
+  area: review
+  severity: high
+  summary: Review reproduced a silent concurrent read-modify-write clobber the whole
+    test suite missed, and both sides proved the fix by lock ablation
+  detail: Two concurrent chats silently lost a turn in the state file while the append-only
+    transcript kept both; the reviewer reproduced it live, the dev red-firsted the
+    regression, and both independently ablated the lock to prove discrimination.
+  evidence:
+  - Zugruul/development-skills#314
+  generalized: Every new read-modify-write over shared state introduced by a request-handling
+    path needs a concurrency probe in review (two overlapping requests, widened window
+    via a sleeping stub) — append-only channels surviving is what makes the state-file
+    loss silent.
+  routing:
+    action: brain-note
+    ref: reviewer/lock-ablation-proof
+- category: worked-well
+  area: briefing
+  severity: medium
+  summary: Gate-recovery recipe and closed action set held for a second and third
+    dev cycle; residual stall moved to the fix-round commit
+  detail: The dev completed red+impl commits and recovered two auto-backgrounded gate
+    runs by polling; the only remaining stall was the post-review fix commit, which
+    the orchestrator recorded.
+  evidence:
+  - Zugruul/development-skills#314
+  - Zugruul/development-skills#313
+  generalized: Stall-point instructions must cover EVERY commit boundary in the task
+    lifecycle (red, impl, each fix round) — agents generalize the instruction poorly
+    across boundaries it does not name explicitly.
+  routing:
+    action: brain-note
+    ref: orchestrator/brief-closed-action-set
+- category: recommendation
+  area: testing
+  severity: low
+  summary: A QA smoke unintentionally ran a real authenticated provider turn end-to-end
+    and revealed plan-mode framing leaking into replies
+  detail: The scaffolded assistant defaults to provider claude; with no stub reachable
+    for that provider the real CLI answered, and the reply carried permission-mode-plan
+    meta-language ("I'll exit plan mode"), which a persona reply should not surface.
+  evidence:
+  - Zugruul/development-skills#314
+  - Zugruul/development-skills#315
+  generalized: When pinning isolation flags that shape model behavior (plan permission
+    modes), dogfood should check the flags' effect on reply TONE, not just their security
+    effect — a gates/dogfood item, and QA smokes should pin the provider to the stubbed
+    one explicitly.
+  routing:
+    action: backlog
+    ref: Zugruul/development-skills#315
