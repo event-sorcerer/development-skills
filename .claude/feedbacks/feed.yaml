@@ -957,3 +957,48 @@ items:
   routing:
     action: brain-note
     ref: reviewer/fixture-must-reach-fixed-path
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-22T13:55:00Z'
+iteration:
+  task: AST-006
+  outcome: merged
+  reviewRounds: 3
+source:
+  role: orchestrator
+  model: claude-fable-5
+items:
+- category: incident
+  area: briefing
+  severity: medium
+  summary: Dev agent fully unresponsive for an entire task; orchestrator carried impl
+    recording and both fix rounds on-behalf
+  detail: No response to any nudge from red-commit onward; implementation, one test-hardening
+    and one two-blocker fix round were all verified and recorded on-behalf. Reviews
+    stayed independent and caught real crashes.
+  evidence:
+  - Zugruul/development-skills#306
+  generalized: When a subagent goes fully dark the loop still functions if the orchestrator
+    treats verify-and-record as a first-class mode, but author truthfulness then rests
+    entirely on the on-behalf attribution discipline; the take-over protocol write-up
+    should cover the fully-dark case, not only the stall-after-writing case.
+  routing:
+    action: backlog
+    ref: Zugruul/development-skills#364
+- category: worked-well
+  area: review
+  severity: medium
+  summary: Quality pass probing environmental failure modes caught two advisory-contract
+    crashes the AC never mentioned
+  detail: Unreadable config (PermissionError past the domain-exception catch) and
+    read-only state dir both crashed a script whose whole contract is advisory-only;
+    both were invisible to the AC-driven fixtures.
+  evidence:
+  - Zugruul/development-skills#306
+  generalized: For advisory/always-exit-0 scripts, reviews should probe the environment
+    (permissions, read-only mounts, corrupted caches) — the AC enumerates domain failures,
+    but the crash class lives in OSError-land the domain exceptions never cover.
+  routing:
+    action: brain-note
+    ref: dev/advisory-scripts-catch-oserror
