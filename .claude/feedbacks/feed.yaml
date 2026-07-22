@@ -1112,3 +1112,48 @@ items:
     action: ignore
     ref: 'already operationalized: reviewer briefs now carry the send-immediately
       instruction verbatim; no plugin change to file'
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-22T17:40:00Z'
+iteration:
+  task: AST-011
+  outcome: merged
+  reviewRounds: 3
+source:
+  role: orchestrator
+  model: claude-fable-5
+items:
+- category: worked-well
+  area: review
+  severity: high
+  summary: Spec review validated an isolation boundary against the real CLI with a
+    no-auth probe and caught a documented-as-solved gap that was not solved
+  detail: The env-home instruction-ingestion leak was invisible to stub tests and
+    asserted-solved by the docstring; a no-cost real-binary probe (debug prompt-input)
+    exposed it, and the fix was re-verified with a discrimination proof.
+  evidence:
+  - Zugruul/development-skills#309
+  generalized: Reviews of subprocess-isolation code must validate boundary claims
+    against the real binary (help text + no-auth render probes), never only stub tests
+    — stubs prove YOUR code's reactions, not the wrapped tool's actual ingestion behavior.
+  routing:
+    action: brain-note
+    ref: reviewer/probe-isolation-claims-on-real-cli
+- category: incident
+  area: briefing
+  severity: medium
+  summary: Dev stall pattern reached the pre-red-commit stage; a scripted recovery
+    nudge restored red-first honestly
+  detail: Agent idled with tests AND impl uncommitted; the nudge prescribed impl-aside
+    → red run → tests-only commit → restore → green, which the agent executed for
+    the red half before stalling again; orchestrator completed and recorded the rest.
+  evidence:
+  - Zugruul/development-skills#309
+  generalized: When a subagent stalls before even the red commit with mixed work in
+    tree, red-first can still be recovered honestly by setting implementation files
+    aside, proving the red run, committing tests only, then restoring — a recovery
+    recipe worth codifying next to the take-over protocol.
+  routing:
+    action: backlog
+    ref: Zugruul/development-skills#364
