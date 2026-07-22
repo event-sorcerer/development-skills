@@ -49,6 +49,10 @@ Approval granted 2026-07-20: C1–C3 approved; C4 deferred, so **GL-043 is not s
 - **GL-043** (P2, 3pt) Optional: consolidate `concurrency`/`ui-mode`/`checkpoint` into `mode` (C4). §6. AC: only if approved; all three surfaces reachable; backing scripts untouched.
 - **GL-044** (P1, 2pt) If-stale cheap retro opening. §11 R11.1–R11.2. AC: retro no-ops in one command when nothing is pending and no outcomes since last retro-mark; existing retro path unchanged otherwise.
 
+## E5 — Knowledge-graph seeding (GL-050–059) — spec § via delta (added 2026-07-22, human-requested; capture: #292)
+
+- **GL-050** (P0, 5pt) `/knowledge-base-seed` skill — explore the project (specs, backlogs, design docs, READMEs, script/source layout, git history, board epics) and seed a comprehensive knowledge graph as zettel notes into a new `knowledge` identity brain, using the existing brain.py machinery only. Provenance frontmatter (`source: seed` + source path/commit); idempotent re-seed (evolve/supersede, never duplicate, never delete); shrink-guarded; orchestrator-mediated like every brain; rendered by neural-view without viewer changes. Spec: the SAME PR adds the requirement section via `docs/spec-deltas/GL-050.md` (never a direct spec edit). AC detail on the issue.
+
 ## Coverage check
 
 Every requirement §7 R7.1–R7.7 → GL-001..006; §8 R8.1–R8.5 → GL-010..013; §9 R9.1–R9.3 → GL-020..022; §10 R10.1–R10.4 → GL-030..033; §11 → GL-044; §6 → GL-040..043; §13 shrink guard → GL-005. Headroom left in every range for discovered work.

@@ -195,6 +195,11 @@ specs:
         taskRanges:
         -   - 40
             - 49
+    -   id: E5
+        title: Knowledge-graph seeding
+        taskRanges:
+        -   - 50
+            - 59
     invariants:
     - Brains remain orchestrator-mediated; no role reads another role's brain directory; subagents receive knowledge only as pasted brief text.
     - No graphify, tree-sitter, embedding, or graph-library dependency is introduced; scripts stay bash 3.2-compatible and Python stdlib-only (PyYAML sole exception).
