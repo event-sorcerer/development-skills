@@ -384,28 +384,26 @@ canvas.grabbing{cursor:grabbing}
 /* activation log — bottom quarter of the right column, mirroring the left
    panel's collapse UX. Always fills its quarter; folding the section (▸)
    shrinks it to the bare header. */
-#rightbar{bottom:16px;right:14px;width:var(--colw);height:var(--colq);overflow:auto;
-  padding:.7rem 1rem;transition:transform .25s ease,opacity .25s ease;
-  scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:rgba(90,190,255,.4) rgba(255,255,255,.05)}
+/* header row then entries, plainly stacked: the panel itself never scrolls —
+   #tickerlog is the scroll area — so entries can't flow behind or above the
+   header and the header needs no background/sticky tricks at all */
+#rightbar{bottom:16px;right:14px;width:var(--colw);height:var(--colq);overflow:hidden;
+  display:flex;flex-direction:column;
+  padding:.7rem 1rem;transition:transform .25s ease,opacity .25s ease}
 #rightbar.collapsed{transform:translateX(calc(100% + 24px));opacity:0;pointer-events:none}
 #rightbar.folded{height:auto}
+#rightbar-head{display:flex;justify-content:space-between;align-items:center;gap:.5rem;
+  padding:0 0 .5rem}
+#tickerlog{flex:1;min-height:0;overflow:auto;
+  scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:rgba(90,190,255,.4) rgba(255,255,255,.05)}
 /* explicit (non-overlay) scrollbar, same convention as #search-filters-panel/
    #search-results-list — a bare overflow:auto defers to the OS's auto-hide
    overlay scrollbar (invisible until you scroll on macOS), which read as "no
    scroll" on a panel that's clearly cut off. */
-#rightbar::-webkit-scrollbar{width:9px}
-#rightbar::-webkit-scrollbar-track{background:rgba(255,255,255,.05);border-radius:5px}
-#rightbar::-webkit-scrollbar-thumb{background:rgba(90,190,255,.4);border-radius:5px}
-#rightbar::-webkit-scrollbar-thumb:hover{background:rgba(90,190,255,.6)}
-/* sticky header: pulled flush to the scrolling container's edges via negative
-   margins that cancel #rightbar's own padding, then re-padded internally so
-   it still lines up with the log entries below once scrolled under it. */
-#rightbar-head{position:sticky;top:0;z-index:2;background:none;
-  display:flex;justify-content:space-between;align-items:center;gap:.5rem;
-  margin:-.7rem -1rem 0;padding:.7rem 1rem .5rem}
-/* the sticky header is transparent at rest (no band over the panel) and only
-   picks up a masking background while entries are actually scrolled under it */
-#rightbar.scrolled #rightbar-head{background:var(--panel-solid)}
+#tickerlog::-webkit-scrollbar{width:9px}
+#tickerlog::-webkit-scrollbar-track{background:rgba(255,255,255,.05);border-radius:5px}
+#tickerlog::-webkit-scrollbar-thumb{background:rgba(90,190,255,.4);border-radius:5px}
+#tickerlog::-webkit-scrollbar-thumb:hover{background:rgba(90,190,255,.6)}
 #rightbar-tab{position:fixed;bottom:16px;right:0;z-index:20;border-right:0;border-radius:8px 0 0 8px;
   padding:.55rem .4rem;cursor:pointer;color:var(--muted);font-family:var(--mono);font-size:.8rem}
 #rightbar-tab:hover{color:var(--cyan)}
@@ -3116,10 +3114,6 @@ gaugesTab.onclick = ()=>{ uiState.panel = false; saveUiState(); applyUiState(); 
 document.getElementById("rightbar-collapse").onclick = ()=>{ uiState.rpanel = true; saveUiState(); applyUiState(); };
 document.getElementById("rightbar-tab").onclick = ()=>{ uiState.rpanel = false; saveUiState(); applyUiState(); };
 document.getElementById("rightbar-clear").onclick = ()=>{ LOG.innerHTML = ""; };
-// sticky log header: masking background only while content is scrolled under it
-document.getElementById("rightbar").addEventListener("scroll", ev=>{
-  ev.currentTarget.classList.toggle("scrolled", ev.currentTarget.scrollTop > 0);
-}, {passive: true});
 document.getElementById("sect-voice").onclick = ()=>{ uiState.voice = !uiState.voice; saveUiState(); applyUiState(); };
 document.getElementById("voicebar-collapse").onclick = ()=>{ uiState.vpanel = true; saveUiState(); applyUiState(); };
 document.getElementById("voicebar-tab").onclick = ()=>{ uiState.vpanel = false; saveUiState(); applyUiState(); };
