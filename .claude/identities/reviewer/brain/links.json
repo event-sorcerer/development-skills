@@ -168,5 +168,15 @@
     "fires": 1,
     "last": "2026-07-22",
     "weight": 0.5
+  },
+  "write-site-classification-sweep->check-empty-expected-vacuous": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "write-site-classification-sweep->mutation-check-assertions": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
   }
 }

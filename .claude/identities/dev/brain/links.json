@@ -264,6 +264,26 @@
     "last": null,
     "weight": 0.5
   },
+  "lock-key-canonicalize->bool-before-int-guard": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "lock-key-canonicalize->marker-barrier-interleave": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "marker-barrier-interleave->deterministic-repro-fast": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "marker-barrier-interleave->test-section-shell-plumbing-risk": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "multiline-body-stdin-contract-gap->sanity-check-fix-against-broken-code": {
     "fires": 3,
     "last": "2026-07-22",
