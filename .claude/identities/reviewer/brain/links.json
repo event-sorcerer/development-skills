@@ -89,6 +89,16 @@
     "last": null,
     "weight": 0.5
   },
+  "probe-isolation-claims-on-real-cli->reports-are-not-the-code": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "probe-isolation-claims-on-real-cli->write-site-classification-sweep": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "probe-spec-silent-input-categories->trace-boundary-operators-by-hand": {
     "fires": 2,
     "last": "2026-07-22",

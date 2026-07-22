@@ -179,6 +179,16 @@
     "last": "2026-07-22",
     "weight": 0.5
   },
+  "env-home-isolation-not-cwd->advisory-scripts-catch-oserror": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "env-home-isolation-not-cwd->getter-over-global-snapshot": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "exclude-before-scan->circular-fixture-detector": {
     "fires": 17,
     "last": "2026-07-22",
