@@ -1204,3 +1204,48 @@ items:
   routing:
     action: brain-note
     ref: dev/per-cli-isolation-differs
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-22T19:20:00Z'
+iteration:
+  task: AST-013
+  outcome: merged
+  reviewRounds: 3
+source:
+  role: orchestrator
+  model: claude-fable-5
+items:
+- category: worked-well
+  area: review
+  severity: medium
+  summary: Quality pass executed the brief's spot-mutation instruction literally and
+    exposed entirely unguarded default constants
+  detail: Every budget test passed explicit overrides, so a 10x default mutation stayed
+    green; the reviewer ran the exact mutation the brief prescribed and proved it.
+    Fix round added constant-relationship assertions with a revert-run-restore proof.
+  evidence:
+  - Zugruul/development-skills#311
+  generalized: Review briefs that prescribe a concrete mutation ("change constant
+    X, a check must fail") get findings generic instructions miss; keep writing executable
+    review instructions rather than qualitative ones.
+  routing:
+    action: brain-note
+    ref: dev/defaults-need-own-tests
+- category: friction
+  area: briefing
+  severity: low
+  summary: Orchestrator now takes over the commit step by default; dev agents complete
+    red and implementation but reliably stall before committing
+  detail: Ninth consecutive task with a commit-boundary stall despite protocol lines,
+    nudges, and concrete-command instructions; take-over with on-behalf recording
+    is the de facto workflow now.
+  evidence:
+  - Zugruul/development-skills#311
+  generalized: When a step fails 9/9 times across varied prompts, the loop design
+    should stop fighting it — either move the commit step to the orchestrator formally
+    (dev returns a work report; orchestrator commits after verification) or fix the
+    underlying agent-runtime cause; repeated nudge cycles are pure overhead.
+  routing:
+    action: backlog
+    ref: Zugruul/development-skills#364
