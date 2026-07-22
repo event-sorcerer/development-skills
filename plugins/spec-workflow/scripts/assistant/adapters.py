@@ -1,9 +1,9 @@
 """Provider adapter contract (SPEC-ASSISTANT.md Sec5a, Sec8.1, Sec8.4, Sec8.5,
 Sec17.1-Sec17.3).
 
-AST-011 fills in the contract AST-010 stubbed: `complete(context) ->
+AST-011/AST-012 fill in the contract AST-010 stubbed: `complete(context) ->
 {text, usage, timings}`, one stateless provider-CLI invocation per turn
-(Sec8.1). Every adapter (codex.py here; claude.py is AST-012) funnels its
+(Sec8.1). Every adapter (codex.py, claude.py) funnels its
 subprocess call through `invoke_cli()` below so the argv-array-only
 (Sec17.3), mandatory-timeout (Sec8.5), and structured-error (Sec8.5)
 invariants are enforced in exactly one place instead of per-adapter.
@@ -89,11 +89,10 @@ _REGISTRY = {}
 # get_adapter() below rather than eagerly here -- importing adapters.py
 # alone never imports a provider module and never spawns a subprocess
 # (Sec17.1's isolation rule extends to import time, not just call time).
-# "claude" (AST-012) is a deliberate seam: it is not listed here, so asking
-# for it falls straight through to the KeyError below.
 _PROVIDER_MODULES = {
     "codex": "assistant.codex",
     "openai": "assistant.codex",
+    "claude": "assistant.claude",
 }
 
 
@@ -108,11 +107,10 @@ def get_adapter(provider):
     `provider` (e.g. "openai", per config.py's PROVIDER_CAPABILITY mapping
     -- the `llm.provider` value from a repo's `assistant:` section).
     Lazily imports the provider's adapter module on first use (so callers
-    never have to remember `import assistant.codex` themselves) and raises
-    KeyError naming the known providers for an unknown or not-yet-
-    implemented one: "claude" (AST-012) is a deliberate seam -- it is not
-    in `_PROVIDER_MODULES`, so asking for it fails the same way an unknown
-    provider would, with no special-cased message to keep in sync."""
+    never have to remember `import assistant.codex`/`assistant.claude`
+    themselves) and raises KeyError naming the known providers for any
+    provider not in `_PROVIDER_MODULES`, with no special-cased message to
+    keep in sync."""
     if provider not in _REGISTRY and provider in _PROVIDER_MODULES:
         importlib.import_module(_PROVIDER_MODULES[provider])
     try:

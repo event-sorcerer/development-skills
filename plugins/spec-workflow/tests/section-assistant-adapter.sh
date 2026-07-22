@@ -171,20 +171,24 @@ check "CODEX_HOME isolation: isolated home carries NO AGENTS.md (no user-global 
 rm -rf "$aa_fake_real_home" "$aa_home_file"
 
 # ---------------------------------------------------------- registry seam
+# AST-012 registers "claude" (see section-assistant-claude.sh for the full
+# claude-adapter contract + provider-switch proof) -- this section only
+# asserts the codex/openai seam still resolves and an actually-unknown
+# provider still fails cleanly.
 cat >"$AA_TMPPY/registry.py" <<PYEOF
 from assistant import adapters
 
 fn = adapters.get_adapter("openai")
 print("GOT_CODEX_ADAPTER", fn is not None)
 try:
-    adapters.get_adapter("claude")
-    print("CLAUDE_UNEXPECTEDLY_REGISTERED")
+    adapters.get_adapter("not-a-real-provider")
+    print("UNKNOWN_UNEXPECTEDLY_REGISTERED")
 except KeyError as exc:
-    print("CLAUDE_NOT_YET_REGISTERED", "claude" not in str(exc) or True)
+    print("UNKNOWN_PROVIDER_CLEAN_KEYERROR", "not-a-real-provider" in str(exc))
 PYEOF
 out="$(PYTHONPATH="$AA_SCRIPTS" python3 "$AA_TMPPY/registry.py" 2>&1)"
 check "registry: get_adapter('openai') resolves to the codex adapter" "GOT_CODEX_ADAPTER True" "$out"
-check "registry: get_adapter('claude') is a clean not-yet-implemented seam (KeyError)" "CLAUDE_NOT_YET_REGISTERED" "$out"
+check "registry: get_adapter('not-a-real-provider') is a clean KeyError" "UNKNOWN_PROVIDER_CLEAN_KEYERROR True" "$out"
 
 # ---------------------------------------------------------- argv-array invariant (Sec17.3): no shell=True anywhere
 adapter_src="$AA_SCRIPTS/assistant/adapters.py"

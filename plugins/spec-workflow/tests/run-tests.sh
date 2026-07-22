@@ -164,6 +164,7 @@ SECTIONS=(
     section-assistant-default.sh
     section-assistant-engine.sh
     section-assistant-adapter.sh
+    section-assistant-claude.sh
 )
 
 if [[ ${#SECTIONS[@]} -eq 0 ]]; then

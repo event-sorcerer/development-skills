@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""Stub claude CLI for section-assistant-claude.sh (AST-012, SPEC-ASSISTANT.md
+Sec8.1, Sec8.4, Sec8.5, Sec16). Records its argv to $CLAUDE_STUB_ARGV_FILE
+(one argument per line, so the test can assert the pinned flag set and prove
+an injection payload arrives as a single literal argv element) and its cwd to
+$CLAUDE_STUB_CWD_FILE (so the test can prove complete() points the real
+`claude` CLI at an isolated per-invocation directory, not this process's own
+cwd -- the same isolation goal as codex.py's `-C`, achieved here via
+subprocess `cwd=` since the real claude CLI has no `-C`/`--cwd` equivalent),
+then behaves per $CLAUDE_STUB_MODE. Never touches the network or a real
+claude binary -- this is the ONLY "claude" contract tests put on PATH.
+
+Provenance of each mode's output shape:
+  ok       -- ASSUMED from claude -p --output-format json's documented
+              single-JSON-object envelope shape (type/subtype/is_error/
+              result/usage), cross-checked against
+              plugins/peer-review/scripts/claude-review.sh's parsing of the
+              same envelope. Not captured against a real authenticated run
+              (auth + cost are out of scope here) -- flagged for dogfood
+              validation.
+  auth     -- CORPUS-SOURCED: reproduces (field names, is_error:true, exit
+              code 1, and message wording) a REAL unauthenticated
+              `claude -p --output-format json` run captured on this machine
+              (claude 2.1.217) with an isolated, empty CLAUDE_CONFIG_DIR:
+              exit 1, stdout is a single JSON object with
+              is_error:true, result:"Not logged in · Please run
+              /login", duration_api_ms:0 (fails client-side, no network
+              round trip). The adapter's own AuthExpired message instructs
+              `claude auth login` (the actual non-interactive CLI
+              subcommand, verified via `claude auth --help` and matching
+              preflight.py's AUTH_PROBES["claude-code"]["login_cmd"]) rather
+              than the interactive-only "/login" slash command claude's own
+              text names.
+  nonzero  -- synthetic: any non-auth CLI failure.
+  garbage  -- synthetic: output the adapter cannot parse as JSON.
+  hang     -- synthetic: sleeps well past any short test timeout.
+"""
+import json
+import os
+import sys
+import time
+
+argv_file = os.environ.get("CLAUDE_STUB_ARGV_FILE")
+if argv_file:
+    with open(argv_file, "a") as fh:
+        for arg in sys.argv[1:]:
+            fh.write(arg + "\n")
+
+cwd_file = os.environ.get("CLAUDE_STUB_CWD_FILE")
+if cwd_file:
+    with open(cwd_file, "w") as fh:
+        fh.write(os.getcwd() + "\n")
+
+mode = os.environ.get("CLAUDE_STUB_MODE", "ok")
+
+if mode == "ok":
+    print(json.dumps({
+        "type": "result",
+        "subtype": "success",
+        "is_error": False,
+        "result": "Hello from stub",
+        "usage": {"input_tokens": 10, "output_tokens": 5},
+        "total_cost_usd": 0.01,
+    }))
+    sys.exit(0)
+
+if mode == "nonzero":
+    print("generic failure: disk full", file=sys.stderr)
+    sys.exit(1)
+
+if mode == "hang":
+    time.sleep(30)
+    sys.exit(0)
+
+if mode == "garbage":
+    print("not-json-output-{{{")
+    sys.exit(0)
+
+if mode == "auth":
+    print(json.dumps({
+        "type": "result",
+        "subtype": "success",
+        "is_error": True,
+        "api_error_status": None,
+        "duration_ms": 48,
+        "duration_api_ms": 0,
+        "num_turns": 1,
+        "result": "Not logged in · Please run /login",
+        "stop_reason": "stop_sequence",
+        "total_cost_usd": 0,
+        "usage": {
+            "input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 0,
+        },
+    }))
+    sys.exit(1)
+
+print("unknown CLAUDE_STUB_MODE: " + mode, file=sys.stderr)
+sys.exit(2)
