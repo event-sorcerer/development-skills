@@ -189,6 +189,16 @@
     "last": null,
     "weight": 0.5
   },
+  "stage-specific-paths-in-takeovers->idle-agent-is-not-done": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "stage-specific-paths-in-takeovers->unresponsive-agent-take-over": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "stall-hypothesis-backgrounded-gate->brief-closed-action-set": {
     "fires": 0,
     "last": null,

@@ -59,6 +59,16 @@
     "last": null,
     "weight": 0.5
   },
+  "lock-ablation-proof->fixture-must-reach-fixed-path": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "lock-ablation-proof->write-site-classification-sweep": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "mutation-check-assertions->import-and-probe-python-library": {
     "fires": 0,
     "last": null,
