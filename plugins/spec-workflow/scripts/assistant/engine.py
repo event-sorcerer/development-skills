@@ -32,11 +32,18 @@ import queue
 import threading
 
 from assistant import default_store
+from assistant.store import SessionStore
 
 # The four §5a-mandated subsystem workers this skeleton wires up. Real logic
 # lands per-subsystem in later E1/E3/E4/E6 tasks; AST-010 only creates the
 # named slot (thread + stop_event + queue) each of those tasks plugs into.
 WORKER_NAMES = ("distiller", "tasks", "traces", "index")
+
+# AST-014 /assistant/history?n=N: default window + hard cap so a client
+# cannot force an unbounded read of the transcript (SessionStore.history's
+# tail-read is a full-file read at v1 -- see store.py's docstring).
+HISTORY_DEFAULT_N = 20
+HISTORY_MAX_N = 500
 
 
 def _heartbeat_worker(stop_event):
@@ -107,6 +114,8 @@ class AssistantEngine:
         matched -- the caller is responsible for turning that into a 404."""
         if method == "GET" and path == "/assistant/status":
             return 200, self._status(), "application/json"
+        if method == "GET" and path == "/assistant/history":
+            return 200, self._history(query), "application/json"
         return None
 
     def _status(self):
@@ -122,3 +131,46 @@ class AssistantEngine:
             "assistants": len(candidates),
             "selected": None,
         }
+
+    def _history(self, query):
+        """GET /assistant/history?n=N -- last N exchanges of the resolved
+        assistant's session transcript. The store is constructed FRESH on
+        every call (never held on `self`) for the same reason `_status`
+        re-discovers candidates every call: `self._repos_getter()` is a
+        live getter, not a ctor-time snapshot (see __init__'s docstring),
+        so a marker added/removed after boot must be reflected on the very
+        next poll -- caching a store instance would pin it to whatever
+        root resolved first and go stale exactly like a ctor-time repos
+        snapshot would.
+        """
+        n = _parse_history_n(query)
+        candidates = default_store.discover_candidates(
+            root for _, root in self._repos_getter()
+        )
+        try:
+            root, _section = default_store.resolve_assistant(candidates, state_dir=self.state_dir)
+        except default_store.ResolutionError as exc:
+            # No assistant unambiguously resolved (none discovered, or
+            # multiple with no stored default) -- an empty, explained
+            # result rather than a 404/500; §5a routes never crash on an
+            # absent selection, matching /assistant/status's `selected:
+            # None` treatment of the same not-yet-selected state.
+            return {"exchanges": [], "warnings": [f"no assistant resolved: {exc}"]}
+        return SessionStore(root).history(n)
+
+
+def _parse_history_n(query):
+    raw = None
+    if query:
+        values = query.get("n")
+        if values:
+            raw = values[0]
+    if raw is None:
+        return HISTORY_DEFAULT_N
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return HISTORY_DEFAULT_N
+    if n < 0:
+        return 0
+    return min(n, HISTORY_MAX_N)

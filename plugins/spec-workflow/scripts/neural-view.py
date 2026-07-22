@@ -1288,7 +1288,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         if path.startswith("/assistant/"):
-            result = ENGINE.handle("GET", path) if ENGINE is not None else None
+            # AST-014: /assistant/history?n=N needs the query string; parsed
+            # here (not inside engine.py) so the engine package stays
+            # HTTP-framework-agnostic -- same division of labor as every
+            # other qs = urllib.parse.parse_qs(...) call in this handler.
+            qs = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+            result = ENGINE.handle("GET", path, qs) if ENGINE is not None else None
             if result is None:
                 return self._send(404, {"error": "not found"})
             status, payload, ctype = result
