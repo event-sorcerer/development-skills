@@ -1,4 +1,9 @@
 {
+  "background-suites-log-to-file-not-pipes->bisect-before-blaming-tracked-flakiness": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "bisect-before-blaming-tracked-flakiness->fix-root-cause-not-retry-around-flake": {
     "fires": 0,
     "last": null,

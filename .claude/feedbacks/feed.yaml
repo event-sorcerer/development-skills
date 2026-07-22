@@ -294,3 +294,129 @@ items:
   routing:
     action: brain-note
     ref: reviewer/dual-path-fixture-proves-sharing
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-22T02:45:00Z'
+iteration:
+  task: '#289/#291 neural-view voice visualizer + polish (PRs #288/#293)'
+  outcome: merged
+  reviewRounds: 0
+source:
+  role: orchestrator
+  model: claude-fable-5
+items:
+- category: worked-well
+  area: docs
+  severity: medium
+  summary: Iterative UI mode converged a visual design in 3 hub rounds via favorite+aspect
+    synthesis
+  detail: 'voice visualizer: 4 styles -> Mirror Spectrum variants -> Split Halves
+    final; element notes drove chrome fixes.'
+  evidence:
+  - Zugruul/development-skills#289
+  generalized: Presenting 2-4 genuinely different mockups per round and synthesizing
+    the favorite plus liked aspects into the next round converges on a final UI pick
+    in about three rounds; element-level annotations are the highest-signal feedback
+    channel.
+  routing:
+    action: brain-note
+    ref: orchestrator
+- category: worked-well
+  area: testing
+  severity: medium
+  summary: Dogfooding a feature by building a live demo artifact caught a real renderer
+    bug
+  detail: demo-note-media's backtick syntax examples came alive as broken media embeds;
+    fixed + regression-tested same session.
+  evidence:
+  - Zugruul/development-skills#293
+  generalized: After building a rendering feature, author a real artifact that exercises
+    every supported input INCLUDING documentation-style literal examples; syntax examples
+    inside code spans are a classic blind spot for tokenizers.
+  routing:
+    action: brain-note
+    ref: orchestrator
+- category: friction
+  area: testing
+  severity: medium
+  summary: Backgrounded test runs piped through grep produced empty output and stale
+    'running' states
+  detail: Two background suite runs yielded 0-byte outputs; a task showed running
+    with no processes alive. Writing the full log to a file and grepping afterwards
+    was reliable.
+  generalized: Long test suites run in background should redirect full output to a
+    log file and analyze the file afterwards; piping through grep/head buffers output
+    and makes hung-vs-finished undecidable.
+  routing:
+    action: brain-note
+    ref: orchestrator
+- category: incident
+  area: board
+  severity: medium
+  summary: Board item moved by a guessed issue number hit an unrelated issue
+  detail: 'add printed ''filed inbound #291'' but the follow-up move used a guessed
+    number and moved an unrelated Backlog bug; restored immediately.'
+  evidence:
+  - Zugruul/development-skills#291
+  generalized: Never guess an issue number for a follow-up board mutation in the same
+    breath as creation — parse the number from the creation output; a wrong guess
+    mutates an unrelated item silently.
+  routing:
+    action: brain-note
+    ref: orchestrator
+- category: friction
+  area: testing
+  severity: low
+  summary: A timing/TTL-based cache test flaked red under machine load and blocked
+    the gate
+  detail: /projects TTL test failed in a loaded full-suite run, passed in isolation;
+    matches the existing bisect-before-blaming lesson.
+  generalized: Tests asserting TTL/timing windows flake under host load; when a gate
+    goes red on code untouched by the diff, rerun the failing section in isolation
+    before assuming regression, and prefer injectable clocks in such tests.
+  routing:
+    action: backlog
+    ref: Zugruul/development-skills#297
+- category: friction
+  area: other
+  component: plugins/spec-workflow/scripts/ui-hub.py
+  severity: low
+  summary: Decision hub port was held by an orphaned hub from another repo; start
+    failed opaquely
+  detail: Fixed by manually killing the orphan after verifying empty inbox/outbox;
+    also, asks from a worktree wrote to a different per-clone state dir than the running
+    server's.
+  generalized: 'A fixed-port, per-repo-state local server needs an ownership handshake:
+    on start, detect a foreign/orphaned instance on the port and offer takeover; and
+    asks should fail loudly when the running server serves a different state dir.'
+  routing:
+    action: backlog
+    ref: Zugruul/development-skills#298
+- category: friction
+  area: other
+  component: plugins/spec-workflow/scripts/gitignore-sync.sh
+  severity: low
+  summary: Managed gitignore block drifted behind the local-state manifest; sync also
+    left a temp file inside the repo
+  detail: staleness-cache entry existed in manifest but not in the repo's managed
+    block; dry-run temp file got committed by git add -A and needed a follow-up removal.
+  generalized: Manifest-driven gitignore blocks drift when config sync isn't re-run
+    after plugin upgrades — surface drift in status/setup checks; helper scripts must
+    create temp files OUTSIDE the repo tree, and blanket git add -A is how strays
+    get committed.
+  routing:
+    action: upstream
+    ref: Zugruul/development-skills#274
+- category: recommendation
+  area: docs
+  severity: low
+  summary: Stale browser tabs of a live-reload-less dev page caused false bug reports
+  detail: 3D viewers 'not rendering' was an old page whose CSS/JS predated the feature;
+    content is fetched live so the page LOOKS current.
+  generalized: A dev-mode page that fetches live data but not live code should detect
+    server/page version skew (boot id endpoint) and badge 'reload needed' — users
+    cannot tell a stale shell from a broken feature.
+  routing:
+    action: backlog
+    ref: Zugruul/development-skills#299
