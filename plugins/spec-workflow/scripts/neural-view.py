@@ -92,6 +92,7 @@ tests); $NEURAL_VIEW_SESSION_RECENT_SECS overrides the "recent" window
 State dir (pid/port/log): $NEURAL_VIEW_STATE, else <git root>/.claude/neural-view.
 Port: --port, else $NEURAL_VIEW_PORT, else 4748. Binds 127.0.0.1 only.
 """
+import atexit
 import base64
 import json
 import os
@@ -111,6 +112,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # import config (project.yaml reader) beside this script
+
+from assistant.engine import AssistantEngine  # noqa: E402  the /assistant/* engine (AST-010, SPEC-ASSISTANT.md §5a)
+
+ENGINE = None  # set by the `serve` branch of main(); route dispatch below checks for None so `import neural_view` alone (e.g. from a test) never needs a live engine
 
 
 def git_root():
@@ -1282,6 +1287,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
+        if path.startswith("/assistant/"):
+            result = ENGINE.handle("GET", path) if ENGINE is not None else None
+            if result is None:
+                return self._send(404, {"error": "not found"})
+            status, payload, ctype = result
+            return self._send(status, payload, ctype)
         if path == "/" or path.startswith("/index"):
             if TEMPLATE.is_file():
                 return self._send(200, TEMPLATE.read_bytes(), "text/html; charset=utf-8")
@@ -1437,6 +1448,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?")[0]
+        if path.startswith("/assistant/"):
+            result = ENGINE.handle("POST", path) if ENGINE is not None else None
+            if result is None:
+                return self._send(404, {"error": "not found"})
+            status, payload, ctype = result
+            return self._send(status, payload, ctype)
         if path == "/metrics":
             try:
                 n = min(int(self.headers.get("Content-Length", 0)), 4096)
@@ -1710,7 +1727,7 @@ def counts(repos):
 
 
 def main():
-    global REPOS
+    global REPOS, ENGINE
     cmd = sys.argv[1] if len(sys.argv) > 1 else "status"
     args = sys.argv[2:]
     ensure_dirs()
@@ -1725,7 +1742,19 @@ def main():
         rescan_interval = arg_rescan(args)
         if rescan_interval > 0:
             threading.Thread(target=rescan_loop, args=(args, rescan_interval), daemon=True).start()
-        httpd.serve_forever()
+        ENGINE = AssistantEngine(lambda: REPOS, S)  # getter, not a snapshot -- stays live across rescan_loop's REPOS reassignment
+        ENGINE.start()
+        atexit.register(ENGINE.stop)  # covers normal return below AND an uncaught KeyboardInterrupt unwinding out of main()
+        # SIGTERM (how `stop` shuts a serving process down) has no default
+        # cleanup path -- without this handler the process would just die,
+        # skipping ENGINE.stop()/atexit entirely. httpd.shutdown() blocks
+        # until serve_forever's loop (running on THIS thread) notices and
+        # exits, so it must run on its own thread rather than inline here.
+        signal.signal(signal.SIGTERM, lambda signum, frame: threading.Thread(target=httpd.shutdown, daemon=True).start())
+        try:
+            httpd.serve_forever()
+        finally:
+            ENGINE.stop()
 
     elif cmd == "start":
         if pid_alive():
@@ -1797,7 +1826,21 @@ def main():
         pid = pid_alive()
         if pid:
             os.kill(pid, signal.SIGTERM)
-            print("stopped")
+            # The `serve` branch's SIGTERM handler now shuts down gracefully
+            # (joins the assistant engine's worker threads) rather than dying
+            # instantly on the OS's default disposition -- wait (bounded) for
+            # the PID to actually exit before reporting "stopped", so a
+            # caller that immediately re-`start`s never races a still-alive
+            # process still finishing its shutdown.
+            still_alive = True
+            for _ in range(50):
+                try:
+                    os.kill(pid, 0)
+                except OSError:
+                    still_alive = False
+                    break
+                time.sleep(0.1)
+            print("stopped (still exiting)" if still_alive else "stopped")
         else:
             print("not running")
         if "--force" in args:
