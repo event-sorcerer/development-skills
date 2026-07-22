@@ -110,3 +110,160 @@ out="$(python3 "$PLUGIN/scripts/validate-config.py" "$FIX/codex-capability-bad.p
 check "unrecognized models.codex.capability is INVALID" "INVALID" "$out"
 check "unrecognized capability error names the offending value" "'super-fast'" "$out"
 
+echo "== validate-config: assistant: section schema (AST-002, SPEC-ASSISTANT.md §6/§6.1/§6.5) =="
+
+AC_SCRIPTS="$PLUGIN/scripts"
+
+ac_py() { # $1: python3 -c snippet body (assistant.config importable, `a` is the assistant dict from sys.argv[1] JSON); $2..: sys.argv[1:]
+    local script="$1"; shift
+    PLUGIN_SCRIPTS="$AC_SCRIPTS" python3 -c '
+import json, os, sys
+sys.path.insert(0, os.environ["PLUGIN_SCRIPTS"])
+from assistant import config as AC
+a = json.loads(sys.argv[1])
+'"$script" "$@"
+}
+
+AC_VALID_JSON='{"version": 1, "enabled": true, "names": ["jarvis", "j"], "systemPrompt": "You are Jarvis.", "llm": {"provider": "openai", "model": "gpt-5.6-sol"}, "capabilities": {"codex": {"enabled": true}, "claude-code": {"enabled": false}}, "observability": {"metrics": {"prometheus": {"enabled": true, "host": "127.0.0.1", "port": 9464}}, "traces": {"sqlite": {"enabled": true, "retainDays": 30, "maxMB": 500}}}}'
+
+out="$(ac_py '
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "valid full section -> no errors" "[]" "$out"
+
+out="$(ac_py '
+a["enabled"] = False
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "enabled: false is still schema-valid (not itself an error)" "[]" "$out"
+
+out="$(ac_py '
+del a["names"]
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "names missing" "assistant: missing required key 'names'" "$out"
+
+out="$(ac_py '
+a["names"] = []
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "names empty list" "assistant.names: must be a non-empty list" "$out"
+
+out="$(ac_py '
+a["names"] = "jarvis"
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "names non-list" "assistant.names: expected list, got str" "$out"
+
+out="$(ac_py '
+a["names"] = ["", "j"]
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "names first element empty" "assistant.names: first entry (the main name) must be a non-empty string" "$out"
+
+out="$(ac_py '
+a["names"] = ["jarvis", ""]
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "names non-first element empty" "assistant.names[1]: must be a non-empty string" "$out"
+
+out="$(ac_py '
+del a["systemPrompt"]
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "systemPrompt missing" "assistant: missing required key 'systemPrompt'" "$out"
+
+out="$(ac_py '
+a["systemPrompt"] = 123
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "systemPrompt non-string" "assistant.systemPrompt: expected str, got int" "$out"
+
+out="$(ac_py '
+del a["llm"]
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "llm missing" "assistant: missing required key 'llm'" "$out"
+
+out="$(ac_py '
+a["llm"]["provider"] = "anthropic-raw"
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "llm.provider unknown value" "assistant.llm.provider: 'anthropic-raw' is not a recognized provider (valid: claude, openai)" "$out"
+
+out="$(ac_py '
+del a["llm"]["model"]
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "llm.model missing" "assistant.llm: missing required key 'model'" "$out"
+
+out="$(ac_py '
+a["capabilities"]["codex"]["enabled"] = False
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "provider openai requires codex enabled (disabled)" "assistant.llm.provider: 'openai' requires capabilities.codex.enabled: true" "$out"
+
+out="$(ac_py '
+del a["capabilities"]
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "provider openai requires codex enabled (capabilities absent)" "assistant.llm.provider: 'openai' requires capabilities.codex.enabled: true" "$out"
+
+out="$(ac_py '
+a["llm"]["provider"] = "claude"
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "provider claude requires claude-code enabled (disabled)" "assistant.llm.provider: 'claude' requires capabilities.claude-code.enabled: true" "$out"
+
+out="$(ac_py '
+a["capabilities"] = []
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "capabilities non-map" "assistant.capabilities: must be a mapping" "$out"
+
+out="$(ac_py '
+del a["capabilities"]["codex"]["enabled"]
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "capabilities entry missing enabled" "assistant.capabilities.codex: missing required key 'enabled'" "$out"
+
+out="$(ac_py '
+a["observability"]["traces"]["sqlite"]["retainDays"] = "thirty"
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "observability retention wrong type" "assistant.observability.traces.sqlite.retainDays: must be an integer >= 0 (0 = unlimited) (got 'thirty')" "$out"
+
+out="$(ac_py '
+a["observability"]["traces"]["sqlite"]["maxMB"] = -5
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "observability retention negative" "assistant.observability.traces.sqlite.maxMB: must be >= 0 (0 = unlimited) (got -5)" "$out"
+
+out="$(ac_py '
+a["observability"]["traces"]["sqlite"]["retainDays"] = 0
+a["observability"]["traces"]["sqlite"]["maxMB"] = 0
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "observability retention 0 is valid (unlimited)" "[]" "$out"
+
+out="$(ac_py '
+a["version"] = "1"
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "version non-int" "assistant.version: must be an integer (got '1')" "$out"
+
+out="$(ac_py '
+a["foo"] = 1
+print(AC.validate_assistant(a))
+' "$AC_VALID_JSON")"
+check "unknown top-level key rejected" "assistant.foo: unknown key" "$out"
+
+echo "== validate-config: assistant: section wiring (AST-002) =="
+out="$(python3 "$PLUGIN/scripts/validate-config.py" "$FIX/valid.project.yaml")"
+check "assistant section absent -- no-op, additive-only (regression)" "VALID: " "$out"
+out="$(python3 "$PLUGIN/scripts/validate-config.py" "$FIX/assistant-good.project.yaml")"
+check "assistant: full valid section end-to-end" "VALID: " "$out"
+out="$(python3 "$PLUGIN/scripts/validate-config.py" "$FIX/assistant-bad.project.yaml" || true)"
+check "assistant: provider/capability violation surfaces through validate-config" "INVALID" "$out"
+check "assistant: error is path-precise" "assistant.llm.provider: 'openai' requires capabilities.codex.enabled: true" "$out"
+

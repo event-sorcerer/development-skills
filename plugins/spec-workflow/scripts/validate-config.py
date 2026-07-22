@@ -14,6 +14,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config as C  # noqa: E402  (shared loader — reuse its shorthand-model detection)
+from assistant import config as AC  # noqa: E402  (assistant: section schema, AST-002)
 
 errs = []
 
@@ -290,6 +291,13 @@ def main(path):
                     modes = ("realtime", "task-close", "session-end", "manual")
                     if "mode" in sync and sync["mode"] not in modes:
                         errs.append(f"work.sync.mode must be one of {', '.join(modes)} (got {sync.get('mode')!r})")
+
+    # assistant: persistent LLM-agnostic assistant identity/config (AST-002,
+    # SPEC-ASSISTANT.md §6/§6.1/§6.5). Absent == no-op -- additive-only, like
+    # work/neuralView/entityKinds above.
+    assistant = cfg.get("assistant")
+    if assistant is not None:
+        errs.extend(AC.validate_assistant(assistant, where="assistant"))
 
     if errs:
         print(f"INVALID: {len(errs)} problem(s) in {path}:")

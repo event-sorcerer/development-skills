@@ -350,9 +350,79 @@
                     "description": "How neural-view colors cross-role entity-correlation edges (#163): the literal \"gradient\" (default, also used when this key or the whole neuralView section is absent) blends the two endpoint notes' own brain colors along the edge (vertexColors, source end -> source brain's color, target end -> target brain's color); any other value is treated as a CSS color string and forces every entity edge in this repo to that flat color instead."
                 }
             }
+        },
+        "assistant": {
+            "type": "object",
+            "description": "AST-002 (SPEC-ASSISTANT.md §6): the persistent, LLM-agnostic assistant this repo hosts. Absent == no assistant (additive-only; every other key in this schema validates identically with or without this section). Per §6.1 this section is the SOLE authority for assistant identity/enabled state — the `.neural-network` discovery marker carries no assistant flags. Structure is validated by scripts/assistant/config.py's validate_assistant(); it never resolves binaries/auth (that's AST-006 preflight) and never allowlists `llm.model` (passed verbatim to the adapter).",
+            "properties": {
+                "version": { "type": "integer", "default": 1, "description": "Schema version of this assistant: section. Always 1 today." },
+                "enabled": { "type": "boolean", "default": true, "description": "Whether this assistant is currently offered by discovery/selection. A structurally-valid section with enabled: false still validates — disabling never bypasses the other checks below." },
+                "names": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": { "type": "string" },
+                    "description": "Non-empty display names for the assistant. The FIRST entry is the main name (used in prompts/UI headers); any remaining entries are aliases it also answers to. Every entry must be a non-empty string."
+                },
+                "systemPrompt": { "type": "string", "description": "The assistant's persona, verbatim. names + the identity-brain roster are appended mechanically at turn time — this key holds only the human-authored persona text." },
+                "llm": {
+                    "type": "object",
+                    "description": "Which model backend serves this assistant's turns.",
+                    "properties": {
+                        "provider": {
+                            "type": "string",
+                            "enum": ["openai", "claude"],
+                            "enumDescriptions": [
+                                "Routes through the codex adapter — requires capabilities.codex.enabled: true (§6.5).",
+                                "Routes through the claude-code adapter — requires capabilities.claude-code.enabled: true (§6.5)."
+                            ],
+                            "description": "Which adapter serves this assistant's turns. Cross-checked against `capabilities` below (§6.5): each provider requires its matching capability enabled, or validate-config.py rejects the section."
+                        },
+                        "model": { "type": "string", "description": "Model id, passed VERBATIM to the adapter (§6.5) — never allowlisted here, since adapters version their own model catalogs independently of this schema." }
+                    }
+                },
+                "capabilities": {
+                    "type": "object",
+                    "description": "Which provider-CLI capabilities are available to this assistant, keyed by capability name (e.g. codex, claude-code). §6.5's provider/capability consistency check reads this map: llm.provider: openai requires capabilities.codex.enabled: true; llm.provider: claude requires capabilities.claude-code.enabled: true.",
+                    "additionalProperties": {
+                        "type": "object",
+                        "description": "One capability's config.",
+                        "properties": {
+                            "enabled": { "type": "boolean", "description": "Whether this capability is available for the assistant to use." },
+                            "provisioning": { "type": "object", "description": "Capability-specific provisioning hints (e.g. { bin: codex }). Structure is opaque to schema validation — binary/auth resolution is AST-006 preflight, not this schema." }
+                        }
+                    }
+                },
+                "observability": {
+                    "type": "object",
+                    "description": "Metrics/traces knobs for this assistant's engine (§10.3-§10.5). Absent == observability off.",
+                    "properties": {
+                        "metrics": {
+                            "type": "object",
+                            "description": "Metrics-exposition backends, keyed by backend name (e.g. prometheus).",
+                            "additionalProperties": { "$ref": "#/definitions/assistantObservabilityBackend" }
+                        },
+                        "traces": {
+                            "type": "object",
+                            "description": "Trace-retention backends, keyed by backend name (e.g. sqlite).",
+                            "additionalProperties": { "$ref": "#/definitions/assistantObservabilityBackend" }
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
+        "assistantObservabilityBackend": {
+            "type": "object",
+            "description": "One assistant observability backend (a metrics or traces exporter, e.g. prometheus or sqlite). retainDays/maxMB are retention knobs (§10.3): age AND size limits, checked independently — 0 means unlimited for that dimension; defaults 30 days / 500MB.",
+            "properties": {
+                "enabled": { "type": "boolean", "description": "Whether this backend is active." },
+                "retainDays": { "type": "integer", "minimum": 0, "default": 30, "description": "Retain data for at most this many days. 0 = unlimited (no age-based eviction)." },
+                "maxMB": { "type": "integer", "minimum": 0, "default": 500, "description": "Retain at most this many megabytes of data. 0 = unlimited (no size-based eviction)." },
+                "host": { "type": "string", "description": "Bind host for an exposition endpoint (e.g. prometheus). Localhost-only per the assistant's networking invariant." },
+                "port": { "type": "integer", "description": "Bind port for an exposition endpoint (e.g. prometheus)." }
+            }
+        },
         "roleIdentity": {
             "description": "How ONE role (dev/reviewer/orchestrator/custom) commits: null (opt out — commits as the human), a single identity, or an array of identities routed by `covers` globs for monorepo per-package agents.",
             "oneOf": [
