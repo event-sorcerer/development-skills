@@ -1049,3 +1049,66 @@ items:
   routing:
     action: brain-note
     ref: reviewer/empty-expected-recurrence-needs-lint
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-22T16:35:00Z'
+iteration:
+  task: AST-010
+  outcome: merged
+  reviewRounds: 3
+source:
+  role: orchestrator
+  model: claude-fable-5
+items:
+- category: worked-well
+  area: testing
+  severity: medium
+  summary: Dev ran the full suite unprompted for a lifecycle change and caught a cross-section
+    stop/start race its own new section could not see
+  detail: Graceful SIGTERM shifted shutdown latency; 29 checks across other sections
+    failed until the stop verb gained a bounded wait-for-exit. The dev bisected, fixed,
+    and reported it without a review round.
+  evidence:
+  - Zugruul/development-skills#308
+  generalized: Lifecycle-touching changes (signals, shutdown timing, daemon threads)
+    must gate on the FULL suite, never an isolated section — the breakage lives in
+    other tests' rapid stop-start sequences. Worth stating explicitly in dev briefs
+    for any change to server lifecycle code.
+  routing:
+    action: brain-note
+    ref: dev/lifecycle-changes-need-full-suite
+- category: worked-well
+  area: review
+  severity: medium
+  summary: Both dev and reviewer independently bug-injected the reverted behavior
+    to prove a regression check discriminates
+  detail: The live-repos getter regression was proven by reintroducing the snapshot
+    bug on both sides; the check failed exactly as claimed.
+  evidence:
+  - Zugruul/development-skills#308
+  generalized: Bug-injection (temporarily reintroduce the fixed defect, watch the
+    new check fail, restore) is becoming the house standard for fix-round verification;
+    cheap and decisive on both the author and reviewer side.
+  routing:
+    action: brain-note
+    ref: reviewer/fixture-must-reach-fixed-path
+- category: friction
+  area: review
+  severity: low
+  summary: Reviewers idle silently while waiting on long background runs instead of
+    sending verdicts with available evidence
+  detail: Two reviewers this session finished analysis but idled awaiting full-suite
+    background runs; each needed a nudge to send. One apologized and named the pattern
+    explicitly.
+  evidence:
+  - Zugruul/development-skills#308
+  - Zugruul/development-skills#303
+  generalized: Reviewer briefs should instruct — send the verdict with the evidence
+    in hand and name any still-running check; never idle on a background run. The
+    orchestrator loses more wall-clock to silent-idle reviewers than to any other
+    review friction.
+  routing:
+    action: ignore
+    ref: 'already operationalized: reviewer briefs now carry the send-immediately
+      instruction verbatim; no plugin change to file'
