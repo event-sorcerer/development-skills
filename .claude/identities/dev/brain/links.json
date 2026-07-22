@@ -14,6 +14,16 @@
     "last": "2026-07-20",
     "weight": 0.5
   },
+  "advisory-scripts-catch-oserror->lock-key-canonicalize": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "advisory-scripts-catch-oserror->tracked-config-atomic-writes": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "anonymous-listener-slice-eval->duplicate-with-agreement-pin": {
     "fires": 12,
     "last": "2026-07-22",
