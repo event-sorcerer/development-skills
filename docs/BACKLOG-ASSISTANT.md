@@ -143,7 +143,7 @@ implements; complexity 1–10 (seed-board rubric); priority P1>P2>P3.
 - **AST-063** Argv-array invoke with schema-validated params. (§11.5, §17.3) — P1, 5pts
   AC: no shell anywhere in the invoke path; injection-attempt fixtures (`; | $() &&`)
   land as literal argv text; type/pattern/allowlist validation errors are specific.
-- **AST-064** MCP invoke flavor. (§11.7) — P3, 4pts
+- **AST-064** MCP invoke flavor. (§11.7) — P2, 4pts
   AC: a capability can reference an MCP server; one round-trip invocation fixture.
 - **AST-065** Enablement gating end-to-end. (§11.2, §17.2) — P1, 3pts
   AC: disabled skill absent from roster/prompt/index; execution attempt refused; enabled
@@ -184,7 +184,7 @@ implements; complexity 1–10 (seed-board rubric); priority P1>P2>P3.
 
 - **AST-090** Merge/retire/aggregate primitives in brain library. (NG3 lift) — P2, 6pts
 - **AST-091** Distiller lifecycle use of the primitives (guarded). — P2, 4pts
-- **AST-092** End-of-session retro consolidation pass. — P3, 4pts
+- **AST-092** End-of-session retro consolidation pass. — P2, 4pts
 
 Dependency guards: E1 blockedBy E0; E2 blockedBy E1 (N1 gate); E3 blockedBy E1;
 E4 blockedBy E1; E5 blockedBy E2; E6 blockedBy E2; E7 blockedBy E6; E8 blockedBy E3.
