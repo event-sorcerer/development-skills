@@ -669,7 +669,6 @@ items:
   routing:
     action: ignore
     ref: positive signal — records that the review protocol worked; no change to make
-
 ---
 schemaVersion: 1
 kind: loop-feedback
@@ -718,4 +717,78 @@ items:
   routing:
     action: brain-note
     ref: orchestrator/worktree-lane-default
-
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-22T07:35:00Z'
+iteration:
+  task: AST-002
+  outcome: merged
+  reviewRounds: 2
+source:
+  role: orchestrator
+  model: claude-fable-5
+items:
+- category: incident
+  area: concurrency
+  severity: medium
+  summary: Dev agent went permanently unresponsive between writing and committing
+    its implementation
+  detail: Agent idled three times ignoring two concrete-command nudges (including
+    exact commands to run); orchestrator verified the tree green and recorded the
+    commit on-behalf (author=dev, committer=orchestrator), reviews proceeded normally.
+    The explicit brief framing line added after the previous iteration did not prevent
+    the stall.
+  evidence:
+  - Zugruul/development-skills#302
+  generalized: Briefing-side fixes do not reliably prevent subagent stalls at the
+    write-vs-commit boundary; the orchestrator needs a bounded take-over protocol
+    (N ignored nudges, then verify-and-record on-behalf) as the standing escalation,
+    and the loop docs should codify the nudge cap so sessions don't wait indefinitely
+    on an agent that will never resume.
+  proposal:
+    target: plugins/spec-workflow/skills/build-next/references/concurrency.md
+    change: Document the take-over protocol — two ignored concrete-command nudges,
+      then orchestrator verifies (gate + red-to-head assertion diff) and commits on-behalf
+      per auto-review commit-identity rule (b).
+  routing:
+    action: backlog
+    ref: Zugruul/development-skills#364
+- category: friction
+  area: brains
+  severity: low
+  summary: Brain recall link-bumps in the session checkout collide with parallel sessions
+    pushing the shared brain files
+  detail: recall commands mutate links.json/.activation.jsonl in the working tree;
+    a parallel session's retro push then blocks pull with overwrite errors, requiring
+    a manual JSON union-merge mid-iteration to continue.
+  evidence:
+  - Zugruul/development-skills#302
+  generalized: Read-path brain commands that write activation metadata into tracked
+    files make every recall a potential merge conflict across concurrent sessions;
+    either commit recall bumps promptly after briefing, or make the recall write-path
+    conflict-free (append-only, or merge-on-read), so multi-session repos don't need
+    hand-merges of link state.
+  proposal:
+    target: plugins/spec-workflow/scripts/brain.py
+    change: Consider deferring link-bump writes to retro time or storing fires/last
+      in an append-only sidecar merged on read, eliminating tracked-file races between
+      concurrent sessions.
+  routing:
+    action: backlog
+    ref: Zugruul/development-skills#365
+- category: worked-well
+  area: review
+  severity: low
+  summary: Reviewer mutation-tested error-message assertions and swept type-guard
+    sites, proving test discrimination
+  detail: Quality pass mutated the consistency message, confirmed exactly the dependent
+    checks failed, restored cleanly; swept all int sites for the bool-before-int guard.
+  evidence:
+  - Zugruul/development-skills#302
+  generalized: Mutation-testing an error-message assertion (swap specific for generic,
+    expect targeted failures) is a cheap standard step that proves a validator's test
+    section discriminates on content rather than on any-error-happened.
+  routing:
+    action: brain-note
+    ref: reviewer/mutation-check-assertions
