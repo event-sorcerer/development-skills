@@ -1295,5 +1295,5 @@ check "the ResizeObserver is disconnected when the canvas leaves the DOM (window
 check "open3dWindow tags its window .mw-3d so the flex-fill CSS and open-time sizing both scope to it" 'win.className = "hud note-window media-window mw-3d";' "$(cat "$NVHTML")"
 check "boot3dViewer sizes the detached panel from the loaded model's bounding box before the first frame" "applyModelPanelSize(win, bb)" "$(cat "$NVHTML")"
 check "the 3D detached window flex-fills so its canvas tracks the panel's actual size (not a fixed vh-based height)" ".media-window.mw-3d{display:flex;flex-direction:column}" "$(cat "$NVHTML")"
-check "the 3D canvas flexes to fill the panel (fullscreen and windowed alike -- no separate :fullscreen-only rule needed anymore)" ".media-window.mw-3d .n3d canvas{flex:1;height:auto;min-height:0;width:100%}" "$(cat "$NVHTML")"
+check "the 3D canvas absolute-fills the panel (in-flow sizing fights the canvas intrinsic aspect-ratio and leaves a dead strip)" ".media-window.mw-3d .n3d canvas{position:absolute;inset:0;width:100%;height:100%}" "$(cat "$NVHTML")"
 

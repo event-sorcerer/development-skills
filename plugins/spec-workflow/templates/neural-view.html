@@ -525,7 +525,15 @@ canvas.grabbing{cursor:grabbing}
   display:flex;justify-content:flex-end;align-items:flex-start;padding:.45rem}
 .mw-actions{display:flex;gap:.3rem;opacity:0;transition:opacity .15s ease}
 .mw-zone:hover .mw-actions{opacity:1}
-.mw-actions .iconbtn{background:rgba(10,20,34,.85);font-size:.56rem;padding:.2rem .4rem}
+.mw-actions .iconbtn{background:rgba(10,20,34,.85);font-size:.56rem;padding:.2rem .4rem;white-space:nowrap}
+/* narrow hosts (inline note blocks): shrink the chips so the row stays one
+   line — the media box is a size container, chips respond to ITS width */
+.n3d,.mw-imgwrap{container-type:inline-size}
+@container (max-width:460px){
+  .mw-actions .iconbtn{font-size:.48rem;padding:.14rem .28rem}
+  .mw-actions{gap:.2rem}
+}
+.n3d-spin.off{text-decoration:line-through;opacity:.75}
 /* a 3D block promoted into its own window (open3dWindow tags it .mw-3d)
    flex-fills whatever space the window currently has, instead of a fixed
    vh-based canvas height that ignored panel resizing -- the ResizeObserver
@@ -533,8 +541,16 @@ canvas.grabbing{cursor:grabbing}
    resize, and dragging the corner handle AND toggling fullscreen both
    reflow this box, so one handler covers both paths (#381) */
 .media-window.mw-3d{display:flex;flex-direction:column}
-.media-window.mw-3d .n3d{flex:1;min-height:0;display:flex;flex-direction:column;margin:0}
-.media-window.mw-3d .n3d canvas{flex:1;height:auto;min-height:0;width:100%}
+/* absolute-fill canvas is load-bearing: a canvas carries an intrinsic
+   aspect-ratio from its buffer attributes, so ANY in-flow sizing (flex,
+   height:auto) caps it at that ratio and leaves a dead strip — absolutely
+   positioning it against the .n3d box (already position:relative) is the
+   only sizing the ratio can't fight. The resize path reads clientWidth/
+   Height and refits buffer + camera. */
+.media-window.mw-3d .n3d{flex:1;min-height:0;margin:0}
+.media-window.mw-3d .n3d canvas{position:absolute;inset:0;width:100%;height:100%}
+.media-window:fullscreen .n3d{flex:1;min-height:0}
+.media-window:fullscreen .n3d canvas{position:absolute;inset:0;width:100%;height:100%}
 .media-window:fullscreen{display:flex;flex-direction:column;background:var(--bg);
   border:0;border-radius:0;max-height:none;resize:none;padding:1rem 1.2rem}
 .media-window:fullscreen .mw-imgwrap{flex:1;min-height:0;display:flex;flex-direction:column}
@@ -4122,8 +4138,13 @@ function make3dBlock(name, url){
   // hover-revealed detach action, mirroring the image experience
   const zone = document.createElement("div");
   zone.className = "mw-zone";
-  zone.innerHTML = '<div class="mw-actions"><button class="iconbtn n3d-pop" type="button">Detach</button></div>';
+  zone.innerHTML = '<div class="mw-actions">' +
+    '<button class="iconbtn n3d-nt" type="button">New tab</button>' +
+    '<button class="iconbtn n3d-dl" type="button">Save to</button>' +
+    '<button class="iconbtn n3d-spin" type="button" title="Toggle auto-rotation" aria-pressed="true">Spin</button>' +
+    '<button class="iconbtn n3d-pop" type="button">Detach</button></div>';
   zone.querySelector(".n3d-pop").onclick = ()=>open3dWindow(name, url);
+  wireModelFileActions(zone, name, url);
   box.appendChild(zone);
   boot3dViewer(box).catch(err=>{
     // surface the real reason IN the block — a silent flat strip is undebuggable
@@ -4244,7 +4265,7 @@ async function boot3dViewer(box){
     object = /\.obj$/i.test(name) ? parseOBJ(await res.text()) : parseSTL(await res.arrayBuffer());
   }
   const scene = new THREE.Scene();
-  const cam = new THREE.PerspectiveCamera(40, 1, .01, 1000);
+  const cam = new THREE.PerspectiveCamera(40, 1, .001, 1000);
   const ren = new THREE.WebGLRenderer({canvas: cv, antialias: true, alpha: true});
   scene.add(new THREE.HemisphereLight(0xdff2fb, 0x0a1422, 1.1));
   const dl = new THREE.DirectionalLight(0xffffff, 1.4);
@@ -4257,15 +4278,70 @@ async function boot3dViewer(box){
   const win = box.closest(".media-window.mw-3d");
   if(win) applyModelPanelSize(win, bb);
   syncViewerSize(cv, ren, cam);
-  fitCameraToBox(cam, bb, cam.aspect || 1);
   const ro = new ResizeObserver(()=>syncViewerSize(cv, ren, cam));
   ro.observe(box);
-  const t0 = performance.now();
+  const size = bb.getSize(new THREE.Vector3()).length() || 1;
+  cam.near = size*.005; cam.far = size*50;
+  cam.updateProjectionMatrix();
+  // orbit rig: drag = orbit, right/shift-drag = pan, wheel = zoom, any
+  // interaction pauses the auto-rotation, double-click reframes + resumes.
+  // Fit distance from the vertical fov with margin so the whole model is in
+  // frame at boot regardless of the canvas' aspect ratio.
+  const FIT = (size*.5) / Math.tan(cam.fov*Math.PI/360) * 1.35;
+  const target = new THREE.Vector3();
+  let yaw = .8, pitch = .32, dist = FIT, auto = true;
+  // "Spin" chip mirrors + toggles the auto-rotation; strikethrough = paused
+  const spinBtn = box.querySelector(".n3d-spin");
+  function setAuto(v){
+    auto = v;
+    if(spinBtn){ spinBtn.classList.toggle("off", !auto); spinBtn.setAttribute("aria-pressed", String(auto)); }
+  }
+  if(spinBtn) spinBtn.onclick = ()=>setAuto(!auto);
+  function applyCam(){
+    const cp = Math.cos(pitch);
+    cam.position.set(target.x + dist*cp*Math.sin(yaw),
+                     target.y + dist*Math.sin(pitch),
+                     target.z + dist*cp*Math.cos(yaw));
+    cam.lookAt(target);
+  }
+  let drag = null;
+  cv.style.touchAction = "none";
+  cv.addEventListener("pointerdown", ev=>{
+    drag = {x: ev.clientX, y: ev.clientY, pan: ev.button===2 || ev.shiftKey};
+    setAuto(false);
+    cv.setPointerCapture(ev.pointerId);
+    ev.preventDefault();
+  });
+  cv.addEventListener("pointermove", ev=>{
+    if(!drag) return;
+    const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+    drag.x = ev.clientX; drag.y = ev.clientY;
+    if(drag.pan){
+      const right = new THREE.Vector3().setFromMatrixColumn(cam.matrix, 0);
+      const up = new THREE.Vector3().setFromMatrixColumn(cam.matrix, 1);
+      target.add(right.multiplyScalar(-dx*dist*.0016)).add(up.multiplyScalar(dy*dist*.0016));
+    }else{
+      yaw -= dx*.008;
+      pitch = Math.max(-1.5, Math.min(1.5, pitch + dy*.008));
+    }
+  });
+  const endDrag = ev=>{ drag = null; try{ cv.releasePointerCapture(ev.pointerId); }catch{} };
+  cv.addEventListener("pointerup", endDrag);
+  cv.addEventListener("pointercancel", endDrag);
+  cv.addEventListener("wheel", ev=>{
+    ev.preventDefault();
+    // zoom deliberately does NOT pause the auto-spin — only rotate/pan do
+    dist = Math.max(size*.15, Math.min(size*10, dist*Math.exp(ev.deltaY*.0015)));
+  }, {passive: false});
+  cv.addEventListener("dblclick", ()=>{ target.set(0,0,0); yaw=.8; pitch=.32; dist=FIT; setAuto(true); });
+  cv.addEventListener("contextmenu", ev=>ev.preventDefault());
+  cv.title = "drag: rotate · right/shift-drag: pan · wheel: zoom · double-click: reset";
   (function tick(){
     if(!cv.isConnected){ ren.dispose(); ro.disconnect(); return; }   // window closed / re-render
     requestAnimationFrame(tick);
     syncViewerSize(cv, ren, cam);
-    object.rotation.y = (performance.now() - t0) * .0004;
+    if(auto) yaw += .004;
+    applyCam();
     ren.render(scene, cam);
   })();
 }
@@ -4297,8 +4373,9 @@ function detachNote(fromRect){
   win.querySelectorAll("img.nm").forEach(img=>{ img.onclick = ()=>openMediaViewer(img.src, img.alt || mediaName(img.src)); });
   win.querySelectorAll(".n3d").forEach(box=>{
     box.querySelector("canvas").replaceWith(document.createElement("canvas"));
-    const pop = box.querySelector(".n3d-pop");   // cloned handler is dead — rebind
+    const pop = box.querySelector(".n3d-pop");   // cloned handlers are dead — rebind
     if(pop) pop.onclick = ()=>open3dWindow(box.dataset.name, box.dataset.url);
+    wireModelFileActions(box, box.dataset.name, box.dataset.url);
     boot3dViewer(box).catch(()=>{});
   });
   // capture phase: the drag surfaces stopPropagation on pointerdown, so a
@@ -4363,7 +4440,7 @@ function openMediaViewer(src, name){
     '<div class="mw-imgwrap"><img class="mw-img">' +
       '<div class="mw-zone"><div class="mw-actions">' +
         '<button class="iconbtn mw-newtab" type="button">New tab</button>' +
-        '<button class="iconbtn mw-dl" type="button">Download</button>' +
+        '<button class="iconbtn mw-dl" type="button">Save to</button>' +
       '</div></div></div>';
   win.querySelector(".mw-name").textContent = name;
   const im = win.querySelector(".mw-img");
@@ -4415,6 +4492,22 @@ function openMediaViewer(src, name){
   return win;
 }
 function mediaName(src){ try{ return decodeURIComponent(src.split("/").pop().split("?")[0]) || "image"; }catch{ return "image"; } }
+// New tab / Download for a model file (same handlers wherever the block lives)
+function wireModelFileActions(scope, name, url){
+  const nt = scope.querySelector(".n3d-nt"), dl = scope.querySelector(".n3d-dl");
+  if(nt) nt.onclick = ()=>window.open(url, "_blank");
+  if(dl) dl.onclick = async ()=>{
+    try{
+      const resp = await fetch(url);
+      if(!resp.ok) throw new Error("fetch failed");
+      const u = URL.createObjectURL(await resp.blob());
+      const a = document.createElement("a");
+      a.href = u; a.download = name.split("/").pop() || "model";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(u), 5000);
+    }catch{ window.open(url, "_blank"); }
+  };
+}
 // a 3D block's Detach action: the model in its own window (⛶ fullscreen, ✕)
 function open3dWindow(name, url){
   const win = document.createElement("aside");
@@ -4431,7 +4524,7 @@ function open3dWindow(name, url){
       '<button class="close mw-x" aria-label="Close 3D window">✕</button></div>';
   win.querySelector(".mw-name").textContent = "3D · " + name.split("/").pop();
   const box = make3dBlock(name, url);
-  box.querySelector(".mw-zone").remove();   // no detach-from-detached recursion
+  box.querySelector(".n3d-pop").remove();   // no detach-from-detached recursion; Spin stays
   win.appendChild(box);
   win.querySelector(".mw-fs").onclick = ()=>{
     if(document.fullscreenElement === win) document.exitFullscreen();
