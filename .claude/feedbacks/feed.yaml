@@ -1777,3 +1777,68 @@ items:
   routing:
     action: upstream
     ref: Zugruul/development-skills#382
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-23T04:30:00Z'
+iteration:
+  task: session 2026-07-22/23 (AST-020 -> perf increment)
+  outcome: merged
+  reviewRounds: 2
+source:
+  role: orchestrator
+  model: claude-fable-5
+items:
+- category: worked-well
+  area: other
+  severity: medium
+  summary: One loop iteration degraded gracefully into interactive pair-programming
+    without losing board truth
+  detail: A single autonomous iteration absorbed a P0 hotfix, live human validation,
+    four user-reported page bugs, a feature recovery from an unmerged branch, and
+    a perf increment — every piece landed as a tracked, closed board item with a merge
+    SHA.
+  evidence:
+  - Zugruul/development-skills#317
+  - Zugruul/development-skills#373
+  - Zugruul/development-skills#382
+  generalized: The loop's real strength is mode-elasticity — autonomous batch work
+    and human-driven interactive fixes can interleave within one session as long as
+    every piece of work still gets its board item, verdict record, and merge announcement;
+    the board staying truthful is what makes the mode switches safe.
+  routing:
+    action: brain-note
+    ref: orchestrator/mode-elastic-loop
+- category: friction
+  area: merge
+  severity: medium
+  summary: No canonical merge locus for local-route merges — every merge improvised
+    its base
+  detail: Local main was checked out at varying places across the session (stale primary
+    checkout, task worktrees), forcing branch -f workarounds, a push-by-SHA, and one
+    retro commit transplant via cherry-pick after landing on a wrong base.
+  evidence:
+  - Zugruul/development-skills#382
+  generalized: Under local-route delivery the orchestrator needs ONE canonical merge
+    procedure (e.g. always merge in a dedicated detached temp worktree and push by
+    SHA to the remote mainline, never force-moving the local branch) — improvising
+    per merge invites wrong-base commits and checked-out-branch conflicts.
+  routing:
+    action: brain-note
+    ref: orchestrator/canonical-merge-locus
+- category: incident
+  area: other
+  severity: medium
+  summary: The primary checkout served months-stale code during live human validation
+  detail: The checkout a human used for validation sat detached at an old commit with
+    local modifications; the viewer served stale code, producing misleading missing-dependency
+    and missing-feature symptoms until diagnosed.
+  evidence:
+  - Zugruul/development-skills#379
+  generalized: Before a human validates anything in a checkout, verify it is on the
+    current mainline tip — and the long-running viewer could check its serving revision
+    against the remote mainline and surface a stale-code warning chip mechanically
+    instead of relying on someone noticing.
+  routing:
+    action: backlog
+    ref: Zugruul/development-skills#384
