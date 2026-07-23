@@ -1285,7 +1285,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            # client aborted mid-response (reload, dev live-reload poll) --
+            # nothing to send to anymore, nothing to log (#379)
+            return
 
     def log_message(self, *a):  # quiet
         pass

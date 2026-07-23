@@ -1077,3 +1077,223 @@ check "activation log entries area owns the scroll" "#tickerlog{flex:1;min-heigh
 check "activation log scrollbar is explicitly styled (not a bare overflow:auto that defers to an OS auto-hide overlay)" "#tickerlog::-webkit-scrollbar{width:9px}" "$(cat "$NVHTML")"
 check "activation log scrollbar thumb/track colors match the rest of the HUD's scrollbar convention" "#tickerlog::-webkit-scrollbar-thumb{background:rgba(90,190,255,.4);border-radius:5px}" "$(cat "$NVHTML")"
 
+echo "== search: dashed queries must match a note's own dashed slug (#380) =="
+# Human-confirmed diagnosis: searchNoteMatches() normalizes the SLUG haystack
+# (dash/underscore -> space) but never normalized the QUERY itself, so a
+# dashed query like a note's own displayed slug produced zero slug-field
+# matches. The fix normalizes once at the point the query is produced
+# (normalizeSearchQuery), not per haystack field -- pinned here by extracting
+# that function plus searchNoteMatches/searchBrainInScope straight out of the
+# live template and driving them against synthetic notes.
+_nvsearch="$(mktemp).cjs"
+cat >"$_nvsearch" <<'NODEJS'
+const fs = require("fs");
+const html = fs.readFileSync(process.argv[2], "utf8");
+function extract(name) {
+    const re = new RegExp("function " + name + "\\([^)]*\\)\\{[\\s\\S]*?\\n\\}\\n");
+    const m = html.match(re);
+    if (!m) throw new Error("could not find function " + name + "() in template");
+    return m[0];
+}
+function extractOneLine(name) {
+    const re = new RegExp("function " + name + "\\([^)]*\\)\\{[\\s\\S]*?\\}\\n");
+    const m = html.match(re);
+    if (!m) throw new Error("could not find function " + name + "() in template");
+    return m[0];
+}
+
+const searchFilters = {
+    fields: {slug: true, tags: true, frontmatter: false, fulltext: false},
+    brains: null,
+};
+const fulltextMatchIds = null;
+
+eval(extractOneLine("normalizeSearchQuery"));
+eval(extractOneLine("searchBrainInScope"));
+eval(extract("searchNoteMatches"));
+
+const note = {id: "n1", repo: "r", role: "dev", slug: "hermetic-fixture-pins-all-search-paths", tags: [], paths: [], source: ""};
+
+// (a) a note self-matches its OWN exact displayed (dashed) slug.
+const qSelf = normalizeSearchQuery(note.slug);
+if (!searchNoteMatches(note, qSelf)) throw new Error("a note does not self-match its own exact dashed slug");
+console.log("SELF_MATCH_OK");
+
+// (b) dashed and spaced forms of the SAME query return IDENTICAL results.
+const dashedForm = "hermetic-fixture";
+const spacedForm = "hermetic fixture";
+const otherNote = {id: "n2", repo: "r", role: "dev", slug: "unrelated-note", tags: [], paths: [], source: ""};
+const dashedMatches = [note, otherNote].filter(n => searchNoteMatches(n, normalizeSearchQuery(dashedForm))).map(n => n.id);
+const spacedMatches = [note, otherNote].filter(n => searchNoteMatches(n, normalizeSearchQuery(spacedForm))).map(n => n.id);
+if (JSON.stringify(dashedMatches) !== JSON.stringify(spacedMatches)) {
+    throw new Error("dashed form " + JSON.stringify(dashedMatches) + " and spaced form " + JSON.stringify(spacedMatches) + " disagree");
+}
+if (dashedMatches.length !== 1 || dashedMatches[0] !== "n1") throw new Error("dashed/spaced forms did not both match the expected note: " + JSON.stringify(dashedMatches));
+console.log("DASHED_SPACED_IDENTICAL_OK");
+
+// (c) leading/trailing whitespace is ignored.
+const qPadded = normalizeSearchQuery("   hermetic-fixture-pins-all-search-paths   ");
+if (!searchNoteMatches(note, qPadded)) throw new Error("leading/trailing whitespace on the query broke the match");
+if (qPadded !== normalizeSearchQuery(note.slug)) throw new Error("padded query did not normalize to the same string as the unpadded form: " + JSON.stringify(qPadded));
+console.log("WHITESPACE_IGNORED_OK");
+
+// (d) plain (undashed) tag matching still works, unaffected by the normalization.
+const tagNote = {id: "n3", repo: "r", role: "dev", slug: "other", tags: ["concurrency"], paths: [], source: ""};
+if (!searchNoteMatches(tagNote, normalizeSearchQuery("concurrency"))) throw new Error("plain tag search regressed");
+console.log("TAG_MATCH_STILL_WORKS_OK");
+
+// (e) round-2 review finding: normalizeSearchQuery() collapses whitespace
+// RUNS (dash/underscore -> space, then \s+ -> one space), but the slug
+// haystack previously only did the dash/underscore replace with no
+// whitespace collapse -- so a slug with ADJACENT separators (foo--bar,
+// foo_-bar) produced a double space in the haystack against a single space
+// in the normalized query, and .includes() failed. A note must self-match
+// its own exact displayed slug even when that slug has adjacent separators.
+const doubleSepNote = {id: "n4", repo: "r", role: "dev", slug: "foo--bar_baz", tags: [], paths: [], source: ""};
+if (!searchNoteMatches(doubleSepNote, normalizeSearchQuery(doubleSepNote.slug))) throw new Error("a note with adjacent separators in its slug (foo--bar_baz) does not self-match its own exact slug");
+console.log("DOUBLE_SEPARATOR_SELF_MATCH_OK");
+NODEJS
+search_out="$(node "$_nvsearch" "$NVHTML" 2>&1)"
+check "a note self-matches its own exact dashed slug" "SELF_MATCH_OK" "$search_out"
+check "dashed and spaced forms of the same query return identical match sets" "DASHED_SPACED_IDENTICAL_OK" "$search_out"
+check "leading/trailing whitespace on the query is ignored" "WHITESPACE_IGNORED_OK" "$search_out"
+check "plain (undashed) tag matching still works" "TAG_MATCH_STILL_WORKS_OK" "$search_out"
+check "a note with adjacent separators in its slug (foo--bar_baz) self-matches its own exact slug" "DOUBLE_SEPARATOR_SELF_MATCH_OK" "$search_out"
+rm -f "$_nvsearch"
+
+echo "== detached 3D model viewer: panel resize rescales the canvas, open-time sizing fits the model (#381) =="
+# Three independently testable pieces, pinned by extracting them straight out
+# of the live template and driving them with stubs (a stub renderer/camera
+# recording setSize/aspect calls, a stub Box3-like bounding box, and a
+# synthetic resize trigger standing in for a real ResizeObserver firing):
+#   panelDimsForModel(bb)   -- open-time panel size derived from the model's
+#                              own bounding-box aspect, clamped to sane bounds
+#   fitCameraToBox(cam,bb,aspect) -- FOV-fit camera distance/position
+#   syncViewerSize(cv,ren,cam)    -- applies a canvas's current CSS size to
+#                              its renderer+camera; called at boot AND from
+#                              the ResizeObserver on every resize, so this one
+#                              function is what makes a resized/fullscreened
+#                              panel actually rescale instead of staying at
+#                              its open-time canvas size
+# The purely visual "does the framing look good" question is manual-evidence
+# tier and is not asserted here -- only the numeric contracts are.
+_nv3d="$(mktemp).cjs"
+cat >"$_nv3d" <<'NODEJS'
+const fs = require("fs");
+const html = fs.readFileSync(process.argv[2], "utf8");
+function extract(name) {
+    const re = new RegExp("function " + name + "\\([^)]*\\)\\{[\\s\\S]*?\\n\\}\\n");
+    const m = html.match(re);
+    if (!m) throw new Error("could not find function " + name + "() in template");
+    return m[0];
+}
+
+global.innerWidth = 1600;
+global.innerHeight = 1000;
+global.devicePixelRatio = 1;
+class Vector3Stub {
+    constructor(x, y, z) { this.x = x || 0; this.y = y || 0; this.z = z || 0; }
+}
+const THREE = { Vector3: Vector3Stub };
+
+function makeBox(sx, sy, sz) {
+    return { getSize(target) { target.x = sx; target.y = sy; target.z = sz; return target; } };
+}
+
+eval(extract("panelDimsForModel"));
+eval(extract("fitCameraToBox"));
+eval(extract("syncViewerSize"));
+
+// panelDimsForModel: a WIDE model (x much greater than y) yields a panel
+// wider than it is tall, within sane bounds.
+{
+    const dims = panelDimsForModel(makeBox(10, 2, 3));
+    if (dims.w <= dims.h) throw new Error("a wide model did not produce a wider-than-tall panel: " + JSON.stringify(dims));
+    if (dims.w < 320 || dims.w > 900) throw new Error("panel width outside sane bounds: " + JSON.stringify(dims));
+    if (dims.h < 220 || dims.h > 700) throw new Error("panel height outside sane bounds: " + JSON.stringify(dims));
+    console.log("PANEL_WIDE_OK " + JSON.stringify(dims));
+}
+// panelDimsForModel: a TALL model (y much greater than x) yields a panel
+// taller than it is wide, still within sane bounds -- not degenerate.
+{
+    const dims = panelDimsForModel(makeBox(2, 10, 3));
+    if (dims.h <= dims.w) throw new Error("a tall model did not produce a taller-than-wide panel: " + JSON.stringify(dims));
+    if (dims.w < 320 || dims.w > 900) throw new Error("panel width outside sane bounds: " + JSON.stringify(dims));
+    if (dims.h < 220 || dims.h > 700) throw new Error("panel height outside sane bounds: " + JSON.stringify(dims));
+    console.log("PANEL_TALL_OK " + JSON.stringify(dims));
+}
+
+// fitCameraToBox: a bigger model is framed from farther away (monotonic in
+// model size), and the camera is actually pointed at the model (lookAt
+// called with the origin, since the object is re-centered before this runs).
+{
+    let lookAtArgs = null;
+    const posSets = [];
+    const cam1 = { fov: 40, position: { set: (x, y, z) => posSets.push([x, y, z]) }, lookAt: (x, y, z) => { lookAtArgs = [x, y, z]; } };
+    const cam2 = { fov: 40, position: { set: (x, y, z) => posSets.push([x, y, z]) }, lookAt: () => {} };
+    const distSmall = fitCameraToBox(cam1, makeBox(1, 1, 1), 1);
+    const distBig = fitCameraToBox(cam2, makeBox(10, 10, 10), 1);
+    if (!(distBig > distSmall)) throw new Error("a 10x bigger model was not framed from farther away: small=" + distSmall + " big=" + distBig);
+    if (!lookAtArgs || lookAtArgs[0] !== 0 || lookAtArgs[1] !== 0 || lookAtArgs[2] !== 0) throw new Error("camera was not pointed at the origin: " + JSON.stringify(lookAtArgs));
+    if (!posSets.length || posSets[0].some(v => !isFinite(v))) throw new Error("camera position was not set to finite coordinates: " + JSON.stringify(posSets));
+    console.log("FIT_CAMERA_OK dist_small=" + distSmall + " dist_big=" + distBig);
+}
+
+// syncViewerSize: drives renderer.setSize + camera.aspect + updateProjectionMatrix
+// off the canvas's CURRENT CSS size -- this is what a ResizeObserver firing on
+// panel drag-resize (or a fullscreen toggle) needs to actually rescale the view.
+{
+    const setSizeCalls = [];
+    let projUpdated = 0;
+    const ren = { setSize: (w, h, f) => setSizeCalls.push([w, h, f]), setPixelRatio: () => {} };
+    const cam = { aspect: 1, updateProjectionMatrix: () => { projUpdated++; } };
+    const cv = { clientWidth: 400, clientHeight: 300, width: 0, height: 0 };
+    const changed1 = syncViewerSize(cv, ren, cam);
+    if (!changed1) throw new Error("syncViewerSize reported no change on a canvas whose backing buffer never matched its CSS size");
+    if (setSizeCalls.length !== 1 || setSizeCalls[0][0] !== 400 || setSizeCalls[0][1] !== 300) throw new Error("renderer.setSize was not called with the canvas's CSS size: " + JSON.stringify(setSizeCalls));
+    if (cam.aspect !== 400/300) throw new Error("camera.aspect was not set from the canvas's CSS size: " + cam.aspect);
+    if (projUpdated !== 1) throw new Error("camera.updateProjectionMatrix() was not called after resizing");
+    console.log("SYNC_INITIAL_OK");
+
+    // simulate the backing buffer now matching (as it would after a real
+    // renderer.setSize call updates cv.width/height) -- a synthetic
+    // ResizeObserver firing again with NO actual size change must be a no-op.
+    cv.width = 400; cv.height = 300;
+    const changedNoop = syncViewerSize(cv, ren, cam);
+    if (changedNoop) throw new Error("syncViewerSize re-resized even though the canvas's CSS size had not changed");
+    if (setSizeCalls.length !== 1) throw new Error("renderer.setSize was called again on a no-op resize: " + JSON.stringify(setSizeCalls));
+    console.log("SYNC_NOOP_OK");
+
+    // NOW simulate a real panel resize (drag handle or fullscreen toggle) --
+    // this IS the #381 regression case: a synthetic ResizeObserver callback
+    // firing after the canvas's CSS size actually changed must rescale it.
+    cv.clientWidth = 800; cv.clientHeight = 450;
+    const changedResize = syncViewerSize(cv, ren, cam);
+    if (!changedResize) throw new Error("syncViewerSize did not detect a real panel resize");
+    if (setSizeCalls.length !== 2 || setSizeCalls[1][0] !== 800 || setSizeCalls[1][1] !== 450) throw new Error("renderer.setSize was not called with the NEW (resized) canvas size: " + JSON.stringify(setSizeCalls));
+    if (cam.aspect !== 800/450) throw new Error("camera.aspect was not updated to the new (resized) aspect ratio: " + cam.aspect);
+    if (projUpdated !== 2) throw new Error("camera.updateProjectionMatrix() was not called again after the resize");
+    console.log("SYNC_RESIZE_OK");
+}
+NODEJS
+nv3d_out="$(node "$_nv3d" "$NVHTML" 2>&1)"
+check "panelDimsForModel: a wide model gets a wider-than-tall panel within sane bounds" "PANEL_WIDE_OK" "$nv3d_out"
+check "panelDimsForModel: a tall model gets a taller-than-wide panel within sane bounds" "PANEL_TALL_OK" "$nv3d_out"
+check "fitCameraToBox: a bigger model is framed farther away and the camera points at it" "FIT_CAMERA_OK" "$nv3d_out"
+check "syncViewerSize: applies the canvas's CSS size to renderer+camera on the first call" "SYNC_INITIAL_OK" "$nv3d_out"
+check "syncViewerSize: a no-op resize (backing buffer already matches) does not re-call setSize" "SYNC_NOOP_OK" "$nv3d_out"
+check "syncViewerSize: a real panel resize rescales the renderer/camera to the NEW size (the #381 regression)" "SYNC_RESIZE_OK" "$nv3d_out"
+rm -f "$_nv3d"
+
+# Static wiring checks: the pure functions above only matter if boot3dViewer
+# actually wires a ResizeObserver on the block AND open3dWindow actually asks
+# for an open-time model-fit size AND the fullscreen toggle reflows the SAME
+# observed element (so it shares the resize handler, not a second one).
+check "boot3dViewer wires a ResizeObserver on the 3D block" "const ro = new ResizeObserver(" "$(cat "$NVHTML")"
+check "the ResizeObserver observes the 3D block itself (also reflowed by the fullscreen toggle -- one handler, both paths)" "ro.observe(box)" "$(cat "$NVHTML")"
+check "the ResizeObserver is disconnected when the canvas leaves the DOM (window closed / re-rendered)" "ro.disconnect()" "$(cat "$NVHTML")"
+check "open3dWindow tags its window .mw-3d so the flex-fill CSS and open-time sizing both scope to it" 'win.className = "hud note-window media-window mw-3d";' "$(cat "$NVHTML")"
+check "boot3dViewer sizes the detached panel from the loaded model's bounding box before the first frame" "applyModelPanelSize(win, bb)" "$(cat "$NVHTML")"
+check "the 3D detached window flex-fills so its canvas tracks the panel's actual size (not a fixed vh-based height)" ".media-window.mw-3d{display:flex;flex-direction:column}" "$(cat "$NVHTML")"
+check "the 3D canvas flexes to fill the panel (fullscreen and windowed alike -- no separate :fullscreen-only rule needed anymore)" ".media-window.mw-3d .n3d canvas{flex:1;height:auto;min-height:0;width:100%}" "$(cat "$NVHTML")"
+

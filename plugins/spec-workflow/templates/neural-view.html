@@ -526,11 +526,15 @@ canvas.grabbing{cursor:grabbing}
 .mw-actions{display:flex;gap:.3rem;opacity:0;transition:opacity .15s ease}
 .mw-zone:hover .mw-actions{opacity:1}
 .mw-actions .iconbtn{background:rgba(10,20,34,.85);font-size:.56rem;padding:.2rem .4rem}
-/* a 3D block promoted into its own window gets a taller canvas */
-.media-window .n3d{margin:0}
-.media-window .n3d canvas{height:min(58vh,480px)}
-.media-window:fullscreen .n3d{flex:1;min-height:0;display:flex;flex-direction:column}
-.media-window:fullscreen .n3d canvas{flex:1;height:auto;min-height:0}
+/* a 3D block promoted into its own window (open3dWindow tags it .mw-3d)
+   flex-fills whatever space the window currently has, instead of a fixed
+   vh-based canvas height that ignored panel resizing -- the ResizeObserver
+   wired in boot3dViewer drives renderer.setSize/camera.aspect on every
+   resize, and dragging the corner handle AND toggling fullscreen both
+   reflow this box, so one handler covers both paths (#381) */
+.media-window.mw-3d{display:flex;flex-direction:column}
+.media-window.mw-3d .n3d{flex:1;min-height:0;display:flex;flex-direction:column;margin:0}
+.media-window.mw-3d .n3d canvas{flex:1;height:auto;min-height:0;width:100%}
 .media-window:fullscreen{display:flex;flex-direction:column;background:var(--bg);
   border:0;border-radius:0;max-height:none;resize:none;padding:1rem 1.2rem}
 .media-window:fullscreen .mw-imgwrap{flex:1;min-height:0;display:flex;flex-direction:column}
@@ -1614,8 +1618,10 @@ function hiddenBrainCountFor(repo){
 // note stays lit too. Filterable by which fields count and which brains are
 // in scope — see the "filters" popover. ----
 let searchActive = false;
-let lastSearchQuery = null;   // tracks the LAST query a search actually ran with, so re-issuing the
-                               // same search (click/Enter again unchanged) reads as "toggle off"
+let lastSearchQuery = null;   // tracks the LAST query a search actually ran with (normalized -- see
+                               // normalizeSearchQuery), so re-issuing the same search (click/Enter
+                               // again unchanged) reads as "toggle off"
+let lastSearchQueryRaw = null; // the same search, but only trimmed+lowered -- what /search-body wants
 const searchFilters = {
   fields: {slug: true, tags: true, frontmatter: false, fulltext: false},
   brains: null,   // null = every brain in scope; else a Set of "repo/role" keys
@@ -1658,6 +1664,17 @@ function facetNoteMatches(nd){
 // note ids via GET /search-body BEFORE applySearchToNodes() runs; null
 // means "not fetched / not applicable" (fulltext scope off, or the fetch
 // failed — treated as no fulltext matches rather than blocking search).
+// Normalizes a raw typed query into the form the client-side matcher
+// compares against: trim, lowercase, dash/underscore -> space, collapse
+// whitespace. Applied ONCE here, at the point a search query is produced
+// (not per haystack field) -- so a dashed query and its spaced equivalent
+// always agree, and a note always self-matches its own displayed (dashed)
+// slug (#380). The /search-body full-text path deliberately does NOT run
+// through this -- it wants the raw, merely-trimmed-and-lowered form, since
+// it substring-matches against note BODY prose server-side, not a slug.
+function normalizeSearchQuery(q){
+  return String(q||"").trim().toLowerCase().replace(/[-_]/g, " ").replace(/\s+/g, " ").trim();
+}
 let fulltextMatchIds = null;
 async function fetchFulltextMatches(ql){
   if(!searchFilters.fields.fulltext || !ql){ fulltextMatchIds = null; return; }
@@ -1671,7 +1688,7 @@ function searchNoteMatches(nd, ql){
   if(!searchBrainInScope(nd.repo, nd.role)) return false;
   if(searchFilters.fields.fulltext && fulltextMatchIds && fulltextMatchIds.has(nd.id)) return true;
   const hay = [];
-  if(searchFilters.fields.slug) hay.push(String(nd.slug||"").replace(/[-_]/g, " "));
+  if(searchFilters.fields.slug) hay.push(String(nd.slug||"").replace(/[-_]/g, " ").replace(/\s+/g, " "));
   if(searchFilters.fields.tags) hay.push((nd.tags||[]).join(" "));
   if(searchFilters.fields.frontmatter){ hay.push((nd.paths||[]).join(" ")); hay.push(nd.source||""); }
   return hay.join("   ").toLowerCase().includes(ql);
@@ -1768,16 +1785,20 @@ async function triggerSearch(){
     return;
   }
   if(looksLikeStructuredQuery(q)){ applyQueryTermsFromText(q); return; }
-  const ql = q.toLowerCase();
+  const ql = normalizeSearchQuery(q);
+  const rawQl = q.toLowerCase();
   if(searchActive && ql === lastSearchQuery){ clearSearch(); return; }   // re-issuing the same search de-highlights
   lastSearchQuery = ql;
+  lastSearchQueryRaw = rawQl;
   searchActive = true;
   searchResultsCollapsed = false;   // a fresh search always opens expanded
   // Full-text needs a server round trip before matches can be computed —
   // await it (a no-op if that scope is off) so applySearchToNodes() sees a
-  // fresh fulltextMatchIds instead of racing an in-flight fetch.
+  // fresh fulltextMatchIds instead of racing an in-flight fetch. It gets the
+  // RAW (unnormalized) form -- /search-body substring-matches note BODY
+  // prose server-side, where dash/underscore normalization doesn't apply.
   document.getElementById("search-count").textContent = "searching…";
-  await fetchFulltextMatches(ql);
+  await fetchFulltextMatches(rawQl);
   if(ql !== lastSearchQuery) return;   // superseded by a newer search/clear while the fetch was in flight
   updateSearchUI(applySearchToNodes());
   visSearchEpoch++;   // updateVisuals(): rewrite aSearch + link colors once
@@ -1788,6 +1809,7 @@ function clearSearch(){
   // checked facet checkboxes and drop queryTerms, not just the text state.
   searchActive = false;
   lastSearchQuery = null;
+  lastSearchQueryRaw = null;
   fulltextMatchIds = null;
   if(hasActiveFacets()){
     searchFilters.queryTerms = [];
@@ -1811,7 +1833,7 @@ function clearSearch(){
 async function refreshSearchHighlight(){
   if(!filterActive()){ updateSearchUI(applySearchToNodes()); visSearchEpoch++; return; }
   const q = lastSearchQuery;
-  await fetchFulltextMatches(q);
+  await fetchFulltextMatches(lastSearchQueryRaw);
   if(q !== lastSearchQuery) return;   // superseded while the fetch was in flight
   updateSearchUI(applySearchToNodes());
   visSearchEpoch++;   // updateVisuals(): rewrite aSearch + link colors once
@@ -4153,6 +4175,62 @@ function parseSTL(buf){
   }
   return meshFromPositions(pos);
 }
+// Open-time panel size for a DETACHED 3D window (open3dWindow's .mw-3d),
+// derived from the loaded model's own bounding-box aspect (x/y extent) so a
+// tall model doesn't open in a wide-and-short panel and vice versa --
+// clamped to sane min/max panel dimensions so a degenerate model (near-zero
+// extent on one axis) can't collapse or blow out the panel (#381).
+function panelDimsForModel(bb){
+  const size = bb.getSize(new THREE.Vector3());
+  let aspect = size.x / Math.max(size.y, 1e-6);
+  if(!isFinite(aspect) || aspect <= 0) aspect = 1;
+  aspect = Math.max(0.4, Math.min(2.5, aspect));
+  const MIN_W = 320, MAX_W = Math.min(900, innerWidth*.85);
+  const MIN_H = 220, MAX_H = Math.min(700, innerHeight*.8);
+  let w = Math.min(640, innerWidth*.7);
+  let h = w / aspect;
+  if(h > MAX_H){ h = MAX_H; w = h*aspect; }
+  if(h < MIN_H){ h = MIN_H; w = h*aspect; }
+  w = Math.max(MIN_W, Math.min(MAX_W, w));
+  return {w: Math.round(w), h: Math.round(h)};
+}
+function applyModelPanelSize(win, bb){
+  const {w, h} = panelDimsForModel(bb);
+  win.style.width = w + "px";
+  win.style.height = h + "px";
+}
+// FOV-fit camera distance along a fixed 3/4 viewing direction -- the same
+// margin/half-angle formula fitDistance()/distanceForSphere() use for the
+// main graph camera (~line 1056), generalized to the 3D-block viewer's own
+// camera FOV rather than the whole-graph's MIN_DIST/MAX_DIST (a loaded
+// model's coordinate scale has nothing to do with the knowledge-graph's).
+function fitCameraToBox(cam, bb, aspect){
+  const size = bb.getSize(new THREE.Vector3());
+  const radius = Math.hypot(size.x, size.y, size.z)/2 || 1;
+  const fovRad = (cam.fov||40) * Math.PI/180;
+  const hFov = 2*Math.atan(Math.tan(fovRad/2)*aspect);
+  const half = Math.min(fovRad, hFov)/2;
+  const dist = (radius*1.35) / Math.sin(half);
+  const dx = .8, dy = .55, dz = .9, dlen = Math.hypot(dx,dy,dz);
+  cam.position.set(dx/dlen*dist, dy/dlen*dist, dz/dlen*dist);
+  cam.lookAt(0, 0, 0);
+  return dist;
+}
+// Applies a canvas's CURRENT CSS size to its renderer + camera. Called once
+// at boot and again from the ResizeObserver wired in boot3dViewer on every
+// resize (drag-resize handle AND the fullscreen toggle both reflow the
+// observed box) -- this is what makes a detached 3D panel actually rescale
+// instead of clipping/leaving dead space at its open-time size (#381).
+function syncViewerSize(cv, ren, cam){
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if(!w || !h) return false;
+  if(cv.width === Math.round(w*devicePixelRatio) && cv.height === Math.round(h*devicePixelRatio)) return false;
+  ren.setSize(w, h, false);   // false: canvas is CSS-sized, don't fight its style
+  ren.setPixelRatio(devicePixelRatio);
+  cam.aspect = w/h;
+  cam.updateProjectionMatrix();
+  return true;
+}
 async function boot3dViewer(box){
   const url = box.dataset.url, name = box.dataset.name;
   const cv = box.querySelector("canvas");
@@ -4173,19 +4251,20 @@ async function boot3dViewer(box){
   dl.position.set(3, 5, 4); scene.add(dl);
   scene.add(object);
   const bb = new THREE.Box3().setFromObject(object);
-  const size = bb.getSize(new THREE.Vector3()).length() || 1;
   object.position.sub(bb.getCenter(new THREE.Vector3()));
-  cam.position.set(size*.8, size*.55, size*.9);
-  cam.lookAt(0, 0, 0);
+  // detached windows: size the panel to the model's own bounding-box aspect
+  // at open time, before the first frame (#381)
+  const win = box.closest(".media-window.mw-3d");
+  if(win) applyModelPanelSize(win, bb);
+  syncViewerSize(cv, ren, cam);
+  fitCameraToBox(cam, bb, cam.aspect || 1);
+  const ro = new ResizeObserver(()=>syncViewerSize(cv, ren, cam));
+  ro.observe(box);
   const t0 = performance.now();
   (function tick(){
-    if(!cv.isConnected){ ren.dispose(); return; }   // window closed / re-render
+    if(!cv.isConnected){ ren.dispose(); ro.disconnect(); return; }   // window closed / re-render
     requestAnimationFrame(tick);
-    const w = cv.clientWidth, h = cv.clientHeight;
-    if(w && h && (cv.width !== Math.round(w*devicePixelRatio) || cv.height !== Math.round(h*devicePixelRatio))){
-      ren.setSize(w, h, false); ren.setPixelRatio(devicePixelRatio);
-      cam.aspect = w/h; cam.updateProjectionMatrix();
-    }
+    syncViewerSize(cv, ren, cam);
     object.rotation.y = (performance.now() - t0) * .0004;
     ren.render(scene, cam);
   })();
@@ -4339,9 +4418,10 @@ function mediaName(src){ try{ return decodeURIComponent(src.split("/").pop().spl
 // a 3D block's Detach action: the model in its own window (⛶ fullscreen, ✕)
 function open3dWindow(name, url){
   const win = document.createElement("aside");
-  win.className = "hud note-window media-window";
+  win.className = "hud note-window media-window mw-3d";
   win.style.left = "26vw"; win.style.top = "14vh";
   win.style.width = "min(640px,70vw)";
+  win.style.height = "420px";   // placeholder -- boot3dViewer's applyModelPanelSize() fits this to the loaded model (#381)
   win.style.zIndex = ++noteWinZ;
   win.innerHTML =
     '<div class="mw-bar" data-drag>' +

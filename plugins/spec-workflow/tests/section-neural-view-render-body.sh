@@ -57,3 +57,57 @@ check "image markdown inside backticks stays literal code" '<code>![alt](path)</
 check "link markdown inside backticks stays literal code" '<code>[label](file.mp4)</code>' "$NVRB_MEDIA_OUT"
 check "wikilink inside backticks stays literal code" '<code>[[wl]]</code>' "$NVRB_MEDIA_OUT"
 check_absent "no live file link leaks from the code-span examples" 'data-href="file.mp4"' "$NVRB_MEDIA_OUT"
+
+echo "== neural-view Handler._send (BrokenPipeError silence #379) =="
+NVSEND_OUT="$(python3 - "$PLUGIN/scripts/neural-view.py" <<'PY' 2>&1
+import importlib.util, sys, types
+spec = importlib.util.spec_from_file_location("neural_view", sys.argv[1])
+nv = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(nv)
+
+class BrokenWfile:
+    def write(self, data):
+        raise BrokenPipeError(32, "Broken pipe")
+
+stub = types.SimpleNamespace(
+    wfile=BrokenWfile(),
+    send_response=lambda *a, **k: None,
+    send_header=lambda *a, **k: None,
+    end_headers=lambda: None,
+)
+try:
+    nv.Handler._send(stub, 200, {"ok": True})
+    print("NO_EXCEPTION_RAISED")
+except Exception as e:
+    print("EXCEPTION_RAISED: " + repr(e))
+PY
+)"
+check "no exception propagates for BrokenPipeError" "NO_EXCEPTION_RAISED" "$NVSEND_OUT"
+check_absent "no traceback text leaks to output" "Traceback" "$NVSEND_OUT"
+
+echo "== neural-view Handler._send (ConnectionResetError silence #379) =="
+NVSEND_OUT2="$(python3 - "$PLUGIN/scripts/neural-view.py" <<'PY' 2>&1
+import importlib.util, sys, types
+spec = importlib.util.spec_from_file_location("neural_view", sys.argv[1])
+nv = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(nv)
+
+class ResetWfile:
+    def write(self, data):
+        raise ConnectionResetError(54, "Connection reset by peer")
+
+stub = types.SimpleNamespace(
+    wfile=ResetWfile(),
+    send_response=lambda *a, **k: None,
+    send_header=lambda *a, **k: None,
+    end_headers=lambda: None,
+)
+try:
+    nv.Handler._send(stub, 200, "plain text", "text/plain")
+    print("NO_EXCEPTION_RAISED")
+except Exception as e:
+    print("EXCEPTION_RAISED: " + repr(e))
+PY
+)"
+check "no exception propagates for ConnectionResetError" "NO_EXCEPTION_RAISED" "$NVSEND_OUT2"
+check_absent "no traceback text leaks to output (reset)" "Traceback" "$NVSEND_OUT2"
