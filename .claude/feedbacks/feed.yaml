@@ -1731,3 +1731,49 @@ items:
   routing:
     action: brain-note
     ref: orchestrator/batch-same-surface-bugs
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-23T04:10:00Z'
+iteration:
+  task: 382 (+3d-viewer recovery, FPS label)
+  outcome: merged
+  reviewRounds: 0
+source:
+  role: orchestrator
+  model: claude-fable-5
+items:
+- category: worked-well
+  area: other
+  severity: medium
+  summary: Unmerged prior-session work was recovered by searching branches before
+    reimplementing
+  detail: A remembered feature turned out to live on a day-old unmerged branch; rebasing
+    it onto the current mainline (resolving overlaps with a freshly merged fix in
+    the same file, keeping the better half of each) shipped it without duplicate implementation.
+  evidence:
+  - Zugruul/development-skills#381
+  generalized: When a human remembers a feature that the mainline lacks, grep the
+    unmerged branches and worktrees BEFORE reimplementing — recovered work rebased
+    over the current mainline preserves original authorship and catches design lessons
+    (e.g. a superseding CSS technique) that a fresh reimplementation would miss.
+  routing:
+    action: brain-note
+    ref: orchestrator/search-branches-before-reimplementing
+- category: friction
+  area: review
+  severity: medium
+  summary: Human overrides compressed the protocol (no independent review, merges
+    before the recorded gate finished)
+  detail: Under an explicit human time/AFK constraint, several merges shipped orchestrator-verified
+    only, one ahead of its full gate result (which later passed). Documented per merge,
+    but the protocol has no first-class expedited mode — each override is ad hoc.
+  evidence:
+  - Zugruul/development-skills#382
+  generalized: An explicit expedited-delivery mode (human-invoked) that records what
+    was skipped per merge would make time-pressured sessions auditable instead of
+    ad hoc; the recorded gate remaining mandatory-but-async (merge allowed, auto-revert
+    task filed on red) is a policy worth designing deliberately.
+  routing:
+    action: upstream
+    ref: Zugruul/development-skills#382

@@ -84,6 +84,16 @@
     "last": null,
     "weight": 0.5
   },
+  "search-branches-before-reimplementing->batch-same-surface-bugs": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "search-branches-before-reimplementing->live-validation-is-loop-input": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "spec-interviews-need-concrete-previews->plan-stage-adversarial-review-before-spec": {
     "fires": 0,
     "last": null,
