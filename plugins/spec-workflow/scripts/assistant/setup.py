@@ -164,9 +164,17 @@ def _leaves(prefix, node):
         yield prefix, node
 
 
+_DEFAULT_MODEL_BY_PROVIDER = {"claude": "claude-sonnet-5", "openai": "gpt-5.6-sol"}
+
+
 def _default_assistant_section(names, provider, model):
     provider = provider or "claude"
-    model = model or "claude-sonnet-5"
+    # bug #377: the default model must follow the resolved provider -- an
+    # unconditional claude-sonnet-5 default silently paired with
+    # --provider openai validates cleanly (§6.5 only checks provider<->
+    # capability consistency; the model string itself is passed verbatim)
+    # but is unservable on the very first live turn.
+    model = model or _DEFAULT_MODEL_BY_PROVIDER.get(provider, "claude-sonnet-5")
     main_name = (names or ["assistant"])[0]
     return {
         "version": 1,

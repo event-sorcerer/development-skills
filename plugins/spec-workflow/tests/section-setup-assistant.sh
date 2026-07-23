@@ -74,6 +74,31 @@ sa_val="$(bash "$SA_SCRIPT" --root "$sa_d" validate 2>&1)"
 check "scaffold: scaffolded assistant: section validates" "VALID" "$sa_val"
 rm -rf "$sa_d"
 
+# --- bug #377: scaffold's default model must be provider-conditional -----------
+# provider openai with no --model must NOT inherit the claude default model
+# (that pair validates cleanly per §6.5 but is unservable on the first live
+# turn -- the model string is passed verbatim and only checked provider-side).
+sa_openai_d="$(mktemp -d)"
+bash "$SA_SCRIPT" --root "$sa_openai_d" scaffold --name jarvis --provider openai >/dev/null 2>&1
+sa_openai_model="$(sa_get "$sa_openai_d" assistant.llm.model)"
+check "scaffold: --provider openai with no --model defaults to gpt-5.6-sol (#377)" \
+    "gpt-5.6-sol" "$sa_openai_model"
+rm -rf "$sa_openai_d"
+
+sa_claude_d="$(mktemp -d)"
+bash "$SA_SCRIPT" --root "$sa_claude_d" scaffold --name jarvis --provider claude >/dev/null 2>&1
+sa_claude_model="$(sa_get "$sa_claude_d" assistant.llm.model)"
+check "scaffold: --provider claude with no --model still defaults to claude-sonnet-5 (#377)" \
+    "claude-sonnet-5" "$sa_claude_model"
+rm -rf "$sa_claude_d"
+
+sa_explicit_d="$(mktemp -d)"
+bash "$SA_SCRIPT" --root "$sa_explicit_d" scaffold --name jarvis --provider openai --model something-explicit >/dev/null 2>&1
+sa_explicit_model="$(sa_get "$sa_explicit_d" assistant.llm.model)"
+check "scaffold: an explicit --model always wins over the provider default (#377)" \
+    "something-explicit" "$sa_explicit_model"
+rm -rf "$sa_explicit_d"
+
 # --- existing-file preservation: unrelated keys + persona prose survive -------
 sa_d="$(mktemp -d)"
 mkdir -p "$sa_d/.claude"
