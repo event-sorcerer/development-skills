@@ -2137,3 +2137,36 @@ items:
   routing:
     action: brain-note
     ref: reviewer/delta-jurisprudence
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-24T13:20:00Z'
+iteration:
+  task: AST run close (hardening batch + queue drain)
+  outcome: merged
+  reviewRounds: 1
+source:
+  role: orchestrator
+  model: claude-fable-5
+items:
+- category: worked-well
+  area: concurrency
+  severity: medium
+  summary: A long fully-autonomous run sustained quality via the same fixed iteration
+    shape every time
+  detail: Roughly fifteen consecutive task closes ran the identical loop — brief with
+    recency-ordered lessons, red-first verification, named-failure-mode review, gate-line
+    read as its own step, board close with verdict trail — with zero human interventions
+    needed after the process lessons stabilized mid-run.
+  evidence:
+  - Zugruul/development-skills#322
+  - Zugruul/development-skills#326
+  - Zugruul/development-skills#331
+  - Zugruul/development-skills#393
+  generalized: Autonomous throughput comes from a FIXED iteration shape whose steps
+    encode past failures, not from adaptive cleverness — once the brief template,
+    verification order, and close-out checklist stabilized, every subsequent iteration
+    was clean; invest failures into the template, then repeat it mechanically.
+  routing:
+    action: brain-note
+    ref: orchestrator/fixed-iteration-shape
