@@ -18,6 +18,8 @@ echo "== build-next SKILL.md: mandatory retro at PR close (SW-021, SPEC 8.2) =="
 BNSKILL="$PLUGIN/skills/build-next/SKILL.md"
 if [[ -f "$BNSKILL" ]]; then echo "ok   build-next/SKILL.md exists"; else echo "FAIL build-next/SKILL.md missing"; fails=$((fails + 1)); fi
 BNBODY="$(cat "$BNSKILL" 2>/dev/null)"
+# shellcheck disable=SC2016  # the backticks in the pinned phrase are literal markdown, never expansion
+check "build-next stop conditions mandate the feedback then retrospective SKILLS before the handoff (#394)" 'invoke the `feedback` skill, then the `retrospective` skill, BEFORE writing the handoff' "$BNBODY"
 check "build-next SKILL.md has a numbered Retro step" "**Retro" "$BNBODY"
 check "build-next SKILL.md states the retro is MANDATORY at PR close" "MANDATORY at PR close" "$BNBODY"
 check "build-next SKILL.md report step carries a retro-status line" "retro: done" "$BNBODY"
