@@ -181,6 +181,7 @@ SECTIONS=(
     section-assistant-continuation.sh
     section-assistant-traces.sh
     section-assistant-metrics.sh
+    section-assistant-inspector.sh
 )
 
 if [[ ${#SECTIONS[@]} -eq 0 ]]; then

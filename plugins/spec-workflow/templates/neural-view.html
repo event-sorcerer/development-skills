@@ -474,6 +474,33 @@ canvas.grabbing{cursor:grabbing}
   font-family:var(--mono);font-size:.6rem;color:var(--fg)}
 .ast-digest-note{border:1px solid var(--border);border-radius:3px;padding:.2rem .4rem}
 .ast-digest-empty{opacity:.6;font-style:italic}
+/* AST-044 voice-panel metrics expansion (SPEC-ASSISTANT.md §10.5, issue
+   #330): same placeholder-only styling note as .ast-picker/.ast-switcher/
+   .ast-digest above -- restyle is a pending human choice on the issue, not
+   made here. */
+.ast-metrics{display:flex;flex-direction:column;gap:.3rem;margin-top:.3rem;
+  font-family:var(--mono);font-size:.6rem;color:var(--fg)}
+.ast-metrics-row{display:flex;justify-content:space-between;gap:.5rem;
+  border:1px solid var(--border);border-radius:3px;padding:.2rem .4rem}
+.ast-metrics-graph{display:block;width:100%;height:2.2rem;fill:var(--cyan)}
+.ast-metrics-state{padding:.2rem .4rem;font-size:.6rem;color:var(--muted);min-height:1em}
+.ast-metrics-state-gated,.ast-metrics-state-offline{color:#e0453a}
+.ast-metrics-retry{font-family:var(--mono);font-size:.6rem;border:1px solid var(--border);
+  border-radius:3px;cursor:pointer;color:var(--fg);background:transparent}
+.ast-metrics-hidden{display:none}
+.ast-turnlist{display:flex;flex-direction:column;gap:.2rem;max-height:8rem;overflow-y:auto}
+.ast-turnlist-row{font-family:var(--mono);font-size:.6rem;color:var(--fg);
+  border:1px solid var(--border);border-radius:3px;padding:.2rem .4rem;cursor:pointer;
+  display:flex;justify-content:space-between;gap:.4rem}
+.ast-turnlist-row:hover{border-color:var(--cyan);color:var(--cyan)}
+.ast-turnlist-row.ast-turnlist-selected{border-color:var(--cyan);color:var(--cyan)}
+.ast-turnlist-row.ast-turnlist-error{color:#e0453a}
+.ast-waterfall{display:flex;flex-direction:column;gap:.15rem;margin-top:.3rem}
+.ast-waterfall-track{position:relative;height:.6rem;border:1px solid var(--border);border-radius:2px}
+.ast-waterfall-bar{position:absolute;top:0;height:100%;background:var(--cyan);opacity:.6}
+.ast-waterfall-bar.ast-waterfall-instant{width:2px!important;opacity:1;background:var(--fg)}
+.ast-waterfall-bar.ast-waterfall-error{background:#e0453a;opacity:1}
+.ast-waterfall-label{font-size:.55rem;color:var(--muted)}
 /* AST-023 T-key chat overlay (SPEC-ASSISTANT.md §8.6, §5, §8.3, §8.5,
    issue #320): minimal HUD-consistent placeholder styling only, matching
    .hud's panel/border language at the structural level -- the real look
@@ -896,6 +923,16 @@ canvas.grabbing{cursor:grabbing}
     <div class="vs-hint">On: the picker shows every time this page loads, even if an assistant was chosen before. Off: the last choice loads automatically.</div>
     <div class="ast-switcher" id="ast-switcher" role="group" aria-label="Switch assistant"></div>
     <div class="ast-digest" id="ast-digest" role="status" aria-label="Assistant activation digest"></div>
+  </div>
+  <div class="vs-row"><span class="label">Metrics</span>
+    <div class="vs-opts">
+      <button class="iconbtn" id="ast-metrics-refresh">Refresh</button>
+      <button class="iconbtn ast-metrics-retry ast-metrics-hidden" id="ast-metrics-retry">Retry</button>
+    </div>
+    <div class="ast-metrics-state" id="ast-metrics-state"></div>
+    <div class="ast-metrics" id="ast-metrics" role="region" aria-label="Assistant metrics"></div>
+    <div class="ast-turnlist" id="ast-turnlist" role="list" aria-label="Turn list"></div>
+    <div class="ast-waterfall ast-metrics-hidden" id="ast-waterfall" role="group" aria-label="Turn waterfall"></div>
   </div>
   <div class="vs-row">
     <button class="iconbtn" id="vs-reset" aria-live="polite">Reset settings</button>
@@ -3300,6 +3337,10 @@ document.getElementById("voice-settings").onclick = ()=>{
   // server state every time the panel opens, not just at boot -- a switch
   // made from another tab must show up here without a full page reload.
   if(open && typeof refreshAssistantSettingsUi === "function") refreshAssistantSettingsUi();
+  // AST-044 (§10.5): fetch the metrics/turns fold's data fresh every time
+  // the panel opens, same "latest server state on open" posture as
+  // AST-022's refreshAssistantSettingsUi call directly above.
+  if(open && typeof loadAssistantInspector === "function") loadAssistantInspector();
 };
 // AST-022 (§7.5): the ⚙ panel's "ask again on load" toggle -- flips the
 // PERSISTED setting for the NEXT boot (see engine.py's _settings docstring
@@ -5296,6 +5337,318 @@ function handleAssistantChatKeydown(ev){
   return openChatOverlay();
 }
 addEventListener("keydown", handleAssistantChatKeydown);
+
+// ---- voice-panel metrics expansion (AST-044, SPEC-ASSISTANT.md §10.5,
+// issue #330) ----
+// Extends the ⚙ voice-settings panel (AST-021/022/023/024 above) with a
+// metrics fold: percentile/per-area counters from GET /assistant/metrics
+// (AST-043 -- fleet-wide; this reads ONLY the currently selected
+// assistant's own entry out of that roots map, matching every other row in
+// this panel's single-assistant focus) plus a turn list + click-to-
+// waterfall view sourced from GET /assistant/traces (AST-043, resolves the
+// SAME assistant /assistant/history already resolves against). Same
+// gated/offline posture as AST-023's chat overlay above: gated/none shows
+// the existing status reason, a fetch failure shows a specific offline
+// message with a retry hook -- no new gating concept invented here.
+window.assistantInspector = window.assistantInspector || { turns: [], selectedTurnId: null };
+
+// Mirrors observability.py's LATENCY_BUCKETS_SECONDS/`_fmt_num` exactly
+// (see that module's docstrings). Returned as a function (not a shared
+// top-level const) so every helper below stays a self-contained, once-
+// extractable `function name(...) {...}` for the template test harness
+// (section-assistant-inspector.sh), the same "getter-only children Proxy"
+// extraction style section-assistant-chat.sh already uses.
+function astMetricsBucketBoundaries(){
+  return [0.1, 0.5, 1, 2, 5, 10, 30];
+}
+function astMetricsBucketKey(n){
+  return String(n);
+}
+// Percentile estimation from Prometheus-style CUMULATIVE bucket counts:
+// linear interpolation within the ONE bucket the target rank (p * count)
+// falls into, assuming samples are spread uniformly across that bucket's
+// own (lowerBoundary, le] range -- the same assumption Prometheus's own
+// `histogram_quantile` makes. This is an ESTIMATE, not an exact quantile:
+// the raw per-sample durations never leave the engine (only bucket counts
+// do, by design -- see observability.py's `root_metrics` docstring). A
+// rank that falls past every finite bucket (every finite cumulative count
+// is still < target, i.e. the samples pushing that rank past are only in
+// the "+Inf" bucket) can't be interpolated past the last finite boundary --
+// this returns that boundary as the closest available estimate, mirroring
+// Prometheus's own "+Inf bucket" edge case.
+function astEstimatePercentile(bucketMap, count, p){
+  if(!count) return null;
+  const boundaries = astMetricsBucketBoundaries();
+  const target = p * count;
+  let prevLe = 0, prevCum = 0;
+  for(const le of boundaries){
+    const cum = (bucketMap && bucketMap[astMetricsBucketKey(le)]) || 0;
+    if(cum >= target){
+      const bucketCount = cum - prevCum;
+      if(bucketCount <= 0) return le;
+      const frac = (target - prevCum) / bucketCount;
+      return prevLe + frac * (le - prevLe);
+    }
+    prevLe = le;
+    prevCum = cum;
+  }
+  return prevLe;
+}
+function astMetricsRootFor(metricsData, selectedName){
+  if(!metricsData || !metricsData.roots || !selectedName) return null;
+  return metricsData.roots[selectedName] || null;
+}
+function astMetricsRow(label, value){
+  const row = document.createElement("div");
+  row.className = "ast-metrics-row";
+  const l = document.createElement("span");
+  l.textContent = label;
+  const v = document.createElement("span");
+  v.textContent = value;
+  row.appendChild(l);
+  row.appendChild(v);
+  return row;
+}
+// Structural placeholder only (hook class ast-metrics-graph): an inline
+// SVG bar per bucket boundary, height proportional to that bucket's OWN
+// (non-cumulative) sample count so the shape reads as a rough distribution
+// rather than a monotonic ramp. No axis/legend/color polish -- that is the
+// pending restyle's job, per this section's own placeholder-only note.
+function buildAstMetricsGraphMarkup(bucketMap, count){
+  const boundaries = astMetricsBucketBoundaries();
+  const n = boundaries.length;
+  let prevCum = 0;
+  let rects = "";
+  for(let i = 0; i < n; i++){
+    const le = boundaries[i];
+    const cum = (bucketMap && bucketMap[astMetricsBucketKey(le)]) || 0;
+    const own = Math.max(0, cum - prevCum);
+    prevCum = cum;
+    const h = count ? (own / count) * 20 : 0;
+    const x = (i / n) * 100;
+    const w = (1 / n) * 100 - 1;
+    rects += `<rect x="${x}" width="${w}" y="${20 - h}" height="${h}"></rect>`;
+  }
+  return `<svg class="ast-metrics-graph" viewBox="0 0 100 20" preserveAspectRatio="none">${rects}</svg>`;
+}
+function renderAstMetrics(rootMetrics){
+  const el = document.getElementById("ast-metrics");
+  if(!el) return;
+  el.innerHTML = "";
+  if(!rootMetrics){
+    const row = document.createElement("div");
+    row.className = "ast-metrics-row";
+    row.textContent = "no metrics for this assistant yet";
+    el.appendChild(row);
+    return;
+  }
+  const td = rootMetrics.turnDuration || {count: 0, sum: 0, buckets: {}};
+  const p50 = astEstimatePercentile(td.buckets, td.count, 0.5);
+  const p95 = astEstimatePercentile(td.buckets, td.count, 0.95);
+  el.appendChild(astMetricsRow("p50 turn duration", p50 === null ? "—" : p50.toFixed(2) + "s"));
+  el.appendChild(astMetricsRow("p95 turn duration", p95 === null ? "—" : p95.toFixed(2) + "s"));
+  const byStatus = rootMetrics.turnsByStatus || {};
+  el.appendChild(astMetricsRow("turns ok", String(byStatus.ok || 0)));
+  el.appendChild(astMetricsRow("turns error", String(byStatus.error || 0)));
+  el.appendChild(astMetricsRow("provider errors", String(rootMetrics.providerErrors || 0)));
+  el.appendChild(astMetricsRow("distill batches", String(rootMetrics.distillBatches || 0)));
+  el.appendChild(astMetricsRow("notes minted", String(rootMetrics.notesMinted || 0)));
+  const graphWrap = document.createElement("div");
+  graphWrap.innerHTML = buildAstMetricsGraphMarkup(td.buckets, td.count);
+  el.appendChild(graphWrap);
+}
+// Groups `/assistant/traces`'s already seq-ordered `events` by `turn_id`
+// (first-seen order preserved -- `turn_id` is a uuid hex string, never an
+// integer-index-shaped one, so plain object insertion order is safe here,
+// unlike the bucket-key gotcha `astMetricsBucketBoundaries` exists to
+// avoid). Every event carrying that `turn_id` is kept (not just
+// turn.start/turn.end) -- the waterfall below needs the full span list.
+function groupTurnsById(events){
+  const byId = {};
+  const order = [];
+  for(const ev of (events || [])){
+    const tid = ev && ev.turn_id;
+    if(!tid) continue;
+    if(!byId[tid]){
+      byId[tid] = {turnId: tid, startTs: null, endTs: null, status: null, events: []};
+      order.push(tid);
+    }
+    byId[tid].events.push(ev);
+    if(ev.kind === "turn.start") byId[tid].startTs = ev.ts;
+    if(ev.kind === "turn.end"){
+      byId[tid].endTs = ev.ts;
+      byId[tid].status = ev.status || null;
+    }
+  }
+  return order.map(id => byId[id]);
+}
+function turnDurationMs(turn){
+  if(!turn || !turn.startTs || !turn.endTs) return null;
+  const s = Date.parse(turn.startTs), e = Date.parse(turn.endTs);
+  if(!Number.isFinite(s) || !Number.isFinite(e)) return null;
+  const d = e - s;
+  return d >= 0 ? d : null;
+}
+function turnHasError(turn){
+  if(!turn) return false;
+  if(turn.status === "error") return true;
+  return turn.events.some(ev => ev.kind === "provider.error" || ev.status === "error");
+}
+// Waterfall geometry: one bar per event, spanning from that event's OWN ts
+// to the NEXT event's ts in seq order (the trace schema has no per-event
+// end timestamp of its own -- each row is a point in time, see
+// observability.py's `_COLUMNS`). Offsets/widths are percentages of the
+// turn's total (turn.start -> turn.end) span. A zero-width delta (two
+// events sharing a ts, most commonly the turn's own last event) or an
+// unparseable/missing ts renders as an instant marker rather than a
+// (degenerate, invisible) zero-width bar.
+function computeWaterfallSpans(turn){
+  const evs = (turn && turn.events) || [];
+  if(!evs.length) return [];
+  const t0 = Date.parse(evs[0].ts);
+  const hasT0 = Number.isFinite(t0);
+  const lastTs = turn.endTs || evs[evs.length - 1].ts;
+  const totalEnd = Date.parse(lastTs);
+  const total = (hasT0 && Number.isFinite(totalEnd)) ? (totalEnd - t0) : 0;
+  return evs.map((ev, i) => {
+    const tsMs = Date.parse(ev.ts);
+    const next = evs[i + 1];
+    const nextMs = next ? Date.parse(next.ts) : totalEnd;
+    let offsetPct = 0, widthPct = 0, instant = true;
+    if(total > 0 && hasT0 && Number.isFinite(tsMs)){
+      offsetPct = ((tsMs - t0) / total) * 100;
+      if(Number.isFinite(nextMs)){
+        const w = ((nextMs - tsMs) / total) * 100;
+        if(w > 0){
+          widthPct = w;
+          instant = false;
+        }
+      }
+    }
+    const error = ev.kind === "provider.error" || ev.status === "error";
+    return {event: ev, offsetPct: offsetPct, widthPct: widthPct, instant: instant, error: error};
+  });
+}
+function renderAstTurnlist(turns, selectedTurnId){
+  const el = document.getElementById("ast-turnlist");
+  if(!el) return;
+  el.innerHTML = "";
+  for(const turn of (turns || [])){
+    const row = document.createElement("div");
+    row.className = "ast-turnlist-row"
+      + (turn.turnId === selectedTurnId ? " ast-turnlist-selected" : "")
+      + (turnHasError(turn) ? " ast-turnlist-error" : "");
+    const dur = turnDurationMs(turn);
+    row.textContent = turn.turnId.slice(0, 8) + " · " + (turn.startTs || "—")
+      + " · " + (dur === null ? "—" : (dur / 1000).toFixed(2) + "s");
+    row.setAttribute("data-turn-id", turn.turnId);
+    row.onclick = () => { selectAstTurn(turn.turnId); };
+    el.appendChild(row);
+  }
+}
+function renderAstWaterfall(turn){
+  const el = document.getElementById("ast-waterfall");
+  if(!el) return;
+  el.innerHTML = "";
+  if(!turn){
+    el.classList.add("ast-metrics-hidden");
+    return;
+  }
+  el.classList.remove("ast-metrics-hidden");
+  const spans = computeWaterfallSpans(turn);
+  for(const span of spans){
+    const track = document.createElement("div");
+    track.className = "ast-waterfall-track";
+    const bar = document.createElement("div");
+    bar.className = "ast-waterfall-bar"
+      + (span.instant ? " ast-waterfall-instant" : "")
+      + (span.error ? " ast-waterfall-error" : "");
+    bar.style.left = span.offsetPct + "%";
+    bar.style.width = span.instant ? "2px" : (span.widthPct + "%");
+    if(span.error){
+      const payload = span.event.payload || {};
+      bar.title = payload.error || payload.message || span.event.status || span.event.kind;
+    }
+    track.appendChild(bar);
+    const label = document.createElement("div");
+    label.className = "ast-waterfall-label";
+    label.textContent = span.event.kind + (span.event.status ? " [" + span.event.status + "]" : "");
+    el.appendChild(track);
+    el.appendChild(label);
+  }
+}
+function selectAstTurn(turnId){
+  window.assistantInspector.selectedTurnId = turnId;
+  const turn = window.assistantInspector.turns.find(t => t.turnId === turnId);
+  renderAstTurnlist(window.assistantInspector.turns, turnId);
+  renderAstWaterfall(turn || null);
+}
+function renderAstInspectorGated(status){
+  const m = document.getElementById("ast-metrics");
+  if(m) m.innerHTML = "";
+  const t = document.getElementById("ast-turnlist");
+  if(t) t.innerHTML = "";
+  const w = document.getElementById("ast-waterfall");
+  if(w){
+    w.innerHTML = "";
+    w.classList.add("ast-metrics-hidden");
+  }
+  const retry = document.getElementById("ast-metrics-retry");
+  if(retry) retry.classList.add("ast-metrics-hidden");
+  const state = document.getElementById("ast-metrics-state");
+  if(state){
+    state.className = "ast-metrics-state ast-metrics-state-gated";
+    state.textContent = (status && status.outcome === "none")
+      ? "no assistant available -- set up an assistant"
+      : "assistant selection was skipped -- pick one in the switcher above";
+  }
+}
+function renderAstInspectorOffline(){
+  const state = document.getElementById("ast-metrics-state");
+  if(state){
+    state.className = "ast-metrics-state ast-metrics-state-offline";
+    state.textContent = "offline -- could not reach the assistant server";
+  }
+  const retry = document.getElementById("ast-metrics-retry");
+  if(retry) retry.classList.remove("ast-metrics-hidden");
+}
+function clearAstInspectorState(){
+  const state = document.getElementById("ast-metrics-state");
+  if(state){
+    state.className = "ast-metrics-state";
+    state.textContent = "";
+  }
+  const retry = document.getElementById("ast-metrics-retry");
+  if(retry) retry.classList.add("ast-metrics-hidden");
+}
+async function loadAssistantInspector(){
+  let status;
+  try{ status = await (await fetch("/assistant/status")).json(); }catch{
+    renderAstInspectorOffline();
+    return;
+  }
+  if(!status || status.gated || status.outcome === "none"){
+    renderAstInspectorGated(status);
+    return;
+  }
+  clearAstInspectorState();
+  let metricsData, tracesData;
+  try{
+    metricsData = await (await fetch("/assistant/metrics")).json();
+    tracesData = await (await fetch("/assistant/traces")).json();
+  }catch{
+    renderAstInspectorOffline();
+    return;
+  }
+  renderAstMetrics(astMetricsRootFor(metricsData, status.selected));
+  const turns = groupTurnsById((tracesData && tracesData.events) || []);
+  window.assistantInspector.turns = turns;
+  window.assistantInspector.selectedTurnId = null;
+  renderAstTurnlist(turns, null);
+  renderAstWaterfall(null);
+}
+document.getElementById("ast-metrics-refresh").onclick = () => { loadAssistantInspector(); };
+document.getElementById("ast-metrics-retry").onclick = () => { loadAssistantInspector(); };
 
 // ---- boot ----
 (async function(){
