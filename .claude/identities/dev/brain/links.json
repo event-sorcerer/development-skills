@@ -544,6 +544,16 @@
     "last": "2026-07-22",
     "weight": 0.5
   },
+  "stub-failure-semantics->anonymous-listener-slice-eval": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "stub-failure-semantics->inspect-red-before-trusting": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "surgical-yaml-edits->budget-count-join-separators": {
     "fires": 18,
     "last": "2026-07-22",
