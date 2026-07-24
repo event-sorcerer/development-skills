@@ -104,6 +104,16 @@
     "last": null,
     "weight": 0.5
   },
+  "resumed-branch-staleness-pass->clean-main-repro-before-blame": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "resumed-branch-staleness-pass->search-branches-before-reimplementing": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "search-branches-before-reimplementing->batch-same-surface-bugs": {
     "fires": 0,
     "last": null,

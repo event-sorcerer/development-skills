@@ -1842,3 +1842,50 @@ items:
   routing:
     action: backlog
     ref: Zugruul/development-skills#384
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-24T02:20:00Z'
+iteration:
+  task: MEM-030
+  outcome: merged
+  reviewRounds: 2
+source:
+  role: orchestrator
+  model: claude-fable-5
+items:
+- category: worked-well
+  area: review
+  severity: medium
+  summary: Reviewer enforced the docs covenant mechanically and verified resume-specific
+    claims by execution
+  detail: Round-1 grep of the README for every new user-facing surface caught the
+    one real gap; the reviewer also re-ran the hermeticity-pinned fixtures against
+    the genuinely installed capability to prove the pins load-bearing.
+  evidence:
+  - Zugruul/development-skills#138
+  generalized: Two reviewer habits with outsized yield — grep the covenant docs for
+    every new user-facing name in the diff before reading code, and verify environment-coupled
+    test claims by executing them in the real environment state rather than reasoning
+    about them.
+  routing:
+    action: brain-note
+    ref: reviewer/covenant-grep-and-execute
+- category: friction
+  area: testing
+  severity: medium
+  summary: A resumed branch carried assertions about a world that moved, in both directions
+  detail: A week-old branch pinned a negative that a later merge legitimately invalidated,
+    and its own installer invalidated machine-state assumptions in OTHER suites (capability-absent
+    fixtures) — two distinct staleness failures surfaced only at rebase+full-gate
+    time.
+  evidence:
+  - Zugruul/development-skills#138
+  generalized: Resuming an old branch needs a dedicated staleness pass, not just a
+    rebase — re-read its negative assertions against current mainline behavior, and
+    ask what machine/global state the branch's own feature will change that OTHER
+    tests currently assume; run the full suite, not just the branch's section, before
+    calling it resumed.
+  routing:
+    action: brain-note
+    ref: orchestrator/resumed-branch-staleness-pass

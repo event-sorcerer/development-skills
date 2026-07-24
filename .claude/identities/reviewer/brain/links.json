@@ -14,6 +14,16 @@
     "last": "2026-07-22",
     "weight": 0.5
   },
+  "covenant-grep-and-execute->execute-guarantees-adversarially": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "covenant-grep-and-execute->reproduce-red-first-claims": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "distinguish-missed-vs-uncatchable-findings->verify-portability-claims-in-target-environment": {
     "fires": 2,
     "last": "2026-07-22",
