@@ -166,6 +166,12 @@ class AssistantEngine:
         # such a boot would wrongly look like "never active before".
         self._last_active = loaded["lastActive"]
         self._selection_lock = threading.Lock()
+        # AST-042 (SPEC-ASSISTANT.md Sec10.4, issue #328): the shared
+        # Prometheus exposition server, if any root currently enables it --
+        # see start()/stop() and _discover_metrics_configs' docstrings.
+        # None/None until (and unless) start() actually binds one.
+        self._metrics_server = None
+        self._metrics_thread = None
 
     def _retention_config_for(self, root):
         """AST-041 (SPEC-ASSISTANT.md §10.3, issue #327): per-root
@@ -199,6 +205,77 @@ class AssistantEngine:
             return None
         traces = (section.get("observability") or {}).get("traces") or {}
         return traces.get("sqlite")
+
+    def _metrics_config_for(self, root):
+        """AST-042 (SPEC-ASSISTANT.md Sec10.4, issue #328): per-root
+        `observability.metrics.prometheus` config -- `_retention_config_for`'s
+        twin for the metrics group instead of traces (same
+        `discovery.classify_repo` reuse, same `None`-for-"not a valid
+        candidate or no entry" contract; see that method's docstring for
+        why classify_repo is reused rather than re-parsing project.yaml).
+        Returns the raw `{enabled, host, port}` mapping (may be `{}` or
+        partial -- `_discover_metrics_configs` applies the Sec10.4/§6
+        defaults, this method only surfaces what config exists), or `None`.
+        """
+        try:
+            classification = discovery.classify_repo(root)
+        except Exception:
+            return None
+        section = classification.section if classification.kind == "candidate" else None
+        if not section:
+            return None
+        metrics = (section.get("observability") or {}).get("metrics") or {}
+        return metrics.get("prometheus")
+
+    def _discover_metrics_configs(self):
+        """AST-042: every currently-discovered root (via `self._repos_getter()`,
+        in that order) with `observability.metrics.prometheus.enabled: true`,
+        as `[(root, host, port), ...]` with the Sec10.4/§6 defaults
+        (`observability.DEFAULT_METRICS_HOST`/`DEFAULT_METRICS_PORT`, i.e.
+        127.0.0.1:9464) already applied to any entry that omits `host`/
+        `port`. Called ONLY from `start()` (see that method's docstring for
+        why host/port is resolved once at start time rather than per
+        scrape -- a bound TCP socket cannot silently rebind if config
+        changes later)."""
+        out = []
+        for _repo_name, root in self._repos_getter():
+            cfg = self._metrics_config_for(root)
+            if cfg and cfg.get("enabled"):
+                host = cfg.get("host") or observability.DEFAULT_METRICS_HOST
+                port = cfg.get("port") or observability.DEFAULT_METRICS_PORT
+                out.append((root, host, port))
+        return out
+
+    def _metrics_roots_provider(self):
+        """AST-042: passed to `observability.start_metrics_server` as its
+        `roots_provider` -- called fresh on EVERY `/metrics` scrape (never
+        cached across calls, matching `_status`'s own live-`repos_getter`
+        posture), so a root's `observability.metrics.prometheus.enabled`
+        flag flipping off/on, or a new assistant appearing, is reflected on
+        the very next scrape without an engine restart. This is
+        DELIBERATELY independent of which root's host/port the shared
+        server happens to be bound to (`_discover_metrics_configs`, called
+        only at `start()`) -- v1's "share one server" choice (design doc)
+        means the BOUND address is fixed for the server's lifetime, but
+        WHICH roots' metrics that one server renders is still live.
+
+        Returns `[(label, root), ...]` -- `label` is the assistant's main
+        name (falls back to the raw root path, defensively, for a
+        classify_repo call that somehow returns a candidate with no
+        resolvable name -- should not happen, `_main_name` already has its
+        own equally-defensive fallback)."""
+        pairs = []
+        for _repo_name, root in self._repos_getter():
+            cfg = self._metrics_config_for(root)
+            if not cfg or not cfg.get("enabled"):
+                continue
+            try:
+                classification = discovery.classify_repo(root)
+                label = _main_name(classification.section) if classification.kind == "candidate" else None
+            except Exception:
+                label = None
+            pairs.append((label or root, root))
+        return pairs
 
     def start(self):
         """Launch the worker registry. Idempotent: a second call while
@@ -251,6 +328,27 @@ class AssistantEngine:
                 workers.append((name, thread, stop_event))
             self.workers = workers
 
+            # AST-042 (SPEC-ASSISTANT.md Sec10.4, issue #328): mount the
+            # shared Prometheus exposition server ONLY when at least one
+            # currently-discovered root enables it -- an assistant repo
+            # with no such config gets no bound socket at all, matching
+            # §17 invariant 10 (localhost only) taken to its natural
+            # extreme: no config means no listener, not a listener nobody
+            # asked for. `_discover_metrics_configs`' first entry's
+            # host/port is what gets bound (v1 multi-root choice, design
+            # doc); every enabled root's metrics still render on that one
+            # shared server via `_metrics_roots_provider` (live, re-scanned
+            # per scrape) regardless of whose host/port was used to bind
+            # it.
+            enabled = self._discover_metrics_configs()
+            if enabled:
+                _root, host, port = enabled[0]
+                self._metrics_server, self._metrics_thread = observability.start_metrics_server(
+                    host, port, self._metrics_roots_provider)
+            else:
+                self._metrics_server = None
+                self._metrics_thread = None
+
     def stop(self, timeout=5.0):
         """Signal every worker's stop_event and join each with a bounded
         timeout, so a server shutdown never hangs on a stuck worker.
@@ -258,10 +356,23 @@ class AssistantEngine:
         started) -- a second call just finds nothing left to stop."""
         with self._lock:
             workers, self.workers = self.workers, []
+            metrics_server, self._metrics_server = self._metrics_server, None
+            metrics_thread, self._metrics_thread = self._metrics_thread, None
         for _, _, stop_event in workers:
             stop_event.set()
         for _, thread, _ in workers:
             thread.join(timeout=timeout)
+        # AST-042: bounded stop for the metrics server too -- shutdown()
+        # unblocks its serve_forever() loop, the join bounds how long stop()
+        # can wait on it (same posture as every WORKER_NAMES thread above),
+        # and server_close() only runs once the thread has actually
+        # exited, releasing the listening socket instead of racing an
+        # in-flight request against it.
+        if metrics_server is not None:
+            metrics_server.shutdown()
+            if metrics_thread is not None:
+                metrics_thread.join(timeout=timeout)
+            metrics_server.server_close()
 
     # --- route table --------------------------------------------------------
 

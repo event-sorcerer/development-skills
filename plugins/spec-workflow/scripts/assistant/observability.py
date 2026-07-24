@@ -1,5 +1,6 @@
 """Observability / traces subsystem (SPEC-ASSISTANT.md Sec5a, Sec10.1, Sec10.2,
-Sec10.6, Sec10.7, E4, AST-040, issue #326, docs/design/ast-E4.md).
+Sec10.4, Sec10.6, Sec10.7, E4, AST-040/AST-042, issue #326/#328,
+docs/design/ast-E4.md).
 
 Per Sec10.1/Sec17.7 emitting an event is O(1) and NEVER blocks a turn: `emit`
 below only puts an item on a `queue.Queue` (drop + stderr on overflow/failure,
@@ -77,12 +78,32 @@ Library:
         docstring for why this differs from the writer thread's own
         internal `_prune_conn` call). `retain_days`/`max_mb` of `0` means
         that knob is unlimited (skipped).
+    metrics_text(roots) -> str
+        AST-042 (SPEC-ASSISTANT.md Sec10.4): Prometheus text-format 0.0.4
+        exposition, computed FRESH from `query()` on every call -- never
+        cached beyond one call, never a second history store (Sec10.4:
+        "SHALL NOT own history"). `roots` is an iterable of `(label, root)`
+        pairs (engine.py's `_metrics_roots_provider` supplies the currently
+        enabled ones); see the function's own docstring for the exact
+        counters/histogram rendered.
+    start_metrics_server(host, port, roots_provider) -> (server, thread)
+        AST-042: the stdlib-only (`http.server`, no `prometheus_client`)
+        exposition server -- binds `(host, port)`, serves `GET /metrics` as
+        `metrics_text(roots_provider())` computed per request. `roots_provider`
+        is a zero-arg callable (mirrors `AssistantEngine.__init__`'s
+        `repos_getter` convention) so the served root set can change across
+        the server's lifetime without a restart. Returns the live
+        `(server, thread)` pair so a caller can `server.shutdown()` then
+        `thread.join(timeout=...)` for a bounded stop, the same posture
+        `engine.py.stop()` already uses for every WORKER_NAMES thread.
 """
+import http.server
 import json
 import os
 import queue as queue_module
 import sqlite3
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -120,6 +141,30 @@ DEFAULT_PRUNE_INTERVAL_SECONDS = 300.0
 # schema/index overhead alone occupies -- see `_prune_conn`'s docstring).
 PRUNE_SIZE_CHUNK = 500
 PRUNE_MAX_SIZE_ITERATIONS = 200
+
+# AST-042 (SPEC-ASSISTANT.md Sec10.4, §6 example): defaults applied whenever
+# a root's assistant.observability.metrics.prometheus config omits host/port
+# -- localhost-only unless config EXPLICITLY says otherwise (§17 invariant
+# 10), matching the spec's own worked example (127.0.0.1:9464).
+DEFAULT_METRICS_HOST = "127.0.0.1"
+DEFAULT_METRICS_PORT = 9464
+
+# metrics_text() reads the WHOLE events table for a root (unlike query()'s
+# endpoint-facing default of 200) -- it is computing exact counters/
+# histograms, not paging a UI. This is a generous ceiling, not a real cap:
+# traces.sqlite is retention-bounded (AST-041, default maxMB=500) so even
+# the largest realistic root's event count stays far under it.
+METRICS_QUERY_LIMIT = 2_000_000
+
+# AST-042: turn-duration histogram bucket boundaries, in seconds (a "+Inf"
+# bucket is always added on top of these, per the Prometheus text format's
+# own convention for a histogram's last bucket). Chosen to span "fast text
+# turn" through "slow/loaded turn" at a coarse-enough granularity that a
+# handful of turns already produces a legible curve, without pretending to
+# the precision a client library's runtime-configurable buckets would offer
+# (this exposition is hand-rendered, stdlib-only -- see the module
+# docstring's "no client library" decision).
+LATENCY_BUCKETS_SECONDS = (0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0)
 
 _COLUMNS = (
     "seq", "ts", "session_id", "turn_id", "span_id", "parent_span_id",
@@ -521,3 +566,313 @@ def query(root, since=None, turn=None, limit=200):
             rec["payload"] = {}
         out.append(rec)
     return out
+
+
+def _family(kind):
+    """The dotted kind's first segment ("turn.end" -> "turn"), or
+    "unknown" for a falsy/malformed kind -- `events_total`'s label
+    (Sec10.1's "kind (dotted: ...)" convention, generalized to a coarse
+    per-subsystem count rather than one time series per exact kind
+    string)."""
+    return (kind or "").split(".", 1)[0] or "unknown"
+
+
+def _parse_ts(ts):
+    """Parses one of THIS module's own `ts` strings (always
+    `datetime.now(timezone.utc).isoformat()`-shaped, see `_now_iso`) back
+    into a `datetime`. Never raises into `_compute_root_metrics` --
+    returns `None` on anything malformed (a hand-edited/foreign row),
+    which that caller treats as "this turn's duration is unknown", not a
+    crash."""
+    try:
+        return datetime.fromisoformat(ts)
+    except (TypeError, ValueError):
+        return None
+
+
+def _compute_root_metrics(root):
+    """One root's raw counters/durations, read fresh off `query()` --
+    Sec10.4's "SHALL NOT own history": every number here is derived from
+    `traces.sqlite` at call time, nothing is retained across calls.
+
+    `turn_starts` only ever holds a `turn_id` from `turn.start` up until
+    ITS OWN matching `turn.end` is seen (each is popped on match) --
+    `query()`'s rows are already `seq`-ordered (arrival order, Sec10.1),
+    so a `turn.end` always finds its `turn.start` already buffered when
+    the pair completed cleanly. A `turn.end` with no matching start
+    (buffer expired... which cannot happen here since nothing is ever
+    dropped from `turn_starts` except by a match) or a `turn.start` that
+    never gets a `turn.end` (an in-flight or abandoned turn at scrape
+    time) simply contributes no duration sample -- never a crash, never a
+    fabricated number.
+    """
+    events = query(root, limit=METRICS_QUERY_LIMIT)
+    turns_by_status = {}
+    provider_errors = 0
+    events_total = {}
+    distill_batches = 0
+    notes_minted = 0
+    turn_starts = {}
+    durations = []
+
+    for ev in events:
+        kind = ev.get("kind") or ""
+        events_total[_family(kind)] = events_total.get(_family(kind), 0) + 1
+
+        if kind == "turn.start":
+            turn_id = ev.get("turn_id")
+            if turn_id:
+                turn_starts[turn_id] = ev.get("ts")
+        elif kind == "turn.end":
+            status = ev.get("status") or "unknown"
+            turns_by_status[status] = turns_by_status.get(status, 0) + 1
+            turn_id = ev.get("turn_id")
+            start_ts = turn_starts.pop(turn_id, None) if turn_id else None
+            if start_ts is not None:
+                start = _parse_ts(start_ts)
+                end = _parse_ts(ev.get("ts"))
+                if start is not None and end is not None:
+                    duration = (end - start).total_seconds()
+                    if duration >= 0:
+                        durations.append(duration)
+        elif kind == "provider.error":
+            provider_errors += 1
+        elif kind == "distill.batch":
+            distill_batches += 1
+            minted = (ev.get("payload") or {}).get("minted") or []
+            notes_minted += len(minted)
+
+    return {
+        "turns_by_status": turns_by_status,
+        "provider_errors": provider_errors,
+        "events_total": events_total,
+        "distill_batches": distill_batches,
+        "notes_minted": notes_minted,
+        "durations": durations,
+    }
+
+
+def _histogram(durations):
+    """Cumulative bucket counts (Prometheus's own histogram convention --
+    each `le` bucket counts every sample <= that boundary, so buckets are
+    non-decreasing as `le` grows) over `LATENCY_BUCKETS_SECONDS`, plus the
+    overall sum and count `_sum`/`_count` samples require. Returns
+    `(buckets_dict, total_sum, count)`; `buckets_dict` does NOT include the
+    "+Inf" bucket -- callers append it themselves as `count` (every sample
+    is <= +Inf by definition, so it is always exactly the total)."""
+    buckets = {b: 0 for b in LATENCY_BUCKETS_SECONDS}
+    total = 0.0
+    count = 0
+    for d in durations:
+        total += d
+        count += 1
+        for b in LATENCY_BUCKETS_SECONDS:
+            if d <= b:
+                buckets[b] += 1
+    return buckets, total, count
+
+
+def _escape_label_value(value):
+    """Prometheus text-format 0.0.4 label-value escaping: backslash, then
+    double-quote, then newline (backslash MUST go first or a value
+    containing a literal backslash would have its own escaping doubled up
+    again by the later replacements)."""
+    value = str(value)
+    value = value.replace("\\", "\\\\")
+    value = value.replace('"', '\\"')
+    value = value.replace("\n", "\\n")
+    return value
+
+
+def _fmt_num(n):
+    """Renders a counter/bucket/sum value the way Prometheus's text format
+    expects: plain integers stay bare ("5", not "5.0"); floats print
+    without a trailing ".0" for whole numbers and without noisy float
+    artifacts otherwise (`repr`'s round-trippable digits, trimmed of
+    trailing zeros then a trailing dot)."""
+    if isinstance(n, bool):
+        return "1" if n else "0"
+    if isinstance(n, int):
+        return str(n)
+    if n == int(n):
+        return str(int(n))
+    text = repr(float(n))
+    if "e" in text or "E" in text:
+        return text
+    return text.rstrip("0").rstrip(".")
+
+
+def metrics_text(roots):
+    """AST-042 (SPEC-ASSISTANT.md Sec10.4, docs/design/ast-E4.md): Prometheus
+    text-format 0.0.4 exposition, hand-rendered (stdlib only, no
+    `prometheus_client`) and computed FRESH from each root's traces.sqlite
+    on every call via `query()`/`_compute_root_metrics` -- pure and
+    deterministic given the db's current contents; nothing here is a
+    second history store (Sec10.4: "SHALL NOT own history"), so calling
+    this twice with new events written in between simply reflects them,
+    with no caching/staleness window of any kind.
+
+    `roots` is an iterable of `(label, root)` pairs -- AST-042's v1
+    multi-root decision (design doc) is that every currently-enabled root
+    shares ONE exposition server (bound on the first-configured root's
+    host/port), so every sample below carries a `root="<label>"` label to
+    disambiguate which assistant it belongs to on a shared scrape. A
+    single-root caller just passes a one-element list. `label` is
+    whatever the caller chooses (engine.py uses the assistant's main
+    name); this function only escapes and renders it, never resolves it.
+
+    Metrics emitted, each with its own `# HELP`/`# TYPE` pair (the
+    Prometheus text-format lint AST-042's tests check for) rendered ONCE
+    per metric name ahead of every root's samples for it, per the format's
+    own convention that a metric name is declared once, not once per
+    label combination:
+
+      assistant_turns_total{root,status}            counter
+      assistant_provider_errors_total{root}          counter
+      assistant_events_total{root,kind}              counter (kind = the
+          dotted event kind's first segment, e.g. "turn", "recall",
+          "provider", "distill" -- see `_family`)
+      assistant_distill_batches_total{root}          counter
+      assistant_notes_minted_total{root}             counter
+      assistant_turn_duration_seconds{root,le}       histogram (turn.start
+          -> turn.end pairs, bucketed per `LATENCY_BUCKETS_SECONDS`)
+    """
+    root_list = list(roots)
+    per_root = [(label, _compute_root_metrics(root)) for label, root in root_list]
+    lines = []
+
+    lines.append("# HELP assistant_turns_total Total number of completed turns, by status.")
+    lines.append("# TYPE assistant_turns_total counter")
+    for label, stats in per_root:
+        for status, n in sorted(stats["turns_by_status"].items()):
+            lines.append(
+                'assistant_turns_total{root="%s",status="%s"} %s'
+                % (_escape_label_value(label), _escape_label_value(status), _fmt_num(n))
+            )
+
+    lines.append("# HELP assistant_provider_errors_total Total number of provider errors.")
+    lines.append("# TYPE assistant_provider_errors_total counter")
+    for label, stats in per_root:
+        lines.append(
+            'assistant_provider_errors_total{root="%s"} %s'
+            % (_escape_label_value(label), _fmt_num(stats["provider_errors"]))
+        )
+
+    lines.append("# HELP assistant_events_total Total number of trace events, by kind family.")
+    lines.append("# TYPE assistant_events_total counter")
+    for label, stats in per_root:
+        for kind, n in sorted(stats["events_total"].items()):
+            lines.append(
+                'assistant_events_total{root="%s",kind="%s"} %s'
+                % (_escape_label_value(label), _escape_label_value(kind), _fmt_num(n))
+            )
+
+    lines.append("# HELP assistant_distill_batches_total Total number of distiller batches processed.")
+    lines.append("# TYPE assistant_distill_batches_total counter")
+    for label, stats in per_root:
+        lines.append(
+            'assistant_distill_batches_total{root="%s"} %s'
+            % (_escape_label_value(label), _fmt_num(stats["distill_batches"]))
+        )
+
+    lines.append("# HELP assistant_notes_minted_total Total number of notes minted by the distiller.")
+    lines.append("# TYPE assistant_notes_minted_total counter")
+    for label, stats in per_root:
+        lines.append(
+            'assistant_notes_minted_total{root="%s"} %s'
+            % (_escape_label_value(label), _fmt_num(stats["notes_minted"]))
+        )
+
+    lines.append("# HELP assistant_turn_duration_seconds Turn duration in seconds (turn.start to turn.end).")
+    lines.append("# TYPE assistant_turn_duration_seconds histogram")
+    for label, stats in per_root:
+        buckets, total, count = _histogram(stats["durations"])
+        for b in LATENCY_BUCKETS_SECONDS:
+            lines.append(
+                'assistant_turn_duration_seconds_bucket{root="%s",le="%s"} %s'
+                % (_escape_label_value(label), _fmt_num(b), _fmt_num(buckets[b]))
+            )
+        lines.append(
+            'assistant_turn_duration_seconds_bucket{root="%s",le="+Inf"} %s'
+            % (_escape_label_value(label), _fmt_num(count))
+        )
+        lines.append(
+            'assistant_turn_duration_seconds_sum{root="%s"} %s'
+            % (_escape_label_value(label), _fmt_num(total))
+        )
+        lines.append(
+            'assistant_turn_duration_seconds_count{root="%s"} %s'
+            % (_escape_label_value(label), _fmt_num(count))
+        )
+
+    return "\n".join(lines) + "\n"
+
+
+class _MetricsHandler(http.server.BaseHTTPRequestHandler):
+    """AST-042: the exposition server's only route, `GET /metrics`. Kept
+    minimal on purpose -- this is not a general-purpose HTTP surface, it is
+    one computed text blob per request."""
+
+    def log_message(self, format, *args):  # noqa: A002 (stdlib's own param name)
+        # Silence BaseHTTPRequestHandler's default per-request stderr
+        # logging -- a scrape loop hitting this every few seconds would
+        # otherwise spam every assistant process's stderr, unlike every
+        # other worker thread in this module (writer/prune), which is
+        # already silent on the happy path.
+        pass
+
+    def do_GET(self):
+        if self.path != "/metrics":
+            self.send_response(404)
+            self.end_headers()
+            return
+        body = metrics_text(self.server.roots_provider()).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class _MetricsHTTPServer(http.server.HTTPServer):
+    """`allow_reuse_address` so a just-stopped server's port is immediately
+    rebindable (matters for tests cycling start/stop against the same
+    port far more than for a real long-lived process, but costs nothing
+    either way)."""
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+def start_metrics_server(host, port, roots_provider):
+    """AST-042 (SPEC-ASSISTANT.md Sec10.4): starts the shared Prometheus
+    exposition server bound to `(host, port)` -- a bare `socket.bind` (via
+    `http.server.HTTPServer`) is what enforces the "localhost by default"
+    invariant in practice: this function does not itself default or
+    validate `host`/`port` (that is engine.py's `_metrics_config_for`/
+    `_discover_metrics_configs`' job, mirroring the
+    `_resolve_retention`/`_retention_config_for` split in this same
+    module), it just binds exactly what it is given -- a non-loopback
+    `host` reaching here is the caller's/config's explicit choice, not
+    something this function decides.
+
+    Runs `serve_forever()` on its OWN daemon-free thread (matching every
+    other WORKER_NAMES thread's `daemon=False` -- an explicit `stop()` is
+    always required, never relying on process-exit cleanup) so an
+    in-flight scrape is never torn down mid-response.
+
+    Returns `(server, thread)`. To stop: `server.shutdown()` (unblocks
+    `serve_forever`'s loop) then `thread.join(timeout=...)` then, once
+    joined, `server.server_close()` to release the listening socket --
+    the exact three-step sequence `engine.py.stop()` performs for this
+    slot, the HTTP-server analogue of every other worker's
+    `stop_event.set()` + bounded `join()`.
+    """
+    server = _MetricsHTTPServer((host, port), _MetricsHandler)
+    server.roots_provider = roots_provider
+    thread = threading.Thread(
+        target=server.serve_forever,
+        name="assistant-metrics",
+        daemon=False,
+    )
+    thread.start()
+    return server, thread
