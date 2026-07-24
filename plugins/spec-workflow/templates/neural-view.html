@@ -488,6 +488,7 @@ canvas.grabbing{cursor:grabbing}
 .ast-metrics-retry{font-family:var(--mono);font-size:.6rem;border:1px solid var(--border);
   border-radius:3px;cursor:pointer;color:var(--fg);background:transparent}
 .ast-metrics-hidden{display:none}
+.ast-truncated{padding:.2rem .4rem;font-size:.6rem;color:var(--muted)}
 .ast-turnlist{display:flex;flex-direction:column;gap:.2rem;max-height:8rem;overflow-y:auto}
 .ast-turnlist-row{font-family:var(--mono);font-size:.6rem;color:var(--fg);
   border:1px solid var(--border);border-radius:3px;padding:.2rem .4rem;cursor:pointer;
@@ -931,6 +932,7 @@ canvas.grabbing{cursor:grabbing}
     </div>
     <div class="ast-metrics-state" id="ast-metrics-state"></div>
     <div class="ast-metrics" id="ast-metrics" role="region" aria-label="Assistant metrics"></div>
+    <div class="ast-truncated ast-metrics-hidden" id="ast-truncated" role="status">showing the newest turns only -- older activity may exist</div>
     <div class="ast-turnlist" id="ast-turnlist" role="list" aria-label="Turn list"></div>
     <div class="ast-waterfall ast-metrics-hidden" id="ast-waterfall" role="group" aria-label="Turn waterfall"></div>
   </div>
@@ -5583,6 +5585,21 @@ function selectAstTurn(turnId){
   renderAstTurnlist(window.assistantInspector.turns, turnId);
   renderAstWaterfall(turn || null);
 }
+// AST-045/#393: a structural placeholder marker (hook class ast-truncated,
+// pre-declared hidden in the panel's own markup) shown whenever
+// GET /assistant/traces' own `truncated` flag comes back true -- the
+// turnlist above is fetched `order=desc` (newest-first) so a truncated
+// batch means OLDER activity may exist beyond what rendered, never that
+// recent turns were silently dropped (that direction is exactly what
+// order=desc fixes). No new styling beyond the CSS placeholder rule --
+// same "structural only" posture buildAstMetricsGraphMarkup's own docstring
+// already documents for this panel's pending restyle.
+function renderAstTruncated(truncated){
+  const el = document.getElementById("ast-truncated");
+  if(!el) return;
+  if(truncated) el.classList.remove("ast-metrics-hidden");
+  else el.classList.add("ast-metrics-hidden");
+}
 function renderAstInspectorGated(status){
   const m = document.getElementById("ast-metrics");
   if(m) m.innerHTML = "";
@@ -5593,6 +5610,7 @@ function renderAstInspectorGated(status){
     w.innerHTML = "";
     w.classList.add("ast-metrics-hidden");
   }
+  renderAstTruncated(false);
   const retry = document.getElementById("ast-metrics-retry");
   if(retry) retry.classList.add("ast-metrics-hidden");
   const state = document.getElementById("ast-metrics-state");
@@ -5609,6 +5627,7 @@ function renderAstInspectorOffline(){
     state.className = "ast-metrics-state ast-metrics-state-offline";
     state.textContent = "offline -- could not reach the assistant server";
   }
+  renderAstTruncated(false);
   const retry = document.getElementById("ast-metrics-retry");
   if(retry) retry.classList.remove("ast-metrics-hidden");
 }
@@ -5635,7 +5654,7 @@ async function loadAssistantInspector(){
   let metricsData, tracesData;
   try{
     metricsData = await (await fetch("/assistant/metrics")).json();
-    tracesData = await (await fetch("/assistant/traces")).json();
+    tracesData = await (await fetch("/assistant/traces?order=desc")).json();
   }catch{
     renderAstInspectorOffline();
     return;
@@ -5646,6 +5665,7 @@ async function loadAssistantInspector(){
   window.assistantInspector.selectedTurnId = null;
   renderAstTurnlist(turns, null);
   renderAstWaterfall(null);
+  renderAstTruncated(!!(tracesData && tracesData.truncated));
 }
 document.getElementById("ast-metrics-refresh").onclick = () => { loadAssistantInspector(); };
 document.getElementById("ast-metrics-retry").onclick = () => { loadAssistantInspector(); };

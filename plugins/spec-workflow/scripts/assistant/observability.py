@@ -513,7 +513,7 @@ def run_writer(q, stop_event, poll_timeout=DEFAULT_POLL_TIMEOUT_SECONDS,
                 pass
 
 
-def query(root, since=None, turn=None, limit=200):
+def query(root, since=None, turn=None, limit=200, order="asc"):
     """Read path for endpoints/terminal (AST-043/AST-045). Opens a fresh
     read-only connection per call (this is a low-frequency, low-volume read
     path -- unlike the writer, no connection is held across calls). Returns
@@ -524,7 +524,18 @@ def query(root, since=None, turn=None, limit=200):
     see the module docstring); `turn` filters to `turn_id == turn`. Both
     filters, and the default ordering, are backed by the `seq`/`turn_id`
     indexes `_open_conn` creates -- never a `json_extract` scan (Sec10.2).
-    """
+
+    `order` is `"asc"` (default, back-compat: every caller that predates
+    #393 gets the exact same oldest-first rows it always did) or `"desc"`.
+    `"desc"` runs the SQL query itself as `ORDER BY seq DESC LIMIT ?` --
+    still index-backed -- so a `LIMIT` actually caps at the NEWEST `limit`
+    rows rather than the oldest (the #393 bug: an oldest-first LIMIT on a
+    root with more than `limit` events silently drops everything recent).
+    The rows are then re-sorted ascending in Python before being returned,
+    so every consumer of this function's return value keeps seeing
+    seq-ascending order regardless of which direction was actually queried
+    -- `order` only changes WHICH `limit` rows come back, never the shape
+    callers see them in."""
     path = _db_path(root)
     if not os.path.exists(path):
         return []
@@ -542,9 +553,10 @@ def query(root, since=None, turn=None, limit=200):
             clauses.append("turn_id = ?")
             params.append(turn)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        sql_order = "DESC" if order == "desc" else "ASC"
         sql = (
-            "SELECT %s FROM events %s ORDER BY seq ASC LIMIT ?"
-            % (", ".join(_COLUMNS), where)
+            "SELECT %s FROM events %s ORDER BY seq %s LIMIT ?"
+            % (", ".join(_COLUMNS), where, sql_order)
         )
         params.append(limit)
         try:
@@ -561,6 +573,14 @@ def query(root, since=None, turn=None, limit=200):
             rows = []
     finally:
         conn.close()
+
+    if order == "desc":
+        # The SQL above fetched the NEWEST `limit` rows (DESC LIMIT) --
+        # re-sort ascending here so every caller of `query()` keeps seeing
+        # seq-ascending order regardless of `order` (see this function's
+        # own docstring for why: `order` only changes which window of rows
+        # is selected, never the shape callers iterate).
+        rows = sorted(rows, key=lambda row: row[0])
 
     out = []
     for row in rows:

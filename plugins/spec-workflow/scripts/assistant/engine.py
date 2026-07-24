@@ -396,7 +396,7 @@ class AssistantEngine:
         if method == "GET" and path == "/assistant/metrics":
             return 200, self._metrics(), "application/json"
         if method == "GET" and path == "/assistant/traces":
-            return 200, self._traces(query), "application/json"
+            return self._traces(query)
         if method == "POST" and path == "/assistant/chat":
             return self._chat(body)
         if method == "POST" and path == "/assistant/select":
@@ -649,17 +649,20 @@ class AssistantEngine:
         return {"roots": out}
 
     def _traces(self, query):
-        """GET /assistant/traces?since=&turn=&limit=&assistant= --
+        """GET /assistant/traces?since=&turn=&limit=&assistant=&order= --
         SPEC-ASSISTANT.md §10.5, issue #329 (`assistant` added by AST-045,
-        issue #331): `{"events": [...]}` (or `{"events": [], "warnings":
-        [...]}` when nothing resolves) from `observability.query` against
-        one resolved assistant -- one currently-selected/resolvable
-        session, not a fleet-wide view like `_metrics` (traces are
-        per-session correlation data; `_metrics` is the fleet dashboard's
-        aggregate). A resolution failure mirrors `_history`'s own
-        ResolutionError handling exactly (an empty, explained result,
-        never a 4xx/500) so both read-surface endpoints agree on what
-        "nothing to report on yet" looks like.
+        issue #331; `order`/`truncated` added by #393): `(status, payload,
+        "application/json")` -- `payload` is `{"events": [...], "truncated":
+        bool}` (or `{"events": [], "warnings": [...]}` when nothing
+        resolves, no `truncated` key -- an unresolved assistant is a
+        different "nothing to report" than a resolved-but-empty root) from
+        `observability.query` against one resolved assistant -- one
+        currently-selected/resolvable session, not a fleet-wide view like
+        `_metrics` (traces are per-session correlation data; `_metrics` is
+        the fleet dashboard's aggregate). A resolution failure mirrors
+        `_history`'s own ResolutionError handling exactly (an empty,
+        explained 200, never a 4xx/500) so both read-surface endpoints
+        agree on what "nothing to report on yet" looks like.
 
         `since` is `observability.query`'s own `since` contract -- a `seq`
         RESUME CURSOR (`seq > since`), NOT a timestamp, despite this
@@ -676,8 +679,25 @@ class AssistantEngine:
         `trace`/`events --assistant NAME` (AST-045) can target a NAMED
         root instead of whichever one resolves by default, mirroring
         `_chat`'s own flag -> sole assistant -> local default -> error
-        order rather than inventing a second resolution rule."""
-        since, turn, limit, assistant_flag = _parse_traces_query(query)
+        order rather than inventing a second resolution rule.
+
+        `order` (#393) is `"asc"` (default, back-compat) or `"desc"` --
+        passed straight through to `observability.query`'s own `order`
+        (see its docstring: `desc` selects the NEWEST `limit` rows, still
+        returned seq-ascending). An `order` value that is neither is a
+        clean 400 -- unlike `since`/`limit`'s "malformed degrades to the
+        permissive default" posture, an unrecognized `order` is a caller
+        mistake worth surfacing rather than silently guessing a direction.
+
+        `truncated` is `True` exactly when `len(events) == limit` -- an
+        honest "possibly more" signal (the off-by-one case where the true
+        count is EXACTLY `limit` reads as truncated too; #393's fix is
+        choosing never-a-false-negative over that rare false-positive,
+        since the caller-side cost of an unnecessary caveat is far lower
+        than the cost of a silently incomplete window)."""
+        since, turn, limit, assistant_flag, order, order_error = _parse_traces_query(query)
+        if order_error:
+            return 400, {"error": order_error}, "application/json"
         candidates = default_store.discover_candidates(
             root for _, root in self._repos_getter()
         )
@@ -687,8 +707,10 @@ class AssistantEngine:
         except default_store.ResolutionError as exc:
             # Same "empty, explained result, never a crash" posture as
             # `_history`'s own ResolutionError handling above.
-            return {"events": [], "warnings": [f"no assistant resolved: {exc}"]}
-        return {"events": observability.query(root, since=since, turn=turn, limit=limit)}
+            return 200, {"events": [], "warnings": [f"no assistant resolved: {exc}"]}, "application/json"
+        events = observability.query(root, since=since, turn=turn, limit=limit, order=order)
+        truncated = limit > 0 and len(events) == limit
+        return 200, {"events": events, "truncated": truncated}, "application/json"
 
     def _chat_lock_for(self, root):
         """One `threading.Lock` per resolved assistant root, canonicalized
@@ -915,24 +937,38 @@ def _parse_history_n(query):
 
 
 def _parse_traces_query(query):
-    """Parses `GET /assistant/traces`'s `since`/`turn`/`limit`/`assistant`
-    query params into `(since, turn, limit, assistant_flag)`. `since`
-    parses as an int (a `seq` cursor -- see `AssistantEngine._traces`'s
-    docstring for why, despite the route's own `since=<iso>`-shaped naming
-    in casual spec prose); an absent/malformed value is `None` (no lower
-    bound), same "malformed input degrades to the permissive default,
-    never a 400" shape `_parse_history_n` already uses for `?n=`. `turn` is
-    passed through verbatim (a `turn_id` string, no parsing needed).
-    `limit` defaults to `TRACES_DEFAULT_LIMIT` and is clamped to `[0,
-    TRACES_MAX_LIMIT]` -- never negative, never past the documented hard
-    cap, regardless of what a client asks for. `assistant` (AST-045, issue
-    #331) is passed through verbatim too -- an absent value is `None`,
-    meaning "resolve however `_chat` would with no flag" (sole candidate ->
-    local default -> error)."""
+    """Parses `GET /assistant/traces`'s `since`/`turn`/`limit`/`assistant`/
+    `order` query params into `(since, turn, limit, assistant_flag, order,
+    order_error)`. `since` parses as an int (a `seq` cursor -- see
+    `AssistantEngine._traces`'s docstring for why, despite the route's own
+    `since=<iso>`-shaped naming in casual spec prose); an absent/malformed
+    value is `None` (no lower bound), same "malformed input degrades to
+    the permissive default, never a 400" shape `_parse_history_n` already
+    uses for `?n=`. `turn` is passed through verbatim (a `turn_id` string,
+    no parsing needed). `limit` defaults to `TRACES_DEFAULT_LIMIT` and is
+    clamped to `[0, TRACES_MAX_LIMIT]` -- never negative, never past the
+    documented hard cap, regardless of what a client asks for. `assistant`
+    (AST-045, issue #331) is passed through verbatim too -- an absent
+    value is `None`, meaning "resolve however `_chat` would with no flag"
+    (sole candidate -> local default -> error).
+
+    `order` (#393) is DIFFERENT from every other param above: an absent
+    value degrades to `"asc"` (the permissive default, back-compat), but a
+    PRESENT-and-invalid value (neither `"asc"` nor `"desc"`) is reported
+    back as `order_error` (a message string, `None` when `order` is valid)
+    rather than silently degrading -- `_traces` turns a non-`None`
+    `order_error` into a clean 400, unlike `since`/`limit`'s "malformed ->
+    default" posture. The asymmetry is deliberate: a malformed `since`/
+    `limit` is indistinguishable from "no opinion" (there's no sane string
+    that means `since=<bogus>` on purpose), but `order=sideways` is
+    unambiguously a caller mistake worth surfacing rather than guessing
+    which direction was meant."""
     since = None
     turn = None
     limit = TRACES_DEFAULT_LIMIT
     assistant_flag = None
+    order = "asc"
+    order_error = None
     if query:
         since_values = query.get("since")
         if since_values:
@@ -952,6 +988,13 @@ def _parse_traces_query(query):
         assistant_values = query.get("assistant")
         if assistant_values:
             assistant_flag = assistant_values[0]
+        order_values = query.get("order")
+        if order_values:
+            order = order_values[0]
+            if order not in ("asc", "desc"):
+                order_error = (
+                    f"invalid order {order!r} (expected 'asc' or 'desc')"
+                )
     if limit < 0:
         limit = 0
-    return since, turn, min(limit, TRACES_MAX_LIMIT), assistant_flag
+    return since, turn, min(limit, TRACES_MAX_LIMIT), assistant_flag, order, order_error

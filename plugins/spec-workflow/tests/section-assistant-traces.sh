@@ -199,6 +199,53 @@ check "query: since=<seq> excludes everything at or before that seq" "SINCE_FILT
 check "query: since filter is a strict > comparison" "SINCE_FILTER_EXCLUDES_FIRST True" "$qfilter_out"
 
 # ------------------------------------------------------------------------
+echo "-- unit: query(order=desc) returns the NEWEST limit rows, re-sorted ascending (#393) --"
+order_out="$(SCRIPTS_DIR="$AT_SCRIPTS" python3 - <<'PY'
+import os, sys, tempfile, threading, queue, time
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import observability
+
+root = tempfile.mkdtemp(prefix="at-order-")
+q = queue.Queue()
+stop = threading.Event()
+t = threading.Thread(target=observability.run_writer, args=(q, stop))
+t.start()
+
+N = 10
+for i in range(N):
+    observability.emit(q, root, {"kind": "turn.start", "turn_id": "t%d" % i})
+
+deadline = time.monotonic() + 5.0
+all_rows = []
+while time.monotonic() < deadline:
+    all_rows = observability.query(root, limit=1000)
+    if len(all_rows) >= N:
+        break
+    time.sleep(0.2)
+stop.set()
+t.join(timeout=3)
+
+# asc (default, back-compat): a 5-row limit on 10 rows returns the OLDEST 5.
+asc_rows = observability.query(root, limit=5)
+print("ASC_TURN_IDS", [r["turn_id"] for r in asc_rows])
+
+# desc: the SAME 5-row limit must instead return the NEWEST 5 -- the #393
+# bug is exactly this returning the same oldest-5 as asc.
+desc_rows = observability.query(root, limit=5, order="desc")
+print("DESC_TURN_IDS", [r["turn_id"] for r in desc_rows])
+print("DESC_STILL_SEQ_ASCENDING", [r["seq"] for r in desc_rows] == sorted(r["seq"] for r in desc_rows))
+
+# order defaults to asc (existing callers see identical behavior).
+default_rows = observability.query(root, limit=5)
+print("DEFAULT_MATCHES_ASC", [r["turn_id"] for r in default_rows] == [r["turn_id"] for r in asc_rows])
+PY
+)"
+check "query order=desc: default (asc) returns the oldest 5 turns" "ASC_TURN_IDS ['t0', 't1', 't2', 't3', 't4']" "$order_out"
+check "query order=desc: returns the newest 5 turns instead" "DESC_TURN_IDS ['t5', 't6', 't7', 't8', 't9']" "$order_out"
+check "query order=desc: rows are re-sorted ascending before returning (never desc order to the caller)" "DESC_STILL_SEQ_ASCENDING True" "$order_out"
+check "query order=desc: an absent order= matches the explicit asc call exactly (back-compat)" "DEFAULT_MATCHES_ASC True" "$order_out"
+
+# ------------------------------------------------------------------------
 echo "-- unit: emitter never raises when the queue is full --"
 overflow_out="$(SCRIPTS_DIR="$AT_SCRIPTS" python3 - <<'PY'
 import os, sys, queue, io, contextlib
@@ -830,6 +877,74 @@ check "traces endpoint: since filter excludes everything at or before that seq" 
 check "traces endpoint: since filter is a strict greater-than comparison" "SINCE_FILTER_EXCLUDES_FIRST True" "$traces_endpoint_out"
 check "traces endpoint: limit caps the returned event count" "LIMIT_COUNT 2" "$traces_endpoint_out"
 rm -rf "$_ate2_root"
+
+# ------------------------------------------------------------------------
+echo "-- unit: GET /assistant/traces order=desc returns the newest events + truncated flag (#393) --"
+_ateo_root="$(mktemp -d)"
+at_repo "$_ateo_root" jarvis
+
+order_endpoint_out="$(SCRIPTS_DIR="$AT_SCRIPTS" ROOT="$_ateo_root" python3 - <<'PY'
+import os, sys, threading, queue, time
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import engine, observability
+
+root = os.environ["ROOT"]
+
+q = queue.Queue()
+stop = threading.Event()
+t = threading.Thread(target=observability.run_writer, args=(q, stop))
+t.start()
+N = 6
+for i in range(N):
+    observability.emit(q, root, {"kind": "turn.start", "turn_id": "t%d" % i})
+deadline = time.monotonic() + 5.0
+while time.monotonic() < deadline:
+    if len(observability.query(root, limit=100)) >= N:
+        break
+    time.sleep(0.2)
+stop.set()
+t.join(timeout=3)
+
+state_dir = os.path.join(root, ".claude", "assistant-engine-state")
+e = engine.AssistantEngine(lambda: [("jarvis", root)], state_dir)
+
+# default order=asc, limit=3 -- oldest 3, not truncated-honest since exactly
+# limit rows came back (limit == returned count means "possibly more").
+status1, payload1, _ct1 = e.handle("GET", "/assistant/traces", query={"limit": ["3"]})
+events1 = payload1.get("events", [])
+print("ASC_IDS", [ev["turn_id"] for ev in events1])
+print("ASC_TRUNCATED", payload1.get("truncated"))
+
+# order=desc, limit=3 -- newest 3.
+status2, payload2, _ct2 = e.handle("GET", "/assistant/traces", query={"limit": ["3"], "order": ["desc"]})
+events2 = payload2.get("events", [])
+print("DESC_STATUS", status2)
+print("DESC_IDS", [ev["turn_id"] for ev in events2])
+print("DESC_TRUNCATED", payload2.get("truncated"))
+
+# limit=100 (> N) -- everything comes back, truncated must be False (an
+# honest "no more" since fewer than limit rows came back).
+status3, payload3, _ct3 = e.handle("GET", "/assistant/traces", query={"limit": ["100"], "order": ["desc"]})
+events3 = payload3.get("events", [])
+print("UNTRUNCATED_COUNT", len(events3))
+print("UNTRUNCATED_FLAG", payload3.get("truncated"))
+
+# an invalid order value is a clean 400-style error, never a crash / silent default.
+status4, payload4, _ct4 = e.handle("GET", "/assistant/traces", query={"order": ["sideways"]})
+print("BAD_ORDER_STATUS", status4)
+print("BAD_ORDER_HAS_ERROR", "error" in payload4)
+PY
+)"
+check "traces endpoint order=desc: request succeeds" "DESC_STATUS 200" "$order_endpoint_out"
+check "traces endpoint order=asc (default): returns the oldest turns" "ASC_IDS ['t0', 't1', 't2']" "$order_endpoint_out"
+check "traces endpoint order=desc: returns the newest turns instead" "DESC_IDS ['t3', 't4', 't5']" "$order_endpoint_out"
+check "traces endpoint: truncated=True when exactly limit rows came back" "ASC_TRUNCATED True" "$order_endpoint_out"
+check "traces endpoint order=desc: truncated=True when exactly limit rows came back" "DESC_TRUNCATED True" "$order_endpoint_out"
+check "traces endpoint: truncated=False when fewer than limit rows came back (honest 'no more')" "UNTRUNCATED_FLAG False" "$order_endpoint_out"
+check "traces endpoint: an over-limit fetch still returns every row" "UNTRUNCATED_COUNT 6" "$order_endpoint_out"
+check "traces endpoint: an invalid order value is a clean 4xx" "BAD_ORDER_STATUS 400" "$order_endpoint_out"
+check "traces endpoint: an invalid order value's error body carries an error key" "BAD_ORDER_HAS_ERROR True" "$order_endpoint_out"
+rm -rf "$_ateo_root"
 
 # ------------------------------------------------------------------------
 echo "-- unit: GET /assistant/traces clamps an over-cap limit to the documented max (1000) --"

@@ -1814,13 +1814,15 @@ def _cmd_assistant_metrics():
 
 # Requested with the endpoint's own documented hard cap (engine.py's
 # TRACES_MAX_LIMIT) -- a single bounded fetch, never a second round-trip.
-# `trace`/`events` both take this same single-shot posture: GET
-# /assistant/traces returns events oldest-first (ORDER BY seq ASC, no
-# `since` cursor threaded from the terminal), so with more than 1000
-# events recorded since inception a stale-oldest window is a known,
-# documented limitation shared with the voice-panel's own single-shot
-# fetch (templates/neural-view.html calls the SAME route with no query
-# string at all) -- not a new regression this command introduces.
+# `trace`/`events` both take this same single-shot posture. Pre-#393 this
+# fetched oldest-first (ORDER BY seq ASC) with no `since` cursor threaded
+# from the terminal -- on a root with more than 1000 events recorded since
+# inception that stale-oldest window silently missed everything recent,
+# indistinguishable from "nothing happened" (the no-silent-caps violation
+# issue #393 reports). `_fetch_traces` now requests `order=desc` for both
+# commands (see its own docstring) -- the single bounded fetch is still a
+# known, documented limitation on a truly enormous history, but the window
+# it misses is now the OLD end, never the new one.
 _TERMINAL_TRACES_LIMIT = 1000
 
 
@@ -1835,18 +1837,26 @@ def _parse_event_ts(ts):
         return None
 
 
-def _fetch_traces(assistant_flag, turn=None):
+def _fetch_traces(assistant_flag, turn=None, order=None):
     """One GET /assistant/traces round-trip, `limit` pinned to the
     documented max and `turn`/`assistant` passed through verbatim when
     given (see engine.py's `_traces`/`_parse_traces_query` docstrings for
-    the `assistant` flag AST-045 added). Returns (code, payload) exactly
-    as `_assistant_http` does; raises OSError on a connection-level
-    failure, same contract as every other `_assistant_http` caller here."""
+    the `assistant` flag AST-045 added). `order` (#393) is passed through
+    verbatim too when given -- both `trace last` and `events --since`
+    (this module's only two callers) pass `order="desc"` so the ONE
+    bounded fetch lands on the NEWEST `limit` events rather than the
+    oldest (engine.py's `_traces`/`observability.query` docstrings explain
+    why `desc` is the correct default for "what happened recently").
+    Returns (code, payload) exactly as `_assistant_http` does; raises
+    OSError on a connection-level failure, same contract as every other
+    `_assistant_http` caller here."""
     query = {"limit": str(_TERMINAL_TRACES_LIMIT)}
     if assistant_flag:
         query["assistant"] = assistant_flag
     if turn is not None:
         query["turn"] = turn
+    if order is not None:
+        query["order"] = order
     path = "/assistant/traces?" + urllib.parse.urlencode(query)
     return _assistant_http(configured_port(), "GET", path)
 
@@ -1879,9 +1889,10 @@ def _cmd_assistant_trace(args, assistant_flag):
     ASSISTANT.md §10.5, issue #331: renders one turn's ordered event
     timeline (a textual waterfall) from GET /assistant/traces. A specific
     `turn-id` filters SERVER-SIDE via `?turn=` (cheap, exact); `last` (the
-    default when no selector is given) resolves the newest turn out of the
-    single bounded fetch (`_fetch_traces`'s own documented limitation
-    applies: "newest" means newest within that one fetch)."""
+    default when no selector is given) fetches `order=desc` (#393) -- the
+    single bounded fetch lands on the NEWEST events, so "newest" actually
+    means newest on a busy root, not just newest within a stale oldest-
+    first window."""
     if len(args) > 1:
         sys.stderr.write("usage: neural-view.py assistant trace [turn-id|last] [--assistant NAME]\n")
         return 2
@@ -1891,7 +1902,7 @@ def _cmd_assistant_trace(args, assistant_flag):
         return 1
     try:
         if selector == "last":
-            code, payload = _fetch_traces(assistant_flag)
+            code, payload = _fetch_traces(assistant_flag, order="desc")
         else:
             code, payload = _fetch_traces(assistant_flag, turn=selector)
     except OSError as exc:
@@ -1938,17 +1949,23 @@ def _parse_duration(text):
 
 def _cmd_assistant_events(args, assistant_flag):
     """`assistant events --since <dur> [--assistant NAME]` -- SPEC-
-    ASSISTANT.md §10.5, issue #331. `/assistant/traces`' own `since` is a
-    `seq` RESUME CURSOR (engine.py's `_parse_traces_query`), not a
-    timestamp -- there is no server-side time-window filter to delegate
-    to. So this command fetches a single bounded batch (`_fetch_traces`,
-    the documented max limit, oldest-first) and filters CLIENT-SIDE on
-    each event's own `ts` field against `now - <dur>`. Documented
-    limitation (see `_TERMINAL_TRACES_LIMIT`'s docstring): if more than
-    the endpoint's max events have been recorded since inception, the
-    single fetch may not reach far enough forward to cover a recent
-    window -- the same trade-off the voice-panel's own single-shot fetch
-    already accepts."""
+    ASSISTANT.md §10.5, issue #331; recency fix #393. `/assistant/traces`'
+    own `since` is a `seq` RESUME CURSOR (engine.py's
+    `_parse_traces_query`), not a timestamp -- there is no server-side
+    time-window filter to delegate to. So this command fetches a single
+    bounded batch (`_fetch_traces`, the documented max limit) and filters
+    CLIENT-SIDE on each event's own `ts` field against `now - <dur>` --
+    exactly as before #393. What changed: the fetch is now `order=desc`
+    (newest-first -- what `--since` actually means: "recent activity",
+    not "the oldest slice of history"), and when the endpoint's own
+    `truncated` flag comes back true AND the oldest event in the raw
+    (unfiltered) batch is still newer than the `--since` cutoff -- i.e.
+    the single fetch hit its cap before it reached back far enough to
+    cover the whole requested window -- this prints an explicit caveat
+    rather than silently reporting a window that may be missing older-
+    than-fetched events. `truncated=true` with the oldest fetched event
+    ALREADY at or before the cutoff means the window is fully covered
+    despite being capped (no caveat needed in that case)."""
     since_dur = None
     rest = []
     i = 0
@@ -1976,7 +1993,7 @@ def _cmd_assistant_events(args, assistant_flag):
         sys.stderr.write(_assistant_not_running_message())
         return 1
     try:
-        code, payload = _fetch_traces(assistant_flag)
+        code, payload = _fetch_traces(assistant_flag, order="desc")
     except OSError as exc:
         sys.stderr.write(f"neural-view: could not reach the server: {exc}\n")
         return 1
@@ -1986,11 +2003,28 @@ def _cmd_assistant_events(args, assistant_flag):
     for warning in payload.get("warnings") or []:
         sys.stderr.write(warning + "\n")
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=seconds)
+    raw_events = payload.get("events") or []
     matched = []
-    for ev in payload.get("events") or []:
+    for ev in raw_events:
         ts = _parse_event_ts(ev.get("ts"))
         if ts is not None and ts >= cutoff:
             matched.append(ev)
+    # #393: `raw_events` is seq-ascending (observability.query's own
+    # contract regardless of `order`), so `raw_events[0]` is the OLDEST
+    # event this one fetch reached. `truncated` means the fetch hit its
+    # cap before exhausting the root's history -- if the oldest event we
+    # actually got is still newer than the requested cutoff, the window
+    # may extend further back than this fetch covers; print that caveat
+    # rather than silently reporting a possibly-incomplete window as
+    # complete. An already-covered window (oldest fetched ts <= cutoff)
+    # needs no caveat even when truncated=true.
+    if payload.get("truncated"):
+        oldest_ts = _parse_event_ts(raw_events[0]["ts"]) if raw_events else None
+        if oldest_ts is None or oldest_ts > cutoff:
+            print(
+                f"showing newest {len(raw_events)} events; window may be "
+                "incomplete -- narrow --since or raise --limit"
+            )
     if not matched:
         print("(no events in window)")
         return 0

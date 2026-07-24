@@ -425,3 +425,90 @@ for _ in $(seq 1 30); do
 done
 unset NEURAL_VIEW_STATE NEURAL_VIEW_PORT
 rm -rf "$_at_g_scan" "$_at_g_state"
+
+# ----------------------------------------------------- H: recency (#393) -- events fetches order=desc + prints a truncation caveat, trace last fetches order=desc
+# Bug #393: `events --since`/`trace last` fetched oldest-first (ORDER BY seq
+# ASC LIMIT _TERMINAL_TRACES_LIMIT) -- on a root with more than
+# _TERMINAL_TRACES_LIMIT events total, that window is stale and silently
+# misses everything recent (an empty/stale result is indistinguishable from
+# "nothing happened", violating the no-silent-caps rule). Pure unit test
+# against the real module (no live server, no 1000+-row fixture needed) --
+# `_fetch_traces`/`pid_alive` are monkeypatched, same "import as a module,
+# stub the boundary" style section-neural-view-rescan.sh already uses.
+echo "-- unit: events --since fetches order=desc and prints a truncation caveat; trace last fetches order=desc --"
+h_out="$(python3 - "$AT_NV" <<'PY'
+import importlib.util, io, sys, contextlib
+from datetime import datetime, timezone, timedelta
+
+spec_path = sys.argv[1]
+spec = importlib.util.spec_from_file_location("neural_view", spec_path)
+nv = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(nv)
+
+nv.pid_alive = lambda: True
+
+now = datetime.now(timezone.utc)
+recent_ts = (now - timedelta(seconds=10)).isoformat()
+old_ts = (now - timedelta(hours=2)).isoformat()
+
+calls = []
+
+def make_fetch(order_requested_holder, events, truncated):
+    def _fake_fetch_traces(assistant_flag, turn=None, order=None):
+        order_requested_holder.append(order)
+        return 200, {"events": events, "truncated": truncated}
+    return _fake_fetch_traces
+
+# ---- truncated=True + the oldest fetched event is NEWER than cutoff -> the
+# window may extend past the fetch -> caveat expected.
+holder1 = []
+nv._fetch_traces = make_fetch(holder1, [{"seq": 1, "ts": recent_ts, "kind": "turn.start", "turn_id": "tA", "status": None}], True)
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    rc1 = nv._cmd_assistant_events(["--since", "1h"], None)
+print("CAVEAT_RC", rc1)
+print("CAVEAT_ORDER_REQUESTED", holder1)
+print("CAVEAT_PRINTED", "may be incomplete" in buf.getvalue())
+print("CAVEAT_MENTIONS_SINCE_OR_LIMIT", "--since" in buf.getvalue() and "--limit" in buf.getvalue())
+
+# ---- truncated=False -> no caveat, regardless of window size.
+holder2 = []
+nv._fetch_traces = make_fetch(holder2, [{"seq": 1, "ts": recent_ts, "kind": "turn.start", "turn_id": "tA", "status": None}], False)
+buf2 = io.StringIO()
+with contextlib.redirect_stdout(buf2):
+    rc2 = nv._cmd_assistant_events(["--since", "1h"], None)
+print("NOCAVEAT_RC", rc2)
+print("NOCAVEAT_PRINTED", "may be incomplete" in buf2.getvalue())
+
+# ---- truncated=True but the oldest fetched event already reaches back past
+# cutoff -> the fetched window fully covers --since, no caveat needed even
+# though the batch was capped.
+holder3 = []
+nv._fetch_traces = make_fetch(holder3, [
+    {"seq": 1, "ts": old_ts, "kind": "turn.start", "turn_id": "tOld", "status": None},
+    {"seq": 2, "ts": recent_ts, "kind": "turn.start", "turn_id": "tNew", "status": None},
+], True)
+buf3 = io.StringIO()
+with contextlib.redirect_stdout(buf3):
+    rc3 = nv._cmd_assistant_events(["--since", "1h"], None)
+print("COVERED_RC", rc3)
+print("COVERED_PRINTED", "may be incomplete" in buf3.getvalue())
+
+# ---- trace last fetches order=desc (correctness on busy roots).
+holder4 = []
+nv._fetch_traces = make_fetch(holder4, [{"seq": 1, "ts": recent_ts, "kind": "turn.start", "turn_id": "tA", "status": None}], False)
+buf4 = io.StringIO()
+with contextlib.redirect_stdout(buf4):
+    rc4 = nv._cmd_assistant_trace(["last"], None)
+print("TRACE_LAST_RC", rc4)
+print("TRACE_LAST_ORDER_REQUESTED", holder4)
+PY
+)"
+check_rc "events --since: no exception, exits 0" 0 0
+check "events --since: requests order=desc from the server (newest-first window)" "CAVEAT_ORDER_REQUESTED ['desc']" "$h_out"
+check "events --since: truncated + incomplete window prints the caveat line" "CAVEAT_PRINTED True" "$h_out"
+check "events --since: the caveat names both mitigations (--since / --limit)" "CAVEAT_MENTIONS_SINCE_OR_LIMIT True" "$h_out"
+check "events --since: truncated=False never prints the caveat" "NOCAVEAT_PRINTED False" "$h_out"
+check "events --since: truncated=True but the window is already fully covered never prints the caveat" "COVERED_PRINTED False" "$h_out"
+check "trace last: also requests order=desc (correctness on busy roots)" "TRACE_LAST_ORDER_REQUESTED ['desc']" "$h_out"
+if [[ "$h_out" != *"CAVEAT_PRINTED True"* ]]; then echo "$h_out" >&2; fi

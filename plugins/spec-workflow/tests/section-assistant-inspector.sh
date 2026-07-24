@@ -106,7 +106,7 @@ global.fetch = async (url) => {
         if (metricsThrows) throw new Error("network down");
         return { status: 200, json: async () => metricsResponse };
     }
-    if (url === "/assistant/traces") {
+    if (url === "/assistant/traces?order=desc") {
         if (metricsThrows) throw new Error("network down");
         return { status: 200, json: async () => tracesResponse };
     }
@@ -127,19 +127,21 @@ eval(extract("computeWaterfallSpans"));
 eval(extract("renderAstTurnlist"));
 eval(extract("renderAstWaterfall"));
 eval(extract("selectAstTurn"));
+eval(extract("renderAstTruncated"));
 eval(extract("renderAstInspectorGated"));
 eval(extract("renderAstInspectorOffline"));
 eval(extract("clearAstInspectorState"));
 eval(extract("loadAssistantInspector"));
 
 function resetInspector() {
-    for (const id of ["ast-metrics-refresh", "ast-metrics-retry", "ast-metrics-state", "ast-metrics", "ast-turnlist", "ast-waterfall"]) {
+    for (const id of ["ast-metrics-refresh", "ast-metrics-retry", "ast-metrics-state", "ast-metrics", "ast-truncated", "ast-turnlist", "ast-waterfall"]) {
         delete elements[id];
     }
     seedEl("ast-metrics-refresh", "iconbtn");
     seedEl("ast-metrics-retry", "iconbtn ast-metrics-retry ast-metrics-hidden");
     seedEl("ast-metrics-state", "ast-metrics-state");
     seedEl("ast-metrics", "ast-metrics");
+    seedEl("ast-truncated", "ast-truncated ast-metrics-hidden");
     seedEl("ast-turnlist", "ast-turnlist");
     seedEl("ast-waterfall", "ast-waterfall ast-metrics-hidden");
     fetchCalls = [];
@@ -236,7 +238,8 @@ const TURN_EVENTS = [
     tracesResponse = { events: TURN_EVENTS };
     await loadAssistantInspector();
     if (fetchCalls.filter(c => c.url === "/assistant/metrics").length !== 1) throw new Error("open must fetch /assistant/metrics exactly once");
-    if (fetchCalls.filter(c => c.url === "/assistant/traces").length !== 1) throw new Error("open must fetch /assistant/traces exactly once");
+    if (fetchCalls.filter(c => c.url === "/assistant/traces?order=desc").length !== 1) throw new Error("open must fetch /assistant/traces?order=desc exactly once (#393: newest-first, not the stale oldest-first default)");
+    if (!document.getElementById("ast-truncated").classList.contains("ast-metrics-hidden")) throw new Error("truncated marker must stay hidden when the response carries no truncated flag");
     const metricsEl = document.getElementById("ast-metrics");
     // rows are built from two child <span>s (label, value) -- the stub's
     // `textContent` is a plain field (unlike a real DOM's auto-aggregating
@@ -266,6 +269,17 @@ const TURN_EVENTS = [
     const rowBAfter = turnlistEl.children.find(r => r.getAttribute("data-turn-id") === "B");
     if (!rowBAfter.className.includes("ast-turnlist-selected")) throw new Error("clicked row must be marked selected");
     console.log("TURN_CLICK_WIRING_OK true");
+
+    // ---- #393: truncated marker reveals/hides on the endpoint's own truncated flag ----
+    resetInspector();
+    tracesResponse = { events: TURN_EVENTS, truncated: true };
+    await loadAssistantInspector();
+    if (document.getElementById("ast-truncated").classList.contains("ast-metrics-hidden")) throw new Error("truncated=true must reveal the ast-truncated marker");
+    resetInspector();
+    tracesResponse = { events: TURN_EVENTS, truncated: false };
+    await loadAssistantInspector();
+    if (!document.getElementById("ast-truncated").classList.contains("ast-metrics-hidden")) throw new Error("truncated=false must keep the ast-truncated marker hidden");
+    console.log("TRUNCATED_MARKER_OK true");
 })().catch(e => { console.error("FAIL", e.message); process.exit(1); });
 NODEJS
 tmpl_inspector_out="$(node "$_ai_node" "$NVHTML_INSPECTOR" 2>&1)"
@@ -282,6 +296,7 @@ check "template: offline (fetch failure) shows a specific message with a retry h
 check "template: loading fetches metrics+traces once and renders percentile/counter rows + graph placeholder" "LOAD_METRICS_OK true" "$tmpl_inspector_out"
 check "template: turn list renders grouped turns with an error hook class" "TURNLIST_OK true" "$tmpl_inspector_out"
 check "template: clicking a turn wires the waterfall render" "TURN_CLICK_WIRING_OK true" "$tmpl_inspector_out"
+check "template (#393): fetches /assistant/traces?order=desc, and the truncated marker follows the endpoint's own flag" "TRUNCATED_MARKER_OK true" "$tmpl_inspector_out"
 if [[ "$tmpl_inspector_rc" -ne 0 ]]; then echo "$tmpl_inspector_out" >&2; fi
 
 check "template pins the ast-metrics class name in source" '"ast-metrics"' "$(cat "$NVHTML_INSPECTOR")"
@@ -290,3 +305,4 @@ check "template pins the ast-metrics-graph class name in source" '"ast-metrics-g
 check "template pins the ast-turnlist-row class name in source" '"ast-turnlist-row"' "$(cat "$NVHTML_INSPECTOR")"
 check "template pins the ast-waterfall class name in source" '"ast-waterfall"' "$(cat "$NVHTML_INSPECTOR")"
 check "template pins the ast-waterfall-error class name in source" "ast-waterfall-error" "$(cat "$NVHTML_INSPECTOR")"
+check "template pins the ast-truncated class name in source (#393 truncation marker)" '"ast-truncated"' "$(cat "$NVHTML_INSPECTOR")"
