@@ -19,6 +19,9 @@ canvas containing its own role-clusters (dev/reviewer/orchestrator/...).
   neural-view.py assistant status                        # GET /assistant/status against the running server
   neural-view.py assistant default [NAME]                # set/read the machine-local default assistant (local file, no server needed)
   neural-view.py assistant chat [--assistant NAME] <msg...>  # POST /assistant/chat; §7.6 resolution: flag -> sole assistant -> local default -> error
+  neural-view.py assistant metrics                        # GET /assistant/metrics; per-root turn counts + p50/p95 turn duration
+  neural-view.py assistant trace [turn-id|last] [--assistant NAME]  # GET /assistant/traces; one turn's event waterfall (default: newest turn)
+  neural-view.py assistant events --since <dur> [--assistant NAME]  # GET /assistant/traces, filtered client-side on ts; dur like 5m/2h/30s
 
 Stale-server detection: if the pidfile is missing/stale but the configured
 port is still occupied, `status` reports STALE (never a bare STOPPED) and
@@ -111,6 +114,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -1714,14 +1718,301 @@ def _cmd_assistant_chat(args, assistant_flag):
     return 0
 
 
+# --- `assistant metrics|trace|events` (AST-045, SPEC-ASSISTANT.md §10.5,
+# issue #331) -- same "thin HTTP client over the running server" posture
+# as chat/status above: no direct sqlite/observability access from this
+# process, only GET /assistant/metrics and GET /assistant/traces, the
+# exact routes the voice-panel's own metrics fold / waterfall inspector
+# (AST-044) reads. Percentile math is reimplemented here rather than
+# imported (there is no shared module between this stdlib-only CLI and
+# templates/neural-view.html's JS) -- see `_estimate_percentile`'s
+# docstring for the parity contract with `astEstimatePercentile`.
+
+# Prometheus-style latency histogram boundaries (observability.py's
+# LATENCY_BUCKETS_SECONDS) -- `turnDuration.buckets`' keys are these
+# stringified via the SAME "bare int, trimmed float" rule observability.py's
+# `_fmt_num` uses (`_fmt_num(1.0) == "1"`, not "1.0"), so the lookup key
+# below must match that formatting, not a naive `str(float)`.
+_LATENCY_BUCKETS_SECONDS = (0.1, 0.5, 1, 2, 5, 10, 30)
+
+
+def _bucket_key(boundary):
+    return str(int(boundary)) if boundary == int(boundary) else str(boundary)
+
+
+def _estimate_percentile(buckets, count, p):
+    """Reimplements templates/neural-view.html's `astEstimatePercentile`
+    (linear interpolation within the bucket the target rank falls into --
+    the same shape `histogram_quantile` uses over a Prometheus-style
+    cumulative histogram) so the terminal's `metrics` command renders the
+    SAME p50/p95 numbers the voice-panel's metrics fold shows, off the
+    SAME raw `turnDuration.buckets` the `/assistant/metrics` route already
+    returns -- no engine change, no new wire shape, just the same "small
+    shared-shape math reimplemented per surface" this route pair already
+    accepts (there is no shared JS<->Python module to import from). Returns
+    `None` when `count` is 0 (nothing to estimate); returns the LAST
+    boundary (30s) if the target rank only falls in the (excluded)
+    "+Inf" bucket, exactly like the JS version's post-loop fallthrough."""
+    if not count:
+        return None
+    target = p * count
+    prev_le = 0.0
+    prev_cum = 0
+    for le in _LATENCY_BUCKETS_SECONDS:
+        cum = buckets.get(_bucket_key(le), 0)
+        if cum >= target:
+            bucket_count = cum - prev_cum
+            if bucket_count <= 0:
+                return le
+            frac = (target - prev_cum) / bucket_count
+            return prev_le + frac * (le - prev_le)
+        prev_le = le
+        prev_cum = cum
+    return prev_le
+
+
+def _cmd_assistant_metrics():
+    """`assistant metrics` -- GET /assistant/metrics, rendered human-
+    readable: one block per discovered root (fleet-wide, matching the
+    route's own "every candidate" shape, §10.5), turn counts by status,
+    provider-error/distill/notes-minted counters, and a p50/p95 turn-
+    duration estimate off the same cumulative-histogram buckets the
+    voice-panel's metrics fold reads (see `_estimate_percentile`)."""
+    if not pid_alive():
+        sys.stderr.write(_assistant_not_running_message())
+        return 1
+    try:
+        code, payload = _assistant_http(configured_port(), "GET", "/assistant/metrics")
+    except OSError as exc:
+        sys.stderr.write(f"neural-view: could not reach the server: {exc}\n")
+        return 1
+    if code != 200:
+        sys.stderr.write(f"assistant metrics failed: {payload.get('error', payload)}\n")
+        return 1
+    roots = payload.get("roots") or {}
+    if not roots:
+        print("(no assistants discovered)")
+        return 0
+    for label in sorted(roots):
+        m = roots[label] or {}
+        turns = m.get("turnsByStatus") or {}
+        turns_str = " ".join(f"{k}={v}" for k, v in sorted(turns.items())) or "(none)"
+        td = m.get("turnDuration") or {}
+        count = td.get("count") or 0
+        print(f"{label}:")
+        print(f"  turns: {turns_str}")
+        print(f"  provider errors: {m.get('providerErrors', 0)}")
+        print(f"  distill batches: {m.get('distillBatches', 0)}  notes minted: {m.get('notesMinted', 0)}")
+        if count:
+            p50 = _estimate_percentile(td.get("buckets") or {}, count, 0.5)
+            p95 = _estimate_percentile(td.get("buckets") or {}, count, 0.95)
+            print(f"  turn duration: count={count} p50={p50 * 1000:.0f}ms p95={p95 * 1000:.0f}ms")
+        else:
+            print("  turn duration: count=0")
+    return 0
+
+
+# Requested with the endpoint's own documented hard cap (engine.py's
+# TRACES_MAX_LIMIT) -- a single bounded fetch, never a second round-trip.
+# `trace`/`events` both take this same single-shot posture: GET
+# /assistant/traces returns events oldest-first (ORDER BY seq ASC, no
+# `since` cursor threaded from the terminal), so with more than 1000
+# events recorded since inception a stale-oldest window is a known,
+# documented limitation shared with the voice-panel's own single-shot
+# fetch (templates/neural-view.html calls the SAME route with no query
+# string at all) -- not a new regression this command introduces.
+_TERMINAL_TRACES_LIMIT = 1000
+
+
+def _parse_event_ts(ts):
+    """Parses one of observability.py's own `ts` strings (`_now_iso`'s
+    `datetime.now(timezone.utc).isoformat()` shape) the same way that
+    module's own `_parse_ts` does -- never raises on a malformed/foreign
+    value, just treats it as "no timestamp" (`None`)."""
+    try:
+        return datetime.fromisoformat(ts)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fetch_traces(assistant_flag, turn=None):
+    """One GET /assistant/traces round-trip, `limit` pinned to the
+    documented max and `turn`/`assistant` passed through verbatim when
+    given (see engine.py's `_traces`/`_parse_traces_query` docstrings for
+    the `assistant` flag AST-045 added). Returns (code, payload) exactly
+    as `_assistant_http` does; raises OSError on a connection-level
+    failure, same contract as every other `_assistant_http` caller here."""
+    query = {"limit": str(_TERMINAL_TRACES_LIMIT)}
+    if assistant_flag:
+        query["assistant"] = assistant_flag
+    if turn is not None:
+        query["turn"] = turn
+    path = "/assistant/traces?" + urllib.parse.urlencode(query)
+    return _assistant_http(configured_port(), "GET", path)
+
+
+def _render_trace_waterfall(events):
+    """Renders one turn's events as an ordered textual waterfall (§10.5):
+    seq, kind, +delta-ms since the previous event's `ts` (the schema has
+    no per-event END timestamp, only a start `ts` per row -- exactly the
+    same "span to the next event" geometry templates/neural-view.html's
+    `computeWaterfallSpans` uses), status, and an inline error marker
+    (`status == "error"` or `kind == "provider.error"`, matching the
+    voice-panel's own `turnHasError` rule)."""
+    ordered = sorted(events, key=lambda ev: ev.get("seq") or 0)
+    prev_ts = None
+    for ev in ordered:
+        ts = _parse_event_ts(ev.get("ts"))
+        if prev_ts is not None and ts is not None:
+            delta_str = f"+{(ts - prev_ts).total_seconds() * 1000.0:.0f}ms"
+        else:
+            delta_str = "+0ms"
+        status = ev.get("status") or ""
+        marker = " [ERROR]" if status == "error" or ev.get("kind") == "provider.error" else ""
+        print(f"  seq={ev.get('seq')} {ev.get('kind')} {delta_str} status={status}{marker}")
+        if ts is not None:
+            prev_ts = ts
+
+
+def _cmd_assistant_trace(args, assistant_flag):
+    """`assistant trace [turn-id|last] [--assistant NAME]` -- SPEC-
+    ASSISTANT.md §10.5, issue #331: renders one turn's ordered event
+    timeline (a textual waterfall) from GET /assistant/traces. A specific
+    `turn-id` filters SERVER-SIDE via `?turn=` (cheap, exact); `last` (the
+    default when no selector is given) resolves the newest turn out of the
+    single bounded fetch (`_fetch_traces`'s own documented limitation
+    applies: "newest" means newest within that one fetch)."""
+    if len(args) > 1:
+        sys.stderr.write("usage: neural-view.py assistant trace [turn-id|last] [--assistant NAME]\n")
+        return 2
+    selector = args[0] if args else "last"
+    if not pid_alive():
+        sys.stderr.write(_assistant_not_running_message())
+        return 1
+    try:
+        if selector == "last":
+            code, payload = _fetch_traces(assistant_flag)
+        else:
+            code, payload = _fetch_traces(assistant_flag, turn=selector)
+    except OSError as exc:
+        sys.stderr.write(f"neural-view: could not reach the server: {exc}\n")
+        return 1
+    if code != 200:
+        sys.stderr.write(f"assistant trace failed: {payload.get('error', payload)}\n")
+        return 1
+    for warning in payload.get("warnings") or []:
+        sys.stderr.write(warning + "\n")
+    events = payload.get("events") or []
+    if selector == "last":
+        turn_id = None
+        for ev in events:
+            if ev.get("turn_id"):
+                turn_id = ev.get("turn_id")
+        if turn_id is None:
+            print("(no turns recorded)")
+            return 0
+        events = [ev for ev in events if ev.get("turn_id") == turn_id]
+    else:
+        turn_id = selector
+        if not events:
+            print(f"(no events for turn {turn_id!r})")
+            return 0
+    print(f"turn {turn_id}")
+    _render_trace_waterfall(events)
+    return 0
+
+
+_DURATION_RE = re.compile(r"^(\d+)(s|m|h)$")
+_DURATION_SECONDS = {"s": 1, "m": 60, "h": 3600}
+
+
+def _parse_duration(text):
+    """Parses a `5m`/`2h`/`30s`-shaped duration into seconds. Returns
+    `None` on anything else (missing/unknown unit, non-numeric, empty) --
+    the caller turns that into a clean usage error, never a traceback."""
+    match = _DURATION_RE.match(text or "")
+    if not match:
+        return None
+    return int(match.group(1)) * _DURATION_SECONDS[match.group(2)]
+
+
+def _cmd_assistant_events(args, assistant_flag):
+    """`assistant events --since <dur> [--assistant NAME]` -- SPEC-
+    ASSISTANT.md §10.5, issue #331. `/assistant/traces`' own `since` is a
+    `seq` RESUME CURSOR (engine.py's `_parse_traces_query`), not a
+    timestamp -- there is no server-side time-window filter to delegate
+    to. So this command fetches a single bounded batch (`_fetch_traces`,
+    the documented max limit, oldest-first) and filters CLIENT-SIDE on
+    each event's own `ts` field against `now - <dur>`. Documented
+    limitation (see `_TERMINAL_TRACES_LIMIT`'s docstring): if more than
+    the endpoint's max events have been recorded since inception, the
+    single fetch may not reach far enough forward to cover a recent
+    window -- the same trade-off the voice-panel's own single-shot fetch
+    already accepts."""
+    since_dur = None
+    rest = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--since":
+            if i + 1 >= len(args):
+                sys.stderr.write("usage: neural-view.py assistant events --since <dur> [--assistant NAME]\n")
+                return 2
+            since_dur = args[i + 1]
+            i += 2
+        else:
+            rest.append(args[i])
+            i += 1
+    if since_dur is None or rest:
+        sys.stderr.write("usage: neural-view.py assistant events --since <dur> [--assistant NAME]\n")
+        return 2
+    seconds = _parse_duration(since_dur)
+    if seconds is None:
+        sys.stderr.write(
+            f"neural-view.py assistant events: invalid --since duration {since_dur!r} "
+            "(expected e.g. 5m, 2h, 30s)\n"
+        )
+        return 2
+    if not pid_alive():
+        sys.stderr.write(_assistant_not_running_message())
+        return 1
+    try:
+        code, payload = _fetch_traces(assistant_flag)
+    except OSError as exc:
+        sys.stderr.write(f"neural-view: could not reach the server: {exc}\n")
+        return 1
+    if code != 200:
+        sys.stderr.write(f"assistant events failed: {payload.get('error', payload)}\n")
+        return 1
+    for warning in payload.get("warnings") or []:
+        sys.stderr.write(warning + "\n")
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=seconds)
+    matched = []
+    for ev in payload.get("events") or []:
+        ts = _parse_event_ts(ev.get("ts"))
+        if ts is not None and ts >= cutoff:
+            matched.append(ev)
+    if not matched:
+        print("(no events in window)")
+        return 0
+    for ev in sorted(matched, key=lambda e: e.get("seq") or 0):
+        status = ev.get("status") or ""
+        marker = " [ERROR]" if status == "error" or ev.get("kind") == "provider.error" else ""
+        print(f"seq={ev.get('seq')} ts={ev.get('ts')} kind={ev.get('kind')} turn={ev.get('turn_id')} status={status}{marker}")
+    return 0
+
+
 def cmd_assistant(args):
-    """`neural-view.py assistant <chat|status|default> [--assistant NAME] ...`
-    (AST-016, SPEC-ASSISTANT.md §7.6, issue #314). All headless: `chat`/
-    `status` talk to the running server over HTTP (clean, non-traceback
-    error + nonzero exit if it isn't running); `default` needs no server at
-    all (see `_cmd_assistant_default`'s docstring)."""
+    """`neural-view.py assistant <chat|status|default|metrics|trace|events>
+    [--assistant NAME] ...` (AST-016, SPEC-ASSISTANT.md §7.6, issue #314;
+    metrics/trace/events added by AST-045, §10.5, issue #331). All
+    headless: `chat`/`status`/`metrics`/`trace`/`events` talk to the
+    running server over HTTP (clean, non-traceback error + nonzero exit if
+    it isn't running); `default` needs no server at all (see
+    `_cmd_assistant_default`'s docstring)."""
     if not args:
-        sys.stderr.write("usage: neural-view.py assistant <chat|status|default> [--assistant NAME] ...\n")
+        sys.stderr.write(
+            "usage: neural-view.py assistant <chat|status|default|metrics|trace|events> [--assistant NAME] ...\n"
+        )
         return 2
     sub, rest = args[0], args[1:]
     assistant_flag, rest, flag_err = _extract_assistant_flag(rest)
@@ -1735,6 +2026,12 @@ def cmd_assistant(args):
         return _cmd_assistant_default(rest)
     if sub == "chat":
         return _cmd_assistant_chat(rest, assistant_flag)
+    if sub == "metrics":
+        return _cmd_assistant_metrics()
+    if sub == "trace":
+        return _cmd_assistant_trace(rest, assistant_flag)
+    if sub == "events":
+        return _cmd_assistant_events(rest, assistant_flag)
 
     sys.stderr.write(f"neural-view.py assistant: unknown subcommand {sub!r}\n")
     return 2

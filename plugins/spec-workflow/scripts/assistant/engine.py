@@ -649,15 +649,15 @@ class AssistantEngine:
         return {"roots": out}
 
     def _traces(self, query):
-        """GET /assistant/traces?since=&turn=&limit= -- SPEC-ASSISTANT.md
-        §10.5, issue #329: `{"events": [...]}` (or `{"events": [],
-        "warnings": [...]}` when nothing resolves) from
-        `observability.query` against the SAME resolved assistant
-        `_history` above resolves against -- one currently-selected/
-        resolvable session, not a fleet-wide view like `_metrics` (traces
-        are per-session correlation data; `_metrics` is the fleet
-        dashboard's aggregate). A resolution failure mirrors `_history`'s
-        own ResolutionError handling exactly (an empty, explained result,
+        """GET /assistant/traces?since=&turn=&limit=&assistant= --
+        SPEC-ASSISTANT.md §10.5, issue #329 (`assistant` added by AST-045,
+        issue #331): `{"events": [...]}` (or `{"events": [], "warnings":
+        [...]}` when nothing resolves) from `observability.query` against
+        one resolved assistant -- one currently-selected/resolvable
+        session, not a fleet-wide view like `_metrics` (traces are
+        per-session correlation data; `_metrics` is the fleet dashboard's
+        aggregate). A resolution failure mirrors `_history`'s own
+        ResolutionError handling exactly (an empty, explained result,
         never a 4xx/500) so both read-surface endpoints agree on what
         "nothing to report on yet" looks like.
 
@@ -669,13 +669,21 @@ class AssistantEngine:
         one `turn_id`. `limit` is parsed/clamped by the module-level
         `_parse_traces_query` (default `TRACES_DEFAULT_LIMIT`, hard cap
         `TRACES_MAX_LIMIT` -- same "bounded read" shape `_parse_history_n`
-        already uses for `/assistant/history?n=`)."""
-        since, turn, limit = _parse_traces_query(query)
+        already uses for `/assistant/history?n=`). `assistant` is an
+        OPTIONAL §7.6 resolution flag -- passed straight through to
+        `resolve_assistant(flag=...)`, the exact same parameter `_chat`'s
+        body-level `assistant` key already feeds -- so the terminal's own
+        `trace`/`events --assistant NAME` (AST-045) can target a NAMED
+        root instead of whichever one resolves by default, mirroring
+        `_chat`'s own flag -> sole assistant -> local default -> error
+        order rather than inventing a second resolution rule."""
+        since, turn, limit, assistant_flag = _parse_traces_query(query)
         candidates = default_store.discover_candidates(
             root for _, root in self._repos_getter()
         )
         try:
-            root, _section = default_store.resolve_assistant(candidates, state_dir=self.state_dir)
+            root, _section = default_store.resolve_assistant(
+                candidates, flag=assistant_flag, state_dir=self.state_dir)
         except default_store.ResolutionError as exc:
             # Same "empty, explained result, never a crash" posture as
             # `_history`'s own ResolutionError handling above.
@@ -907,20 +915,24 @@ def _parse_history_n(query):
 
 
 def _parse_traces_query(query):
-    """Parses `GET /assistant/traces`'s `since`/`turn`/`limit` query params
-    into `(since, turn, limit)` for `observability.query`. `since` parses
-    as an int (a `seq` cursor -- see `AssistantEngine._traces`'s docstring
-    for why, despite the route's own `since=<iso>`-shaped naming in casual
-    spec prose); an absent/malformed value is `None` (no lower bound), same
-    "malformed input degrades to the permissive default, never a 400" shape
-    `_parse_history_n` already uses for `?n=`. `turn` is passed through
-    verbatim (a `turn_id` string, no parsing needed). `limit` defaults to
-    `TRACES_DEFAULT_LIMIT` and is clamped to `[0, TRACES_MAX_LIMIT]` --
-    never negative, never past the documented hard cap, regardless of what
-    a client asks for."""
+    """Parses `GET /assistant/traces`'s `since`/`turn`/`limit`/`assistant`
+    query params into `(since, turn, limit, assistant_flag)`. `since`
+    parses as an int (a `seq` cursor -- see `AssistantEngine._traces`'s
+    docstring for why, despite the route's own `since=<iso>`-shaped naming
+    in casual spec prose); an absent/malformed value is `None` (no lower
+    bound), same "malformed input degrades to the permissive default,
+    never a 400" shape `_parse_history_n` already uses for `?n=`. `turn` is
+    passed through verbatim (a `turn_id` string, no parsing needed).
+    `limit` defaults to `TRACES_DEFAULT_LIMIT` and is clamped to `[0,
+    TRACES_MAX_LIMIT]` -- never negative, never past the documented hard
+    cap, regardless of what a client asks for. `assistant` (AST-045, issue
+    #331) is passed through verbatim too -- an absent value is `None`,
+    meaning "resolve however `_chat` would with no flag" (sole candidate ->
+    local default -> error)."""
     since = None
     turn = None
     limit = TRACES_DEFAULT_LIMIT
+    assistant_flag = None
     if query:
         since_values = query.get("since")
         if since_values:
@@ -937,6 +949,9 @@ def _parse_traces_query(query):
                 limit = int(limit_values[0])
             except (TypeError, ValueError):
                 limit = TRACES_DEFAULT_LIMIT
+        assistant_values = query.get("assistant")
+        if assistant_values:
+            assistant_flag = assistant_values[0]
     if limit < 0:
         limit = 0
-    return since, turn, min(limit, TRACES_MAX_LIMIT)
+    return since, turn, min(limit, TRACES_MAX_LIMIT), assistant_flag

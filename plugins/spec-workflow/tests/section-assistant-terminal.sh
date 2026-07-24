@@ -270,5 +270,158 @@ noserver_default_out="$(python3 "$AT_NV" assistant default someone)"
 check_rc "assistant default with no server running: still works (local file op)" 0 $?
 check "assistant default with no server running: confirms the name it stored" "someone" "$noserver_default_out"
 
+# AST-045 (SPEC-ASSISTANT.md §10.5, issue #331): metrics/trace/events are
+# the same "thin HTTP client" posture as chat/status above -- a clean
+# not-running message + nonzero exit, no traceback, no server dependency
+# bypass.
+noserver_metrics_out="$(python3 "$AT_NV" assistant metrics 2>&1)"
+noserver_metrics_rc=$?
+check_rc "assistant metrics with no server running: exits nonzero" 1 "$noserver_metrics_rc"
+check "assistant metrics with no server running: clean message, not a stack trace" "neural-view not running" "$noserver_metrics_out"
+check_absent "assistant metrics with no server running: no raw traceback" "Traceback" "$noserver_metrics_out"
+
+noserver_trace_out="$(python3 "$AT_NV" assistant trace last 2>&1)"
+noserver_trace_rc=$?
+check_rc "assistant trace with no server running: exits nonzero" 1 "$noserver_trace_rc"
+check "assistant trace with no server running: clean message, not a stack trace" "neural-view not running" "$noserver_trace_out"
+check_absent "assistant trace with no server running: no raw traceback" "Traceback" "$noserver_trace_out"
+
+noserver_events_out="$(python3 "$AT_NV" assistant events --since 5m 2>&1)"
+noserver_events_rc=$?
+check_rc "assistant events with no server running: exits nonzero" 1 "$noserver_events_rc"
+check "assistant events with no server running: clean message, not a stack trace" "neural-view not running" "$noserver_events_out"
+check_absent "assistant events with no server running: no raw traceback" "Traceback" "$noserver_events_out"
+
 unset NEURAL_VIEW_STATE
 rm -rf "$_at_e_state"
+
+# ----------------------------------------------------- F: metrics/trace/events happy path (AST-045, issue #331)
+echo "-- metrics/trace/events: happy path against a live fixture server --"
+_at_f_root="$(mktemp -d)"
+_at_f_state="$(mktemp -d)"
+_at_f_scan_empty="$(mktemp -d)"
+at_repo "$_at_f_root" jarvis
+
+export NEURAL_VIEW_STATE="$_at_f_state" NEURAL_VIEW_SCAN="$_at_f_scan_empty"
+lifecycle_start "assistant terminal (metrics/trace/events): neural-view starts" NEURAL_VIEW_PORT \
+    'PATH="$AT_STUB_CODEX:$PATH" CODEX_STUB_MODE=ok python3 "$AT_NV" start --dir "$_at_f_root"'
+
+python3 "$AT_NV" assistant chat "turn one" >/dev/null
+sleep 1
+python3 "$AT_NV" assistant chat "turn two" >/dev/null
+
+metrics_out="$(python3 "$AT_NV" assistant metrics)"
+metrics_rc=$?
+check_rc "assistant metrics: exits 0" 0 "$metrics_rc"
+check "assistant metrics: reports the fixture assistant's root label" "jarvis" "$metrics_out"
+check "assistant metrics: both turns landed ok" "ok=2" "$metrics_out"
+check "assistant metrics: no provider errors" "provider errors: 0" "$metrics_out"
+check "assistant metrics: turn duration count matches the number of completed turns" "count=2" "$metrics_out"
+check "assistant metrics: renders a p50 latency estimate" "p50=" "$metrics_out"
+check "assistant metrics: renders a p95 latency estimate" "p95=" "$metrics_out"
+
+# Pull the two turn ids straight off the raw /assistant/traces feed (seq
+# order == chronological order) so `trace last`/`trace <id>` can be
+# asserted against real, not guessed, ids.
+turn_ids_out="$(curl -sf "http://127.0.0.1:$NEURAL_VIEW_PORT/assistant/traces" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+ids = []
+for ev in data["events"]:
+    if ev.get("kind") == "turn.start" and ev.get("turn_id") not in ids:
+        ids.append(ev["turn_id"])
+print(ids[0])
+print(ids[-1])
+')"
+_at_f_turn_first="$(sed -n '1p' <<<"$turn_ids_out")"
+_at_f_turn_last="$(sed -n '2p' <<<"$turn_ids_out")"
+
+trace_last_out="$(python3 "$AT_NV" assistant trace last)"
+check_rc "assistant trace last: exits 0" 0 $?
+check "assistant trace last: names the newest turn" "$_at_f_turn_last" "$trace_last_out"
+check_absent "assistant trace last: never mixes in the older turn's id" "$_at_f_turn_first" "$trace_last_out"
+check "assistant trace last: renders the waterfall's turn.start row" "turn.start" "$trace_last_out"
+check "assistant trace last: renders the waterfall's turn.end row" "turn.end" "$trace_last_out"
+
+trace_id_out="$(python3 "$AT_NV" assistant trace "$_at_f_turn_first")"
+check_rc "assistant trace <turn-id>: exits 0" 0 $?
+check "assistant trace <turn-id>: names the requested (older) turn" "$_at_f_turn_first" "$trace_id_out"
+check_absent "assistant trace <turn-id>: never mixes in the other turn's id" "$_at_f_turn_last" "$trace_id_out"
+
+events_wide_out="$(python3 "$AT_NV" assistant events --since 1h)"
+check_rc "assistant events --since 1h: exits 0" 0 $?
+check "assistant events --since 1h: a wide window includes the first turn" "$_at_f_turn_first" "$events_wide_out"
+check "assistant events --since 1h: a wide window includes the last turn" "$_at_f_turn_last" "$events_wide_out"
+
+events_narrow_out="$(python3 "$AT_NV" assistant events --since 0s)"
+check_rc "assistant events --since 0s: exits 0 (an empty window is not an error)" 0 $?
+check "assistant events --since 0s: an already-past window reports nothing, not stale data" "no events" "$events_narrow_out"
+
+# duration parsing (5m/2h/30s valid; a unit-less/garbage value is a usage error, exit 2)
+for _at_f_good_dur in 5m 2h 30s; do
+    python3 "$AT_NV" assistant events --since "$_at_f_good_dur" >/dev/null 2>&1
+    check_rc "assistant events --since $_at_f_good_dur: valid duration exits 0" 0 $?
+done
+
+bad_dur_out="$(python3 "$AT_NV" assistant events --since 5 2>&1)"
+bad_dur_rc=$?
+check_rc "assistant events --since 5 (no unit): usage error, exits 2" 2 "$bad_dur_rc"
+check "assistant events --since 5 (no unit): names the invalid duration" "invalid" "$bad_dur_out"
+check_absent "assistant events --since 5 (no unit): no raw traceback" "Traceback" "$bad_dur_out"
+
+trace_toomany_out="$(python3 "$AT_NV" assistant trace last extra-arg 2>&1)"
+trace_toomany_rc=$?
+check_rc "assistant trace with extra positional args: usage error, exits 2" 2 "$trace_toomany_rc"
+check "assistant trace with extra positional args: usage message, not a traceback" "usage:" "$trace_toomany_out"
+
+_at_f_pid="$(cat "$_at_f_state/pid")"
+python3 "$AT_NV" stop >/dev/null
+for _ in $(seq 1 30); do
+    kill -0 "$_at_f_pid" 2>/dev/null || break
+    sleep 0.1
+done
+unset NEURAL_VIEW_STATE NEURAL_VIEW_PORT NEURAL_VIEW_SCAN
+rm -rf "$_at_f_root" "$_at_f_state" "$_at_f_scan_empty"
+
+# ----------------------------------------------------- G: --assistant passthrough (two-candidate resolution)
+echo "-- coverage: --assistant passthrough resolves trace/events to the NAMED root, not whichever resolves by default --"
+_at_g_scan="$(mktemp -d)"
+_at_g_state="$(mktemp -d)"
+mkdir -p "$_at_g_scan/repo-jarvis" "$_at_g_scan/repo-friday"
+at_repo "$_at_g_scan/repo-jarvis" jarvis
+at_repo "$_at_g_scan/repo-friday" friday
+
+export NEURAL_VIEW_STATE="$_at_g_state"
+lifecycle_start "assistant terminal (--assistant passthrough): neural-view starts" NEURAL_VIEW_PORT \
+    'PATH="$AT_STUB_CODEX:$PATH" CODEX_STUB_MODE=ok python3 "$AT_NV" start --scan "$_at_g_scan"'
+
+python3 "$AT_NV" assistant chat --assistant jarvis "hi jarvis" >/dev/null
+
+metrics_two_out="$(python3 "$AT_NV" assistant metrics)"
+check "assistant metrics: two-candidate reports jarvis's root" "jarvis" "$metrics_two_out"
+check "assistant metrics: two-candidate reports friday's root too (fleet-wide)" "friday" "$metrics_two_out"
+
+jarvis_trace_out="$(python3 "$AT_NV" assistant trace last --assistant jarvis)"
+check_rc "assistant trace last --assistant jarvis: exits 0" 0 $?
+check "assistant trace last --assistant jarvis: shows jarvis's own turn" "turn.start" "$jarvis_trace_out"
+
+friday_trace_out="$(python3 "$AT_NV" assistant trace last --assistant friday)"
+check_rc "assistant trace last --assistant friday: exits 0 (a root with zero turns is not an error)" 0 $?
+check "assistant trace last --assistant friday: friday has run no turns of its own, proving --assistant actually scoped the query" "no turns recorded" "$friday_trace_out"
+
+friday_events_out="$(python3 "$AT_NV" assistant events --since 1h --assistant friday)"
+check_rc "assistant events --since 1h --assistant friday: exits 0" 0 $?
+check "assistant events --assistant friday: friday's own window is empty" "no events" "$friday_events_out"
+
+jarvis_events_out="$(python3 "$AT_NV" assistant events --since 1h --assistant jarvis)"
+check_rc "assistant events --since 1h --assistant jarvis: exits 0" 0 $?
+check "assistant events --assistant jarvis: jarvis's own window has events" "turn.start" "$jarvis_events_out"
+
+_at_g_pid="$(cat "$_at_g_state/pid")"
+python3 "$AT_NV" stop >/dev/null
+for _ in $(seq 1 30); do
+    kill -0 "$_at_g_pid" 2>/dev/null || break
+    sleep 0.1
+done
+unset NEURAL_VIEW_STATE NEURAL_VIEW_PORT
+rm -rf "$_at_g_scan" "$_at_g_state"
