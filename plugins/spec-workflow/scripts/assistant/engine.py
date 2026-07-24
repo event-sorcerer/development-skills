@@ -34,9 +34,11 @@ an explicit shutdown path and once via `atexit`) without raising.
 import os
 import queue
 import threading
+import uuid
 from datetime import datetime, timezone
 
-from assistant import adapters, default_store, digest as digest_module, discovery, distill, selection_store, turns
+from assistant import (adapters, default_store, digest as digest_module, discovery,
+                        distill, observability, selection_store, turns)
 from assistant.store import SessionStore
 
 
@@ -179,9 +181,24 @@ class AssistantEngine:
                     # loop instead of the v1 heartbeat no-op -- see
                     # distill.run_worker's docstring for the buffering/
                     # batch-trigger/failure posture this thread owns.
+                    # AST-040: also hands it the traces queue so a batch's
+                    # completion can emit a `distill.batch` trace event
+                    # (enqueue-only, on this same worker thread).
                     thread = threading.Thread(
                         target=distill.run_worker,
                         args=(self.queues["distiller"], stop_event),
+                        kwargs={"traces_queue": self.queues["traces"]},
+                        name=f"assistant-{name}",
+                        daemon=False,
+                    )
+                elif name == "traces":
+                    # AST-040 (SPEC-ASSISTANT.md §5a/§10.2): the traces
+                    # slot runs the real single-writer traces.sqlite loop
+                    # instead of the v1 heartbeat no-op -- see
+                    # observability.run_writer's docstring.
+                    thread = threading.Thread(
+                        target=observability.run_writer,
+                        args=(self.queues["traces"], stop_event),
                         name=f"assistant-{name}",
                         daemon=False,
                     )
@@ -512,6 +529,27 @@ class AssistantEngine:
             except queue.Full:
                 pass
 
+    def _emit_trace(self, root, kind, turn_id=None, span_id=None,
+                     parent_span_id=None, status=None, payload=None):
+        """AST-040 (SPEC-ASSISTANT.md §10.1): a thin, enqueue-only wrapper
+        over `observability.emit` bound to THIS engine's traces queue --
+        every `_chat` call site below goes through this one spot rather
+        than repeating `self.queues["traces"]` + the event-dict shape at
+        each site. `session_id` is `os.path.realpath(root)` (the same
+        canonicalization `_chat_lock_for` already uses to key a root) --
+        one session per assistant per §7.5, so the root IS the session
+        identity; there is no separate session table/id to look up."""
+        observability.emit(self.queues["traces"], root, {
+            "kind": kind,
+            "session_id": os.path.realpath(root),
+            "turn_id": turn_id,
+            "span_id": span_id,
+            "parent_span_id": parent_span_id,
+            "modality": "text",
+            "status": status,
+            "payload": payload or {},
+        })
+
     def _chat(self, body):
         """POST /assistant/chat -- {"message": str, "assistant"?: str} ->
         {"text", "chips", "warnings"} (§7.6, §5, AST-016, issue #314). The
@@ -566,19 +604,52 @@ class AssistantEngine:
         except default_store.ResolutionError as exc:
             return 400, {"error": str(exc)}, "application/json"
 
+        # AST-040 (SPEC-ASSISTANT.md §10.1/§10.6): one turn_id links every
+        # trace event this turn emits (turn.start -> recall.summary/
+        # provider.call|error -> turn.end); a fresh span_id per provider
+        # attempt distinguishes the call itself from the turn as a whole.
+        # Every emit below is enqueue-only (§17.7: never blocks this
+        # request thread) and generated OUTSIDE the per-root chat lock so
+        # a slow/backed-up traces queue can never contend with it.
+        turn_id = uuid.uuid4().hex
+        self._emit_trace(root, "turn.start", turn_id=turn_id, status="start",
+                          payload={"message_len": len(message)})
+
         store = SessionStore(root)
         with self._chat_lock_for(root):
             session_state = store.load_state()
+            provider_span_id = uuid.uuid4().hex
             try:
                 result = turns.run_turn(section, None, None, session_state, message)
             except adapters.AdapterError as exc:
                 # provider CLI failure (Sec8.5) -- a clean upstream error,
                 # never a raw traceback, and never a persisted exchange
-                # (nothing to append: the turn produced no reply).
+                # (nothing to append: the turn produced no reply). §10.6:
+                # the error is a first-class event linked to this turn via
+                # turn_id -- recorded even though the turn itself fails.
+                self._emit_trace(root, "provider.error", turn_id=turn_id,
+                                  span_id=provider_span_id, parent_span_id=turn_id,
+                                  status="error",
+                                  payload={"error": str(exc), "error_type": type(exc).__name__})
+                self._emit_trace(root, "turn.end", turn_id=turn_id, status="error")
                 return 502, {"error": str(exc)}, "application/json"
 
             store.append_exchange(message, result["text"])
             store.save_state(result["updated_session_state"])
+
+        # Recall summary + provider.call are emitted together (both only
+        # become available once run_turn returns successfully -- compose_
+        # context computes chips before the adapter call internally, but
+        # run_turn's own contract returns nothing on failure, so a failed
+        # attempt above emits provider.error with no matching recall event;
+        # see run_turn's docstring for that composed-then-called shape).
+        chips = result["chips"]
+        self._emit_trace(root, "recall.summary", turn_id=turn_id,
+                          payload={"chip_count": len(chips),
+                                   "slugs": [c.get("slug") for c in chips if isinstance(c, dict)]})
+        self._emit_trace(root, "provider.call", turn_id=turn_id,
+                          span_id=provider_span_id, parent_span_id=turn_id, status="ok",
+                          payload={"usage": result.get("usage")})
 
         # AST-030 (Sec9.2/Sec9.5): enqueue-only, AFTER the turn's own
         # critical section has released the per-root lock -- a non-blocking
@@ -589,6 +660,9 @@ class AssistantEngine:
         warnings = []
         if result.get("budget_report", {}).get("over_budget"):
             warnings.append("turn context exceeded the token budget")
+
+        self._emit_trace(root, "turn.end", turn_id=turn_id, status="ok",
+                          payload={"warnings": warnings})
 
         return 200, {
             "text": result["text"],

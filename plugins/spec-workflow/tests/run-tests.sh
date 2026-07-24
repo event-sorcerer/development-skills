@@ -179,6 +179,7 @@ SECTIONS=(
     section-assistant-switch.sh
     section-assistant-distill.sh
     section-assistant-continuation.sh
+    section-assistant-traces.sh
 )
 
 if [[ ${#SECTIONS[@]} -eq 0 ]]; then

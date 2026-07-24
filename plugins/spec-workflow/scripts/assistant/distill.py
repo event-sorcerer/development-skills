@@ -30,6 +30,8 @@ import queue as queue_module
 import re
 import sys
 
+from assistant import observability
+
 # Sec9.2 "batch every N exchanges" default -- hard-coded for v1; an
 # additive `distiller:` config knob is a later task once config grows one
 # (design doc's Data models section).
@@ -205,7 +207,7 @@ def refresh_after_mint(identities, root, role="assistant"):
 
 
 def run_worker(q, stop_event, batch_n=DEFAULT_BATCH_N, role="assistant",
-                poll_timeout=DEFAULT_POLL_TIMEOUT_SECONDS):
+                poll_timeout=DEFAULT_POLL_TIMEOUT_SECONDS, traces_queue=None):
     """The `distiller` worker body engine.py's `start()` binds into the
     AST-010 `distiller` slot, replacing the v1 heartbeat no-op. Drains `q`
     for items shaped `{"root": str, "identities": str, "exchange": dict}`
@@ -227,6 +229,14 @@ def run_worker(q, stop_event, batch_n=DEFAULT_BATCH_N, role="assistant",
     already fsync'd by SessionStore before the item was even enqueued), so
     a dropped/failed batch loses only that batch's distillation, never the
     exchange itself.
+
+    `traces_queue` (AST-040, SPEC-ASSISTANT.md §10.1) is OPTIONAL and
+    defaults to `None` so every existing caller/test that constructs this
+    worker without one keeps working unchanged. When given (engine.py's
+    `start()` passes `self.queues["traces"]`), a `distill.batch` event is
+    emitted -- enqueue-only via `observability.emit`, on THIS thread, never
+    the HTTP request thread -- once per batch actually processed, whether
+    or not it minted anything.
     """
     buffers = {}  # root -> [exchange, ...]
     while not stop_event.is_set():
@@ -249,6 +259,15 @@ def run_worker(q, stop_event, batch_n=DEFAULT_BATCH_N, role="assistant",
                 result = process_batch(identities_dir, root, batch, role=role)
                 if result.get("minted"):
                     refresh_after_mint(identities_dir, root, role=role)
+                if traces_queue is not None:
+                    observability.emit(traces_queue, root, {
+                        "kind": "distill.batch",
+                        "payload": {
+                            "batch_size": len(batch),
+                            "minted": result.get("minted", []),
+                            "bumped": result.get("bumped", []),
+                        },
+                    })
         except Exception as exc:  # park-and-continue -- never kill the worker thread
             sys.stderr.write("distiller worker: batch failed: %s\n" % exc)
         finally:
