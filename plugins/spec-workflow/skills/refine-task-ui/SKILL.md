@@ -50,6 +50,8 @@ Once a final `Use:` has landed, don't hand the human a static export of the raw 
 
 ## 4. Fold the decision into the task's issue body
 
+**Check the issue's status first (`board.sh show <issue#>` — CLOSED or OPEN).** If it's already CLOSED, implementation shipped before this decision finalized — a real incident: a task closed with placeholder-only styling (a source comment noting "restyle follows the pending UI option pick"), and folding the finalized decision into that closed issue's body was the ONLY record of it — nobody's queue ever surfaced "go apply this," because closed issues don't show up in anyone's queue. In that case, BEFORE step 4's edit-body, also file a linked follow-up so the restyle is actually trackable: `board.sh bug "restyle <task-id>: apply finalized UI decision (Option X)" <priority> <origin#>`. The closed issue still gets the full edit-body treatment below (it's the durable design record), but the follow-up issue is what makes the work resurface in the board queue.
+
 `board.sh edit-body <issue#> <file>` — write a refined body that preserves whatever original context the issue had (don't delete a bug's origin-task reference, a spec pointer, etc.) and adds:
 
 - **A "UI decision — finalized" section** naming the chosen option.
