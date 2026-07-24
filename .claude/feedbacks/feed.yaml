@@ -1979,3 +1979,35 @@ items:
   routing:
     action: brain-note
     ref: orchestrator/parallel-push-races
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-24T04:15:00Z'
+iteration:
+  task: AST-023
+  outcome: merged
+  reviewRounds: 2
+source:
+  role: orchestrator
+  model: claude-fable-5
+items:
+- category: incident
+  area: testing
+  severity: high
+  summary: Simplified DOM stub masked a crash-on-open defect through two consecutive
+    green-suite tasks
+  detail: The template harness modeled element children as a plain array, so an assignment
+    that throws on a real live HTMLCollection passed silently; two tasks shipped the
+    anti-pattern before an execution-minded reviewer caught it, and the fix hardened
+    the stub so the whole class is now guarded.
+  evidence:
+  - Zugruul/development-skills#320
+  - Zugruul/development-skills#387
+  generalized: A test double must reproduce the FAILURE SEMANTICS of the real interface,
+    not just its happy-path API — model getter-only properties, strict-mode throw
+    behavior, and live-collection semantics; when a reviewer finds a stub-masked defect,
+    the fix always lands in two places (the code site AND the stub) so the class is
+    caught forever after.
+  routing:
+    action: brain-note
+    ref: dev/stub-failure-semantics
