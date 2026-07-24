@@ -276,7 +276,11 @@ function mkEl(initialId) {
                 get(o, k){ const v = o[k]; return typeof v === "function" ? v.bind(o) : v; },
             });
         },
-        set innerHTML(v){ this._innerHTMLv = v; if(v === "") this._items.length = 0; },
+        // AST-022 restyle: mirror real DOM's live textContent (tag-stripped)
+        // now that switcher rows are built via innerHTML templates -- see
+        // section-assistant-selection-memory.sh's identical stub for the
+        // full rationale (stub-failure-semantics: extend, don't fork).
+        set innerHTML(v){ this._innerHTMLv = v; if(v === "") this._items.length = 0; this.textContent = v.replace(/<[^>]*>/g, ""); },
         get innerHTML(){ return this._innerHTMLv || ""; },
         disabled: false,
         title: "",
@@ -327,6 +331,10 @@ global.fetch = async (url, opts) => {
 eval(extract("renderAssistantDigest"));
 eval(extract("setVoiceHeaderName"));
 eval(extract("gateVoiceAndChat"));
+// AST-022 restyle (issue #319 follow-up): renderAssistantSwitcher now calls
+// the shared escapeHtml() helper -- extract it too so this stays the real
+// production wiring instead of a simplified fork.
+eval(extract("escapeHtml"));
 eval(extract("renderAssistantSwitcher"));
 eval(extract("setAskAgainUi"));
 eval(extract("refreshAssistantSettingsUi"));

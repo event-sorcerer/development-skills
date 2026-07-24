@@ -458,15 +458,32 @@ canvas.grabbing{cursor:grabbing}
 .ast-none-overlay{margin:.5rem;padding:.5rem .6rem;border:1px solid #e0453a;
   border-radius:3px;color:#e0453a;font-family:var(--mono);font-size:.62rem;
   letter-spacing:.05em;cursor:help}
-/* AST-022 selection memory (SPEC-ASSISTANT.md §7.5): same placeholder-only
-   styling note as AST-021's .ast-picker above -- restyle is a pending
-   human choice, not made here. */
-.ast-switcher{display:flex;flex-direction:column;gap:.25rem;margin-top:.3rem}
-.ast-switcher-row{font-family:var(--mono);font-size:.6rem;color:var(--fg);
-  border:1px solid var(--border);border-radius:3px;padding:.25rem .45rem;cursor:pointer}
-.ast-switcher-row:hover{border-color:var(--cyan);color:var(--cyan)}
-.ast-switcher-row.ast-switcher-selected{border-color:var(--cyan);color:var(--cyan)}
+/* AST-022 selection memory (SPEC-ASSISTANT.md §7.5, issue #319): human-picked
+   restyle -- Option 5 "glanceable badges" (docs/ui-options/AST-022.html,
+   finalized in f923566). The mockup's palette is lifted 1:1 from this
+   file's vars (its own comment says so), so the rules below reference
+   --cyan/--cyan-dim/--muted/--border directly instead of re-deriving hex.
+   The mockup's badges show per-candidate done/fail/note counts, but
+   status.candidates carries only name+aliases (engine.py) -- no per-row
+   activity data exists yet to badge honestly, so the one badge this can
+   show is the selected row's "active" state, styled like the mockup's
+   b-done (cyan) badge. */
+.ast-switcher{display:flex;flex-direction:column;gap:.3rem;margin-top:.4rem}
+.ast-switcher-row{display:flex;align-items:center;gap:.5rem;
+  font-family:var(--mono);font-size:.62rem;color:var(--fg);
+  border:1px solid var(--border);border-radius:6px;padding:.35rem .55rem;cursor:pointer;background:transparent}
+.ast-switcher-row:hover{border-color:var(--cyan-dim);color:var(--cyan)}
+.ast-switcher-row.ast-switcher-selected{border-color:var(--cyan-dim);background:rgba(70,230,255,.12)}
+.ast-switcher-name{font-size:.68rem;letter-spacing:.03em;flex:none}
+.ast-switcher-aliases{font-size:.56rem;color:var(--muted);flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ast-switcher-badge{font-size:.5rem;letter-spacing:.05em;text-transform:uppercase;
+  padding:.08rem .32rem;border-radius:4px;border:1px solid var(--cyan-dim);color:var(--cyan);
+  flex:none;white-space:nowrap}
 .ast-ask-again{align-self:flex-start}
+/* same on/active treatment as .iconbtn.active elsewhere, applied via the
+   .on class setAskAgainUi() already toggles */
+.ast-ask-again.on{color:var(--cyan);border-color:var(--cyan-dim);background:rgba(70,230,255,.1)}
 /* AST-024 activation digest (SPEC-ASSISTANT.md §7.7/§7.8, issue #321):
    same placeholder-only styling note as .ast-picker/.ast-switcher above --
    restyle is a pending human choice, not made here. */
@@ -2757,7 +2774,9 @@ function logEvent(e){
   LOG.prepend(div);
   while(LOG.childNodes.length>40) LOG.lastChild.remove();   // sidebar has vertical room the old bottom strip lacked
 }
-function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
 
 // ---- gauges ----
 // #75: grouped by repo — one section per repo in repoList (already
@@ -5024,12 +5043,19 @@ function renderAssistantDigest(digestPayload){
 function renderAssistantSwitcher(candidates, selected){
   const el = document.getElementById("ast-switcher");
   if(!el) return;
-  el.innerHTML = "";
   el.innerHTML = "";   // #387: children.length=0 throws on a real live HTMLCollection
   for(const c of (candidates || [])){
     const row = document.createElement("div");
-    row.className = "ast-switcher-row" + (c.name === selected ? " ast-switcher-selected" : "");
-    row.textContent = (c.name === selected ? "✓ " : "") + c.name;
+    const isSelected = c.name === selected;
+    row.className = "ast-switcher-row" + (isSelected ? " ast-switcher-selected" : "");
+    // Option 5 "glanceable badges" (issue #319): name + aliases + an
+    // active-state badge on the selected row -- see the CSS comment above
+    // renderAssistantSwitcher for why this is the one badge available
+    // without per-candidate activity data.
+    const aliasesHtml = (c.aliases && c.aliases.length)
+      ? `<span class="ast-switcher-aliases">${escapeHtml(c.aliases.join(", "))}</span>` : "";
+    const badgeHtml = isSelected ? `<span class="ast-switcher-badge">active</span>` : "";
+    row.innerHTML = `<span class="ast-switcher-name">${escapeHtml(c.name)}</span>${aliasesHtml}${badgeHtml}`;
     row.onclick = async ()=>{
       let resp = null;
       try{

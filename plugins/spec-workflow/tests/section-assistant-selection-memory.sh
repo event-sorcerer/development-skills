@@ -174,7 +174,13 @@ function mkEl(initialId) {
                 get(o, k){ const v = o[k]; return typeof v === "function" ? v.bind(o) : v; },
             });
         },
-        set innerHTML(v){ this._innerHTMLv = v; if(v === "") this._items.length = 0; },
+        // AST-022 restyle: production rows are now built via innerHTML
+        // templates (name/aliases/badge spans) instead of a bare
+        // textContent assignment -- mirror real DOM's live textContent
+        // (tag-stripped) so existing "row.textContent.includes(name)"
+        // pins keep working against the new markup (stub-failure-semantics:
+        // extend the harness, don't fork it).
+        set innerHTML(v){ this._innerHTMLv = v; if(v === "") this._items.length = 0; this.textContent = v.replace(/<[^>]*>/g, ""); },
         get innerHTML(){ return this._innerHTMLv || ""; },
         disabled: false,
         title: "",
@@ -232,6 +238,10 @@ eval(extract("renderNoneOverlay"));
 // exercising the REAL production wiring rather than drifting into a
 // simplified fork (stub-failure-semantics lesson: extend, don't fork).
 eval(extract("renderAssistantDigest"));
+// AST-022 restyle (issue #319 follow-up): renderAssistantSwitcher now calls
+// the shared escapeHtml() helper -- extract it too so this stays the real
+// production wiring instead of a simplified fork.
+eval(extract("escapeHtml"));
 eval(extract("renderAssistantSwitcher"));
 eval(extract("setAskAgainUi"));
 eval(extract("refreshAssistantSettingsUi"));
@@ -272,6 +282,11 @@ async function run(outcome, candidates, selected, askAgain) {
     for (const r of sw.children) if (!r.className.includes("ast-switcher-row")) throw new Error("switcher row missing ast-switcher-row class");
     const selectedRow = sw.children.find(r => r.textContent.includes("friday"));
     if (!selectedRow || !selectedRow.className.includes("ast-switcher-selected")) throw new Error("selected candidate not marked in switcher");
+    // AST-022 restyle (Option 5 "glanceable badges", issue #319 follow-up):
+    // the selected row carries a badge element; unselected rows don't.
+    if (!selectedRow.innerHTML.includes("ast-switcher-badge")) throw new Error("selected row missing glanceable badge");
+    const unselectedRow = sw.children.find(r => r.textContent.includes("jarvis"));
+    if (unselectedRow.innerHTML.includes("ast-switcher-badge")) throw new Error("unselected row should not carry the active badge");
     console.log("SWITCHER_OK true");
 
     // clicking a switcher row re-POSTs select
@@ -299,3 +314,8 @@ if [[ "$tmpl_mem_rc" -ne 0 ]]; then echo "$tmpl_mem_out" >&2; fi
 check "template pins the ast-ask-again class/id name in source" 'ast-ask-again' "$(cat "$NVHTML_MEM")"
 check "template pins the ast-switcher class name in source" '"ast-switcher"' "$(cat "$NVHTML_MEM")"
 check "template pins the ast-switcher-row class name in source" 'ast-switcher-row' "$(cat "$NVHTML_MEM")"
+# AST-022 restyle (Option 5 "glanceable badges", docs/ui-options/AST-022.html,
+# issue #319 follow-up): the switcher row's name/badge structure is now
+# load-bearing markup, not placeholder text -- pin it.
+check "template pins the ast-switcher-name class name in source" 'ast-switcher-name' "$(cat "$NVHTML_MEM")"
+check "template pins the ast-switcher-badge class name in source" 'ast-switcher-badge' "$(cat "$NVHTML_MEM")"
