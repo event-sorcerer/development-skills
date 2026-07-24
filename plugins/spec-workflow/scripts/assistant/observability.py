@@ -278,6 +278,25 @@ def _flush(conns, buffers):
             conn, next_seq = conns[root]
             rows = []
             for ev in events:
+                try:
+                    payload_json = json.dumps(ev.get("payload") or {}, sort_keys=True)
+                except (TypeError, ValueError) as exc:
+                    # issue #390: a single non-serializable payload must not
+                    # roll back this root's WHOLE drain -- degrade THIS
+                    # event to a marker payload (still inserted, still
+                    # linked via its own turn_id/span_id/kind) and log once,
+                    # rather than letting json.dumps raise out of this
+                    # row-building loop and lose every other event in the
+                    # same batch (the #390 bug: raising here happens BEFORE
+                    # any DB write for this root, so `except Exception`
+                    # below caught it and the entire batch -- good events
+                    # included -- was silently dropped).
+                    sys.stderr.write(
+                        "observability writer: unserializable payload for %s "
+                        "kind=%r, degrading to a marker event: %s\n"
+                        % (root, ev.get("kind"), exc)
+                    )
+                    payload_json = json.dumps({"_payload_error": str(exc)})
                 rows.append((
                     next_seq,
                     ev.get("ts") or _now_iso(),
@@ -289,7 +308,7 @@ def _flush(conns, buffers):
                     ev.get("skill"),
                     ev.get("modality"),
                     ev.get("status"),
-                    json.dumps(ev.get("payload") or {}, sort_keys=True),
+                    payload_json,
                 ))
                 next_seq += 1
             conn.execute("BEGIN IMMEDIATE")

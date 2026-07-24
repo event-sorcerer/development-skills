@@ -992,3 +992,115 @@ check "traces endpoint: no assistant discovered returns 200 with an empty events
 check "traces endpoint: no-selection case still reports application/json" "CONTENT_TYPE application/json" "$none_out"
 check "traces endpoint: no-selection case returns an empty events list, not an error" "EVENTS_EMPTY True" "$none_out"
 check "traces endpoint: no-selection case explains itself via warnings, matching /assistant/history" "HAS_WARNINGS True" "$none_out"
+
+# ------------------------------------------------------------------------
+echo "-- engine: TRACES_QUEUE_MAXSIZE bounds the traces queue (issue #390) --"
+tq_bound_out="$(SCRIPTS_DIR="$AT_SCRIPTS" python3 - <<'PY'
+import os, sys
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import engine
+
+state_dir = "/tmp/at-traces-bound-state"
+e = engine.AssistantEngine(lambda: [], state_dir)
+print("TRACES_MAXSIZE", e.queues["traces"].maxsize)
+print("DISTILLER_MAXSIZE", e.queues["distiller"].maxsize)
+PY
+)"
+tq_maxsize="$(printf '%s\n' "$tq_bound_out" | awk '/^TRACES_MAXSIZE/ {print $2}')"
+if [[ "$tq_maxsize" =~ ^[0-9]+$ ]] && [[ "$tq_maxsize" -gt 0 ]]; then
+    echo "ok   traces queue is bounded (maxsize=$tq_maxsize, not the unbounded 0 default)"
+else
+    echo "FAIL traces queue is bounded — expected a positive maxsize, got '$tq_maxsize'"; fails=$((fails + 1))
+fi
+check "the traces queue's bound mirrors the distiller queue's bound" "TRACES_MAXSIZE $(printf '%s\n' "$tq_bound_out" | awk '/^DISTILLER_MAXSIZE/ {print $2}')" "$tq_bound_out"
+
+# ------------------------------------------------------------------------
+echo "-- writer: _flush degrades one unserializable payload to a marker event instead of rolling back the whole drain (issue #390) --"
+_at_poison_root="$(mktemp -d)"
+at_repo "$_at_poison_root" jarvis
+poison_out="$(SCRIPTS_DIR="$AT_SCRIPTS" ROOT="$_at_poison_root" python3 - <<'PY'
+import os, sys
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import observability
+
+root = os.environ["ROOT"]
+conns = {}
+buffers = {
+    root: [
+        {"kind": "turn.start", "turn_id": "t1", "payload": {"message_len": 3}},
+        # a non-JSON-serializable payload (a raw set) -- must not roll back
+        # the good events in the SAME drain for this root.
+        {"kind": "recall.summary", "turn_id": "t1", "payload": {"bad": {1, 2, 3}}},
+        {"kind": "turn.end", "turn_id": "t1", "payload": {"warnings": []}},
+    ],
+}
+observability._flush(conns, buffers)
+for conn, _next_seq in conns.values():
+    conn.close()
+
+events = observability.query(root, limit=10)
+print("EVENT_COUNT", len(events))
+print("KINDS", [e["kind"] for e in events])
+poison_events = [e for e in events if e["kind"] == "recall.summary"]
+print("POISON_KEPT", len(poison_events) == 1)
+print("POISON_PAYLOAD_IS_MARKER", bool(poison_events) and "bad" not in poison_events[0]["payload"])
+PY
+)"
+rc=$?
+check_rc "poison-payload flush script exits 0" 0 "$rc"
+check "the good turn.start/turn.end events are NOT lost alongside the poison event" "EVENT_COUNT 3" "$poison_out"
+check "all three events (including the degraded one) are present, in kind order" "KINDS ['turn.start', 'recall.summary', 'turn.end']" "$poison_out"
+check "the poisoned event is kept (degraded), not silently dropped" "POISON_KEPT True" "$poison_out"
+check "the poisoned event's payload is replaced with a safe marker, not the raw unserializable value" "POISON_PAYLOAD_IS_MARKER True" "$poison_out"
+rm -rf "$_at_poison_root"
+
+# ------------------------------------------------------------------------
+echo "-- engine: GET /assistant/traces degrades cleanly on a busy-timeout lock overrun, never crashes (issue #391) --"
+_at_busy_root="$(mktemp -d)"
+at_repo "$_at_busy_root" jarvis
+busy_out="$(SCRIPTS_DIR="$AT_SCRIPTS" ROOT="$_at_busy_root" python3 - <<'PY'
+import os, sys, sqlite3
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import engine, observability
+
+root = os.environ["ROOT"]
+
+# Create traces.sqlite (as the real writer thread would), then switch it
+# OUT of WAL mode: a rollback-journal EXCLUSIVE lock (below) blocks
+# readers the same way a VACUUM own exclusive access does (Sec10.3,
+# "VACUUM lock overrun"), unlike normal WAL reader/writer non-blocking
+# posture, which this test needs to actually reproduce contention.
+conn0, _ = observability._open_conn(root)
+conn0.execute("PRAGMA journal_mode=DELETE")
+conn0.close()
+
+db_path = observability._db_path(root)
+locker = sqlite3.connect(db_path, isolation_level=None)
+locker.execute("PRAGMA busy_timeout=100")
+locker.execute("BEGIN EXCLUSIVE")  # held for the rest of this script -- simulates a live VACUUM
+
+repos = lambda: [("a", root)]
+e = engine.AssistantEngine(repos, "/tmp/at-busy-state")
+try:
+    status, payload, ct = e.handle("GET", "/assistant/traces")
+    print("CRASHED", False)
+    print("STATUS", status)
+    print("CONTENT_TYPE", ct)
+    print("EVENTS_EMPTY", payload.get("events") == [])
+    print("HAS_WARNINGS", bool(payload.get("warnings")))
+except Exception as exc:
+    print("CRASHED", True)
+    print("CRASH_TYPE", type(exc).__name__)
+
+locker.execute("ROLLBACK")
+locker.close()
+PY
+)"
+rc=$?
+check_rc "busy-timeout traces script exits 0" 0 "$rc"
+check "a VACUUM-style lock overrun never crashes the request, it degrades cleanly" "CRASHED False" "$busy_out"
+check "the degraded response is still a clean 200" "STATUS 200" "$busy_out"
+check "the degraded response is still application/json" "CONTENT_TYPE application/json" "$busy_out"
+check "the degraded response's events list is empty, matching the 'no such table' posture" "EVENTS_EMPTY True" "$busy_out"
+check "the degraded response explains itself via warnings (retryable, not a silent empty)" "HAS_WARNINGS True" "$busy_out"
+rm -rf "$_at_busy_root"

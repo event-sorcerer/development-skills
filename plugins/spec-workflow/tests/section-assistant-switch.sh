@@ -203,6 +203,86 @@ check "lastActive persists: a fresh engine's switch still produces a digest" "RE
 
 rm -rf "$_asw_a" "$_asw_b" "$_asw_state"
 
+echo "-- engine: _select releases the selection lock before digest I/O (issue #388) --"
+_asw_lock_a="$(mktemp -d)"
+_asw_lock_b="$(mktemp -d)"
+asw_repo "$_asw_lock_a" jarvis
+asw_repo "$_asw_lock_b" friday
+_asw_lock_state="$(mktemp -d)"
+
+lock_out="$(SCRIPTS_DIR="$ASW_SCRIPTS" MA="$_asw_lock_a" MB="$_asw_lock_b" STATE="$_asw_lock_state" python3 - <<'PY'
+import os, sys, threading
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import engine
+
+repos = lambda: [("a", os.environ["MA"]), ("b", os.environ["MB"])]
+state_dir = os.environ["STATE"]
+
+e = engine.AssistantEngine(repos, state_dir)
+e.start()
+
+# initial select: jarvis -- nothing to switch from, no digest call at all
+e.handle("POST", "/assistant/select", body={"name": "jarvis"})
+
+digest_started = threading.Event()
+digest_release = threading.Event()
+
+
+def fake_digest(root, since_ts):
+    # simulates digest_module.digest's real disk I/O (brain-events.jsonl +
+    # the whole session transcript) taking a while -- bounded by
+    # digest_release so this thread can never hang the test.
+    digest_started.set()
+    digest_release.wait(timeout=10)
+    return {"sinceTs": since_ts, "notesMinted": [], "exchanges": 0,
+            "tasks": [], "tasksSource": "pending-E4"}
+
+
+engine.digest_module.digest = fake_digest
+
+result = {}
+
+
+def do_switch():
+    code, payload, _ = e.handle("POST", "/assistant/select", body={"name": "friday"})
+    result["code"] = code
+
+
+t = threading.Thread(target=do_switch)
+t.start()
+
+if not digest_started.wait(timeout=10):
+    print("DIGEST_NEVER_STARTED", True)
+    digest_release.set()
+    t.join(timeout=10)
+    e.stop()
+    sys.exit(0)
+print("DIGEST_NEVER_STARTED", False)
+
+# digest is now blocked mid-flight (simulating slow disk I/O). A concurrent
+# request that only needs the selection lock (e.g. another select/skip)
+# must NOT be stalled waiting for digest to finish -- #388's bug is that
+# _select holds _selection_lock across the whole digest() call, so this
+# acquire would time out while the bug is present.
+lock_acquired = e._selection_lock.acquire(blocking=True, timeout=2.0)
+print("LOCK_ACQUIRED_WHILE_DIGEST_IN_FLIGHT", lock_acquired)
+if lock_acquired:
+    e._selection_lock.release()
+
+digest_release.set()
+t.join(timeout=10)
+print("SWITCH_CODE", result.get("code"))
+e.stop()
+PY
+)"
+rc=$?
+check_rc "select-lock/digest script exits 0" 0 "$rc"
+check "digest actually started (fixture is exercising the real code path)" "DIGEST_NEVER_STARTED False" "$lock_out"
+check "the selection lock is free while digest's I/O is still in flight (#388)" "LOCK_ACQUIRED_WHILE_DIGEST_IN_FLIGHT True" "$lock_out"
+check "the switch still completes successfully once digest returns" "SWITCH_CODE 200" "$lock_out"
+
+rm -rf "$_asw_lock_a" "$_asw_lock_b" "$_asw_lock_state"
+
 echo "-- selection_store: lastActive additive persistence + backward compat --"
 _asw_store_dir="$(mktemp -d)"
 store_out="$(SCRIPTS_DIR="$ASW_SCRIPTS" STATE="$_asw_store_dir" python3 - <<'PY'

@@ -512,3 +512,134 @@ check "events --since: truncated=False never prints the caveat" "NOCAVEAT_PRINTE
 check "events --since: truncated=True but the window is already fully covered never prints the caveat" "COVERED_PRINTED False" "$h_out"
 check "trace last: also requests order=desc (correctness on busy roots)" "TRACE_LAST_ORDER_REQUESTED ['desc']" "$h_out"
 if [[ "$h_out" != *"CAVEAT_PRINTED True"* ]]; then echo "$h_out" >&2; fi
+
+# ----------------------------------------------------- G: `assistant prune` -- issue #391 dormant-root escape hatch
+echo "-- assistant prune: dormant-root escape hatch (issue #391, no server needed) --"
+_at_g_root="$(mktemp -d)"
+_at_g_state="$(mktemp -d)"
+mkdir -p "$_at_g_root/.claude"
+printf '%s\n' '# neural-network' >"$_at_g_root/.claude/.neural-network"
+printf '%s\n' \
+    'schemaVersion: 2' \
+    'assistant:' \
+    '    version: 1' \
+    '    enabled: true' \
+    '    names: [jarvis]' \
+    '    systemPrompt: |' \
+    '        You are jarvis.' \
+    '    llm:' \
+    '        provider: openai' \
+    '        model: gpt-5.6-sol' \
+    '    capabilities:' \
+    '        codex:' \
+    '            enabled: true' \
+    '            provisioning:' \
+    '                bin: codex' \
+    '    observability:' \
+    '        traces:' \
+    '            sqlite:' \
+    '                retainDays: 1' \
+    '                maxMB: 500' \
+    >"$_at_g_root/.claude/project.yaml"
+
+prune_out="$(SCRIPTS_DIR="$PLUGIN/scripts" ROOT="$_at_g_root" STATE="$_at_g_state" python3 - "$AT_NV" <<'PY'
+import importlib.util, os, sys, sqlite3
+from datetime import datetime, timedelta, timezone
+
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import observability
+
+spec_path = sys.argv[1]
+spec = importlib.util.spec_from_file_location("neural_view", spec_path)
+nv = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(nv)
+
+root = os.environ["ROOT"]
+nv.discover_repos = lambda args: [("jarvis", root)]
+
+# seed traces.sqlite with one row far older than the configured retainDays=1,
+# so a real prune pass has something to actually remove -- proving this
+# verb reaches the resolved root own configured knobs, not just a no-op.
+conn, next_seq = observability._open_conn(root)
+old_ts = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+conn.execute(
+    "INSERT INTO events (seq, ts, session_id, turn_id, span_id, parent_span_id, "
+    "kind, skill, modality, status, payload) VALUES (?, ?, NULL, NULL, NULL, NULL, "
+    "'turn.start', NULL, NULL, NULL, '{}')",
+    (next_seq, old_ts),
+)
+conn.commit()
+conn.close()
+
+print("BEFORE_COUNT", len(observability.query(root, limit=10)))
+
+rc = nv._cmd_assistant_prune([], None)
+print("PRUNE_RC", rc)
+print("AFTER_COUNT", len(observability.query(root, limit=10)))
+
+# --- resolution failure: no assistant discovered -> clean nonzero, no traceback ---
+nv.discover_repos = lambda args: []
+rc_missing = nv._cmd_assistant_prune([], None)
+print("MISSING_RC", rc_missing)
+
+# --- a bad --assistant flag / unknown name: clean nonzero, not a crash ---
+nv.discover_repos = lambda args: [("jarvis", root)]
+rc_unknown = nv._cmd_assistant_prune([], "nope")
+print("UNKNOWN_RC", rc_unknown)
+
+# --- usage error: extra positional args ---
+rc_usage = nv._cmd_assistant_prune(["extra"], None)
+print("USAGE_RC", rc_usage)
+PY
+)"
+rc=$?
+check_rc "assistant prune fixture script exits 0" 0 "$rc"
+check "assistant prune: seeded row present before prune" "BEFORE_COUNT 1" "$prune_out"
+check "assistant prune: exits 0 against a dormant (no server) fixture" "PRUNE_RC 0" "$prune_out"
+check "assistant prune: the stale row (older than retainDays=1) is actually gone after pruning" "AFTER_COUNT 0" "$prune_out"
+check "assistant prune: no assistant discovered is a clean nonzero, not a crash" "MISSING_RC 1" "$prune_out"
+check "assistant prune: an unmatched --assistant name is a clean nonzero, not a crash" "UNKNOWN_RC 1" "$prune_out"
+check "assistant prune: extra positional args are a clean usage error" "USAGE_RC 2" "$prune_out"
+check_absent "assistant prune: no raw traceback anywhere in the fixture run" "Traceback" "$prune_out"
+
+# --- the live-writer race: a real EXCLUSIVE lock held on the same
+# traces.sqlite (simulating a running neural-view.py serve process own
+# writer thread) must make this verb fail LOUD (clean nonzero + explained
+# message), never silently succeed or corrupt the db (Sec10.2 single-
+# writer discipline; see _cmd_assistant_prune docstring).
+race_out="$(SCRIPTS_DIR="$PLUGIN/scripts" ROOT="$_at_g_root" python3 - "$AT_NV" <<'PY'
+import importlib.util, os, sys, sqlite3
+
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import observability
+
+spec_path = sys.argv[1]
+spec = importlib.util.spec_from_file_location("neural_view", spec_path)
+nv = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(nv)
+
+root = os.environ["ROOT"]
+nv.discover_repos = lambda args: [("jarvis", root)]
+
+conn0, _ = observability._open_conn(root)
+conn0.execute("PRAGMA journal_mode=DELETE")
+conn0.close()
+
+db_path = observability._db_path(root)
+locker = sqlite3.connect(db_path, isolation_level=None)
+locker.execute("PRAGMA busy_timeout=100")
+locker.execute("BEGIN EXCLUSIVE")
+
+rc = nv._cmd_assistant_prune([], None)
+print("RACE_RC", rc)
+
+locker.execute("ROLLBACK")
+locker.close()
+PY
+)"
+race_rc=$?
+check_rc "assistant prune race-simulation script exits 0" 0 "$race_rc"
+check "assistant prune: a live-writer lock race fails loud (clean nonzero), never a silent no-op" "RACE_RC 1" "$race_out"
+check_absent "assistant prune: the live-writer race still never prints a raw traceback" "Traceback" "$race_out"
+
+rm -rf "$_at_g_root" "$_at_g_state"

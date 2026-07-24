@@ -175,3 +175,68 @@ else echo "ok   assistant engine: server process no longer alive after stop"; fi
 
 unset NEURAL_VIEW_STATE NEURAL_VIEW_PORT NEURAL_VIEW_SCAN
 rm -rf "$_ae_root" "$_ae_state" "$_ae_scan_empty"
+
+echo "-- engine: DISTILLER_QUEUE_MAXSIZE overflow is drop-oldest (issue #389) --"
+_ae_dq_state="$(mktemp -d)"
+dq_out="$(SCRIPTS_DIR="$AE_SCRIPTS" STATE="$_ae_dq_state" python3 - <<'PY'
+import os, sys, queue as queue_module
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import engine
+
+repos = lambda: []
+state_dir = os.environ["STATE"]
+e = engine.AssistantEngine(repos, state_dir)
+# no e.start() -- nothing drains queues["distiller"], so the queue's own
+# contents after N _enqueue_distill calls reflect ONLY the overflow policy,
+# never a race with a real worker thread.
+e.queues["distiller"] = queue_module.Queue(maxsize=5)
+
+for i in range(5):
+    e._enqueue_distill("root", "u%d" % i, "a%d" % i, [])
+print("FULL_LEN", e.queues["distiller"].qsize())
+
+# 3 more pushes past maxsize=5 -- drop-oldest means u0/u1/u2 are evicted,
+# u3..u7 remain (still exactly maxsize items).
+for i in range(5, 8):
+    e._enqueue_distill("root", "u%d" % i, "a%d" % i, [])
+
+remaining = []
+while True:
+    try:
+        remaining.append(e.queues["distiller"].get_nowait())
+    except queue_module.Empty:
+        break
+users = [item["exchange"]["user"] for item in remaining]
+print("OVERFLOW_LEN", len(users))
+print("OVERFLOW_USERS", users)
+
+# --- documented race-degrades-to-drop-newest branch (see _enqueue_distill's
+# docstring): a raced eviction where another producer's get_nowait/put_nowait
+# slips in between this call's own two calls degrades to silently dropping
+# THIS item. Deterministically reproduced with a fake queue whose put_nowait
+# always raises Full (simulating an already-full queue) and whose get_nowait
+# always raises Empty (simulating the raced eviction: something else already
+# took the oldest slot) -- so the retry put_nowait also raises Full, and the
+# item is dropped without _enqueue_distill raising.
+class _AlwaysFullQueue:
+    def put_nowait(self, item):
+        raise queue_module.Full
+    def get_nowait(self):
+        raise queue_module.Empty
+
+e.queues["distiller"] = _AlwaysFullQueue()
+try:
+    e._enqueue_distill("root", "raced-user", "raced-assistant", [])
+    print("RACE_RAISED", False)
+except Exception:
+    print("RACE_RAISED", True)
+PY
+)"
+rc=$?
+check_rc "distiller overflow script exits 0" 0 "$rc"
+check "queue fills to exactly maxsize before any overflow" "FULL_LEN 5" "$dq_out"
+check "overflow keeps exactly maxsize items (drop-oldest, never grows unbounded)" "OVERFLOW_LEN 5" "$dq_out"
+check "overflow evicts the oldest and keeps the newest 5" "OVERFLOW_USERS ['u3', 'u4', 'u5', 'u6', 'u7']" "$dq_out"
+check "a raced eviction degrades to silently dropping the item, never raises (Sec9.5)" "RACE_RAISED False" "$dq_out"
+
+rm -rf "$_ae_dq_state"

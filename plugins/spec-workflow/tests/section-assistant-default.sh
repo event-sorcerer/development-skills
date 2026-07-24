@@ -136,6 +136,13 @@ check "missing default: error names the stale stored default" \
     "local default 'nobody-by-this-name' matches no discovered assistant" "$out"
 check "missing default: error LISTS candidate jarvis" "jarvis" "$out"
 check "missing default: error LISTS candidate friday" "friday" "$out"
+# issue #368: a stale-default ResolutionError names the fix action, not just
+# the problem -- a human/agent reading this message can act on it directly
+# instead of having to already know the CLI verb that fixes it.
+check "missing default (stale): error names the fix action" \
+    "setup-assistant.sh set-default <name>" "$out"
+check "missing default (stale): error also mentions the --assistant escape hatch" \
+    "--assistant NAME" "$out"
 rm -rf "$ad_a" "$ad_b" "$ad_state"
 
 # ------------------------------------------------------------ no default set, 2+ candidates -> error LISTS candidates
@@ -148,6 +155,11 @@ check_rc "no default, 2+ candidates: resolution fails" 1 "$rc"
 check "no default, 2+ candidates: error says no local default set" "no local default set" "$out"
 check "no default, 2+ candidates: error LISTS candidate jarvis" "jarvis" "$out"
 check "no default, 2+ candidates: error LISTS candidate friday" "friday" "$out"
+# issue #368: same fix-action hint on the no-default branch.
+check "no default: error names the fix action" \
+    "setup-assistant.sh set-default <name>" "$out"
+check "no default: error also mentions the --assistant escape hatch" \
+    "--assistant NAME" "$out"
 rm -rf "$ad_a" "$ad_b" "$ad_state"
 
 # ------------------------------------------------------------ duplicate/colliding default -> error LISTS the colliders specifically
@@ -185,7 +197,27 @@ rc=$?
 check_rc "flag matches nothing: resolution fails" 1 "$rc"
 check "flag matches nothing: error names the flag and lists candidates" \
     "no assistant named 'nobody' — candidates: jarvis" "$out"
+# issue #368: same fix-action hint on the no-candidates (unmatched flag) branch.
+check "flag matches nothing: error names the fix action" \
+    "setup-assistant.sh set-default <name>" "$out"
+check "flag matches nothing: error also mentions the --assistant escape hatch" \
+    "--assistant NAME" "$out"
 rm -rf "$ad_a" "$ad_state"
+
+# ------------------------------------------------------------ issue #368: ambiguous-branch messages are UNCHANGED (no fix-action hint)
+# An ambiguous match (2+ candidates share a name) is not fixed by "set a
+# default" or "pass --assistant" -- the human still has to disambiguate by
+# renaming/aliasing one of the colliding repos, so these two branches
+# deliberately keep their existing message shape rather than appending a
+# hint that would not actually resolve the collision.
+ad_a="$(mktemp -d)"; ad_b="$(mktemp -d)"; ad_state="$(mktemp -d)"
+ad_repo "$ad_a" jarvis
+ad_repo "$ad_b" jarvis
+python3 "$AD_SCRIPT" write-default jarvis --state-dir "$ad_state" >/dev/null
+out="$(ad_resolve "$ad_state" "$ad_a" "$ad_b" 2>&1)"
+check_absent "colliding default: does NOT append the set-default fix-action hint" \
+    "setup-assistant.sh set-default" "$out"
+rm -rf "$ad_a" "$ad_b" "$ad_state"
 
 # ------------------------------------------------------------ stored file location: gitignored local state, never a tracked file
 ad_a="$(mktemp -d)"

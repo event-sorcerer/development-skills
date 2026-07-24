@@ -33,6 +33,7 @@ an explicit shutdown path and once via `atexit`) without raising.
 """
 import os
 import queue
+import sqlite3
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -73,6 +74,21 @@ TRACES_MAX_LIMIT = 1000
 # that one exchange's contribution to a future batch is skipped, not the
 # turn). See `_enqueue_distill`.
 DISTILLER_QUEUE_MAXSIZE = 1000
+
+# issue #390: the traces queue was left unbounded (only the distiller's
+# queue was ever bounded per AST-030) -- a stalled/slow traces writer thread
+# could otherwise grow unbounded memory off a long-running chat session the
+# exact same way an unbounded distiller queue could. Mirrors
+# DISTILLER_QUEUE_MAXSIZE's value; the eviction posture on overflow is
+# DIFFERENT from the distiller's drop-OLDEST policy, though -- traces are an
+# ordered, append-only correlation log (seq is assigned in arrival order by
+# the single writer thread), so silently reordering it via an evict-and-
+# reinsert would corrupt that ordering. `observability.emit`'s existing
+# `except queue.Full` branch (drop the NEWEST event, one stderr line) is the
+# enforced policy here instead -- that branch already existed for exactly
+# this case but was dead code in production while this queue stayed
+# unbounded (a `Queue()` with no maxsize can never raise `Full`).
+TRACES_QUEUE_MAXSIZE = 1000
 
 
 def _heartbeat_worker(stop_event):
@@ -118,6 +134,11 @@ class AssistantEngine:
         # (AST-010: nothing drains them yet; E4/E6 give them their own real
         # workers and bounding decisions later).
         self.queues["distiller"] = queue.Queue(maxsize=DISTILLER_QUEUE_MAXSIZE)
+        # issue #390: bounded the same way -- see TRACES_QUEUE_MAXSIZE's
+        # docstring for why the OVERFLOW POLICY differs from the
+        # distiller's (drop-newest via observability.emit's existing `Full`
+        # branch, not drop-oldest).
+        self.queues["traces"] = queue.Queue(maxsize=TRACES_QUEUE_MAXSIZE)
         self.workers = []  # [(name, Thread, stop_event), ...] -- see start()
         self._lock = threading.Lock()
         # AST-016 review r1 BLOCKER fix: one lock per resolved assistant
@@ -540,11 +561,21 @@ class AssistantEngine:
         matched_root, matched_section = matches[0]
         new_name = _main_name(matched_section)
 
+        # issue #388: only the in-memory bookkeeping (old/new names,
+        # is_switch, stamping _last_active, reading since_ts, persisting)
+        # runs under `_selection_lock` -- `digest_module.digest()` below
+        # does real disk I/O (brain-events.jsonl + the whole session
+        # transcript) and must NOT run while the lock is held, or a
+        # concurrent select/skip that only needs the lock stalls behind
+        # this switch's digest read for no reason. `since_ts` is captured
+        # here (inside the lock, off `self._last_active` as it stood at
+        # this switch) so the digest call below is self-contained and
+        # needs no further access to engine state.
         with self._selection_lock:
             old_name = self._selected
             is_switch = old_name is not None and old_name != new_name
 
-            payload = None
+            since_ts = None
             if is_switch:
                 now = _now_iso()
                 # the outgoing assistant stops being active now -- see
@@ -552,11 +583,14 @@ class AssistantEngine:
                 # anchor for ITS next digest, not for this one.
                 self._last_active[old_name] = now
                 since_ts = self._last_active.get(new_name)
-                payload = digest_module.digest(matched_root, since_ts)
 
             self._selected = new_name
             self._gated = False
             self._persist_selection()
+
+        payload = None
+        if is_switch:
+            payload = digest_module.digest(matched_root, since_ts)
 
         response = {"selected": self._selected, "gated": self._gated}
         if payload is not None:
@@ -694,7 +728,19 @@ class AssistantEngine:
         count is EXACTLY `limit` reads as truncated too; #393's fix is
         choosing never-a-false-negative over that rare false-positive,
         since the caller-side cost of an unnecessary caveat is far lower
-        than the cost of a silently incomplete window)."""
+        than the cost of a silently incomplete window).
+
+        issue #391: `observability.query`'s own busy_timeout only covers
+        ordinary write/read contention -- a VACUUM (AST-041's retention
+        prune pass, Sec10.3) holds an exclusive lock long enough to run
+        past it on a busy root, and `query` lets that surface as a raw
+        `sqlite3.OperationalError` rather than swallowing it (it already
+        swallows "no such table" the same way, see its own docstring).
+        This route catches that specific, retryable condition and
+        degrades to the SAME `{"events": [], "warnings": [...]}` shape the
+        ResolutionError branch above already returns -- a lock overrun is
+        transient (the caller's next poll will very likely succeed), never
+        a 5xx/crash."""
         since, turn, limit, assistant_flag, order, order_error = _parse_traces_query(query)
         if order_error:
             return 400, {"error": order_error}, "application/json"
@@ -708,7 +754,16 @@ class AssistantEngine:
             # Same "empty, explained result, never a crash" posture as
             # `_history`'s own ResolutionError handling above.
             return 200, {"events": [], "warnings": [f"no assistant resolved: {exc}"]}, "application/json"
-        events = observability.query(root, since=since, turn=turn, limit=limit, order=order)
+        try:
+            events = observability.query(root, since=since, turn=turn, limit=limit, order=order)
+        except sqlite3.OperationalError as exc:
+            # issue #391: a VACUUM-style lock overrun -- clean, retryable,
+            # never a crash (same posture as the ResolutionError branch
+            # above, and as `query`'s own internal "no such table" degrade).
+            return 200, {
+                "events": [],
+                "warnings": [f"traces temporarily unavailable, retry shortly: {exc}"],
+            }, "application/json"
         truncated = limit > 0 and len(events) == limit
         return 200, {"events": events, "truncated": truncated}, "application/json"
 

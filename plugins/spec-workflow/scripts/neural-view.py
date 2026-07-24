@@ -22,6 +22,7 @@ canvas containing its own role-clusters (dev/reviewer/orchestrator/...).
   neural-view.py assistant metrics                        # GET /assistant/metrics; per-root turn counts + p50/p95 turn duration
   neural-view.py assistant trace [turn-id|last] [--assistant NAME]  # GET /assistant/traces; one turn's event waterfall (default: newest turn)
   neural-view.py assistant events --since <dur> [--assistant NAME]  # GET /assistant/traces, filtered client-side on ts; dur like 5m/2h/30s
+  neural-view.py assistant prune [--assistant NAME]       # traces.sqlite retention pass, direct (no server needed) -- see _cmd_assistant_prune
 
 Stale-server detection: if the pidfile is missing/stale but the configured
 port is still occupied, `status` reports STALE (never a bare STOPPED) and
@@ -107,6 +108,7 @@ import shlex
 import shutil
 import signal
 import socket
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -123,6 +125,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # import config (proje
 
 from assistant.engine import AssistantEngine  # noqa: E402  the /assistant/* engine (AST-010, SPEC-ASSISTANT.md §5a)
 from assistant import default_store  # noqa: E402  §7.6 resolution + machine-local default store, for `assistant default` (AST-016)
+from assistant import observability  # noqa: E402  issue #391: `assistant prune`'s direct (non-HTTP) traces.sqlite retention pass
 
 ENGINE = None  # set by the `serve` branch of main(); route dispatch below checks for None so `import neural_view` alone (e.g. from a test) never needs a live engine
 
@@ -2035,17 +2038,80 @@ def _cmd_assistant_events(args, assistant_flag):
     return 0
 
 
+def _cmd_assistant_prune(args, assistant_flag):
+    """`assistant prune [--assistant NAME]` -- SPEC-ASSISTANT.md Sec10.3,
+    issue #391's dormant-root escape hatch. Unlike chat/status/metrics/
+    trace/events (all thin HTTP clients against a RUNNING server -- see
+    this module's own "assistant subcommand" docstring above), this verb
+    calls `observability.prune` DIRECTLY against the resolved root's
+    traces.sqlite: it works even when neural-view is not running at all (a
+    "dormant" root -- no server, no traces worker thread, nothing to poll
+    or retention-prune on its own periodic cadence).
+
+    Repos are discovered the same way `serve` does (`discover_repos([])`
+    -- no --dir/--scan override here; this is a one-shot admin action, not
+    a long-running scan) and resolved via the SAME §7.6 order every other
+    `assistant` subcommand already uses (`default_store.resolve_assistant`:
+    flag -> sole assistant -> stored local default -> error listing
+    candidates).
+
+    Retention knobs come from the resolved root's own
+    `assistant.observability.traces.sqlite` config, resolved through
+    `observability._resolve_retention` -- mirrors
+    `AssistantEngine._retention_config_for` exactly (there is no engine
+    instance here to reuse that method from), so this verb prunes to the
+    SAME 30/500 defaults / per-root overrides the live traces worker's own
+    periodic pass would apply.
+
+    `observability.prune` opens its OWN short-lived connection (see its
+    docstring) -- safe only when the root's traces worker thread is NOT
+    concurrently holding open its own connection to the SAME traces.sqlite
+    (Sec10.2 single-writer discipline). If a live `neural-view.py serve`
+    process IS running against this same root, its writer thread's open
+    connection races this verb's connection; the 5s `busy_timeout`
+    (`observability._open_conn`) makes that race FAIL LOUD (a raised
+    `sqlite3.OperationalError`, reported and a non-zero exit) rather than
+    corrupting the db or silently skipping the prune -- this is a
+    documented risk of running `prune` against a LIVE root, not a bug: the
+    escape hatch is meant for dormant ones."""
+    if args:
+        sys.stderr.write("usage: neural-view.py assistant prune [--assistant NAME]\n")
+        return 2
+    repos = discover_repos([])
+    candidates = default_store.discover_candidates(root for _, root in repos)
+    try:
+        root, section = default_store.resolve_assistant(candidates, flag=assistant_flag, state_dir=str(S))
+    except default_store.ResolutionError as exc:
+        sys.stderr.write(f"neural-view assistant prune: {exc}\n")
+        return 1
+    traces_cfg = ((section.get("observability") or {}).get("traces") or {}).get("sqlite") or {}
+    retain_days, max_mb = observability._resolve_retention(root, lambda _r: traces_cfg)
+    try:
+        observability.prune(root, retain_days, max_mb)
+    except sqlite3.OperationalError as exc:
+        sys.stderr.write(
+            "neural-view assistant prune: traces.sqlite busy -- a live "
+            f"'neural-view.py serve' may be writing to this root right now: {exc}\n"
+        )
+        return 1
+    print(f"pruned {root} (retainDays={retain_days}, maxMB={max_mb})")
+    return 0
+
+
 def cmd_assistant(args):
-    """`neural-view.py assistant <chat|status|default|metrics|trace|events>
+    """`neural-view.py assistant <chat|status|default|metrics|trace|events|prune>
     [--assistant NAME] ...` (AST-016, SPEC-ASSISTANT.md §7.6, issue #314;
-    metrics/trace/events added by AST-045, §10.5, issue #331). All
-    headless: `chat`/`status`/`metrics`/`trace`/`events` talk to the
-    running server over HTTP (clean, non-traceback error + nonzero exit if
-    it isn't running); `default` needs no server at all (see
-    `_cmd_assistant_default`'s docstring)."""
+    metrics/trace/events added by AST-045, §10.5, issue #331; prune added
+    by issue #391, Sec10.3). All headless: `chat`/`status`/`metrics`/
+    `trace`/`events` talk to the running server over HTTP (clean,
+    non-traceback error + nonzero exit if it isn't running); `default`
+    needs no server at all (see `_cmd_assistant_default`'s docstring);
+    `prune` likewise needs no running server (see `_cmd_assistant_prune`'s
+    docstring) -- it is the one verb meant to work against a DORMANT
+    root."""
     if not args:
         sys.stderr.write(
-            "usage: neural-view.py assistant <chat|status|default|metrics|trace|events> [--assistant NAME] ...\n"
+            "usage: neural-view.py assistant <chat|status|default|metrics|trace|events|prune> [--assistant NAME] ...\n"
         )
         return 2
     sub, rest = args[0], args[1:]
@@ -2066,6 +2132,8 @@ def cmd_assistant(args):
         return _cmd_assistant_trace(rest, assistant_flag)
     if sub == "events":
         return _cmd_assistant_events(rest, assistant_flag)
+    if sub == "prune":
+        return _cmd_assistant_prune(rest, assistant_flag)
 
     sys.stderr.write(f"neural-view.py assistant: unknown subcommand {sub!r}\n")
     return 2

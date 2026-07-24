@@ -201,6 +201,19 @@ def _list_candidates(candidates):
     return ", ".join(_label(c) for c in candidates)
 
 
+# issue #368: appended verbatim to a ResolutionError message wherever the
+# fix IS "set a default, or pass a flag" -- i.e. the no-candidates
+# (unmatched flag), no-default, and stale-default branches below. The two
+# AMBIGUOUS branches (a flag or a stored default matching 2+ candidates)
+# deliberately do NOT get this hint: neither "set a default" nor "pass
+# --assistant" resolves a name collision -- the human still has to rename/
+# alias one of the colliding repos, so appending this hint there would
+# just be misleading advice.
+_FIX_HINT = (
+    "set one with: setup-assistant.sh set-default <name>, or pass --assistant NAME"
+)
+
+
 def resolve_assistant(candidates, flag=None, state_dir=None):
     candidates = list(candidates)
     if not candidates:
@@ -210,7 +223,7 @@ def resolve_assistant(candidates, flag=None, state_dir=None):
         matches = [c for c in candidates if _matches_name(c[1], flag)]
         if not matches:
             raise ResolutionError(
-                f"no assistant named {flag!r} — candidates: {_list_candidates(candidates)}"
+                f"no assistant named {flag!r} — candidates: {_list_candidates(candidates)} — {_FIX_HINT}"
             )
         if len(matches) > 1:
             raise ResolutionError(
@@ -225,14 +238,14 @@ def resolve_assistant(candidates, flag=None, state_dir=None):
     if not default:
         raise ResolutionError(
             "no local default set and multiple assistants found — "
-            f"candidates: {_list_candidates(candidates)}"
+            f"candidates: {_list_candidates(candidates)} — {_FIX_HINT}"
         )
 
     matches = [c for c in candidates if _matches_name(c[1], default)]
     if not matches:
         raise ResolutionError(
             f"local default {default!r} matches no discovered assistant — "
-            f"candidates: {_list_candidates(candidates)}"
+            f"candidates: {_list_candidates(candidates)} — {_FIX_HINT}"
         )
     if len(matches) > 1:
         raise ResolutionError(
