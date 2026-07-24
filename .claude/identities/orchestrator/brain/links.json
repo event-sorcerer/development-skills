@@ -1,35 +1,5 @@
 {
-  "attribute-all-gate-legs->attribute-red-gate-to-sections-first": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
   "attribute-all-gate-legs->gate-verdict-before-merge": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "background-suites-log-to-file-not-pipes->bisect-before-blaming-tracked-flakiness": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "board-moves-before-branch-delete->merge-via-temp-worktree-when-main-held": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "brief-closed-action-set->brief-out-of-scope-failure-line": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "brief-closed-action-set->idle-agent-is-not-done": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "brief-out-of-scope-failure-line->idle-agent-is-not-done": {
     "fires": 0,
     "last": null,
     "weight": 0.5
@@ -40,26 +10,6 @@
     "weight": 0.5
   },
   "canonical-merge-locus->search-branches-before-reimplementing": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "combined-two-pass-for-small-siblings->idle-agent-is-not-done": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "combined-two-pass-for-small-siblings->unresponsive-agent-take-over": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "diagnose-stalls-before-attributing->board-moves-before-branch-delete": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "fetch-before-hotfix-filing->idle-agent-is-not-done": {
     "fires": 0,
     "last": null,
     "weight": 0.5
@@ -79,17 +29,7 @@
     "last": null,
     "weight": 0.5
   },
-  "gap-to-pinned-contract->batch-red-across-surfaces": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
   "gap-to-pinned-contract->fixed-iteration-shape": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "gate-before-fold-push->board-moves-before-branch-delete": {
     "fires": 0,
     "last": null,
     "weight": 0.5
@@ -100,16 +40,6 @@
     "weight": 0.5
   },
   "gate-verdict-before-merge->clean-main-repro-before-blame": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "idle-agent-is-not-done->brief-out-of-scope-failure-line": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "idle-agent-is-not-done->unresponsive-agent-take-over": {
     "fires": 0,
     "last": null,
     "weight": 0.5
@@ -134,16 +64,6 @@
     "last": null,
     "weight": 0.5
   },
-  "live-validation-is-loop-input->clean-main-repro-before-blame": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "merge-via-temp-worktree-when-main-held->board-moves-before-branch-delete": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
   "mode-elastic-loop->batch-same-surface-bugs": {
     "fires": 0,
     "last": null,
@@ -154,22 +74,7 @@
     "last": null,
     "weight": 0.5
   },
-  "name-the-failure-modes->execute-guarantees-adversarially": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
   "name-the-failure-modes->lead-brief-with-last-failure": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "numbers-gated-epic-doors->brief-closed-action-set": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "numbers-gated-epic-doors->combined-two-pass-for-small-siblings": {
     "fires": 0,
     "last": null,
     "weight": 0.5
@@ -180,11 +85,6 @@
     "weight": 0.5
   },
   "parallel-push-races->gate-verdict-before-merge": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "plan-stage-adversarial-review-before-spec->ui-rounds-converge-via-favorite-plus-aspects": {
     "fires": 0,
     "last": null,
     "weight": 0.5
@@ -219,57 +119,12 @@
     "last": null,
     "weight": 0.5
   },
-  "spec-interviews-need-concrete-previews->plan-stage-adversarial-review-before-spec": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "stage-specific-paths-in-takeovers->idle-agent-is-not-done": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "stage-specific-paths-in-takeovers->unresponsive-agent-take-over": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "stall-hypothesis-backgrounded-gate->brief-closed-action-set": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "stall-hypothesis-backgrounded-gate->unresponsive-agent-take-over": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
   "ui-split-logic-first->batch-same-surface-bugs": {
     "fires": 0,
     "last": null,
     "weight": 0.5
   },
   "ui-split-logic-first->mode-elastic-loop": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "unresponsive-agent-take-over->brief-out-of-scope-failure-line": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "unresponsive-agent-take-over->idle-agent-is-not-done": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "worktree-lane-default->board-moves-before-branch-delete": {
-    "fires": 0,
-    "last": null,
-    "weight": 0.5
-  },
-  "worktree-lane-default->merge-via-temp-worktree-when-main-held": {
     "fires": 0,
     "last": null,
     "weight": 0.5
