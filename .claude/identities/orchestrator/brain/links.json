@@ -119,6 +119,16 @@
     "last": null,
     "weight": 0.5
   },
+  "name-the-failure-modes->execute-guarantees-adversarially": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "name-the-failure-modes->lead-brief-with-last-failure": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "numbers-gated-epic-doors->brief-closed-action-set": {
     "fires": 0,
     "last": null,

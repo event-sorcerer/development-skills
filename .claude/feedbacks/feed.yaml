@@ -2087,3 +2087,53 @@ items:
   routing:
     action: brain-note
     ref: orchestrator/reconcile-incidental-delivery
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-24T11:45:00Z'
+iteration:
+  task: E4 epic close (AST-040..045)
+  outcome: merged
+  reviewRounds: 1
+source:
+  role: orchestrator
+  model: claude-fable-5
+items:
+- category: worked-well
+  area: review
+  severity: medium
+  summary: Reviewer briefs that name concrete failure modes to hunt consistently outperform
+    generic review asks
+  detail: Across six observability-epic reviews, briefs that specified the exact traps
+    (cumulative-bucket math, silent caps, lock windows, stub fidelity, XSS in generated
+    markup) produced verdicts with hand-recomputed math and genuine catches; every
+    accepted finding traced to a named hunt.
+  evidence:
+  - Zugruul/development-skills#326
+  - Zugruul/development-skills#328
+  - Zugruul/development-skills#330
+  - Zugruul/development-skills#331
+  generalized: Write reviewer briefs as a list of NAMED failure modes specific to
+    the diff's domain (math correctness, silent truncation, lock scope, stub fidelity,
+    injection surfaces) rather than generic verify-the-AC asks — reviewers reliably
+    execute the named hunts and the findings quality tracks the brief's specificity.
+  routing:
+    action: brain-note
+    ref: orchestrator/name-the-failure-modes
+- category: worked-well
+  area: other
+  severity: low
+  summary: Delta jurisprudence stabilized — the reviewer corpus now distinguishes
+    real contract corrections from untyped-prose gap-filling
+  detail: One reviewer resolved a spec-delta question by reading the actual spec text
+    and citing both the delta precedents and the no-delta precedent, correcting the
+    framing both the dev and orchestrator carried.
+  evidence:
+  - Zugruul/development-skills#329
+  generalized: Spec deltas are for text that CONTRADICTS implemented reality; untyped
+    prose being filled by a reasonable implementation choice needs code/README documentation,
+    not a delta — and reviewers should verify the alleged contradiction against the
+    actual spec text before demanding either.
+  routing:
+    action: brain-note
+    ref: reviewer/delta-jurisprudence

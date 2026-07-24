@@ -24,6 +24,16 @@
     "last": null,
     "weight": 0.5
   },
+  "delta-jurisprudence->covenant-grep-and-execute": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "delta-jurisprudence->reproduce-red-first-claims": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "distinguish-missed-vs-uncatchable-findings->verify-portability-claims-in-target-environment": {
     "fires": 2,
     "last": "2026-07-22",
