@@ -467,7 +467,16 @@ def compose_context(persona_cfg, roster_provider, recall_fn, session_state,
         "tokens": estimate_tokens(user_message), "cap": None, "clipped": False,
     }
 
-    system_parts = [p for p in (persona_text, roster_text, notes_text, summary_text, turns_text) if p]
+    # AST-032 note-wins ordering: recalled notes render AFTER the rolling
+    # summary (not the literal persona+roster+notes+summary+turns listing
+    # order in Sec8.2's prose) so a note that contradicts a stale summary
+    # wins by PROMPT-ORDER RECENCY -- the summary is a coarse, possibly
+    # stale digest (regenerated only every K turns, Sec8.2/AST-032) while a
+    # recalled note is the sharper, independently-ranked signal for THIS
+    # turn; placing it later lets it override the summary's claim without
+    # any explicit contradiction-detection logic. See docs/spec-deltas/
+    # AST-032.md for the Sec8.2 ordering clarification this encodes.
+    system_parts = [p for p in (persona_text, roster_text, summary_text, notes_text, turns_text) if p]
     system = "\n\n".join(system_parts)
 
     total_tokens = sum(c["tokens"] for c in components.values())

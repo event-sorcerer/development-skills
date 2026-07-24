@@ -29,6 +29,20 @@ inside that directory:
     half-written file, and a crash mid-save leaves the PREVIOUS state
     file intact (the new one never existed under its final name).
 
+AST-032 (Sec8.2 "the rolling summary SHALL be size-capped and refreshed
+every K turns") note: this module does NOT decide when/how to refresh the
+summary -- that cadence (every `SUMMARY_REFRESH_EVERY_K_TURNS` turns, size
+cap enforced twice: once by the summarizer's own cap_chars argument, once
+again as defense-in-depth) already lives in `turns.py`'s
+`_advance_session_state`/`run_turn`, wired synchronously on the request
+thread by `engine.py`'s `_chat` (`load_state` -> `run_turn` -> `save_state`,
+per-root locked -- see `engine.py`'s `_chat_locks` docstring). `save_state`
+here is the ONLY place a refreshed summary is persisted, and it is already
+atomic per the paragraph above -- no separate `refresh_summary` entry point
+is needed in this module; adding one would create a second, divergent
+refresh mechanism instead of reusing the one already proven by
+`section-assistant-turns.sh`'s summary-refresh tests.
+
 OQ2 default (documented, not built): one `assistant` session per repo --
 `SessionStore` takes no session-id parameter and always addresses the same
 two fixed filenames under `<root>/.claude/assistant/`. Multi-session

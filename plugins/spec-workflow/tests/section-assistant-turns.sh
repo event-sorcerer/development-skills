@@ -38,9 +38,9 @@ print("HAS_KEYS", sorted(result.keys()) == ["budget_report", "chips", "context_f
 print("INPUT_IS_RAW", ctx["input"] == "what's the weather?")
 print("MODEL_PASSED", ctx.get("model") == "claude-fable-5")
 print("PERSONA_BEFORE_ROSTER", sys_text.find("Jarvis, terse") < sys_text.find("search"))
-print("ROSTER_BEFORE_NOTES", sys_text.find("search") < sys_text.find("note-one"))
-print("NOTES_BEFORE_SUMMARY", sys_text.find("note-one") < sys_text.find("prior recap"))
-print("SUMMARY_BEFORE_TURNS", sys_text.find("prior recap") < sys_text.find("hello"))
+print("ROSTER_BEFORE_SUMMARY", sys_text.find("search") < sys_text.find("prior recap"))
+print("SUMMARY_BEFORE_NOTES", sys_text.find("prior recap") < sys_text.find("note-one"))
+print("NOTES_BEFORE_TURNS", sys_text.find("note-one") < sys_text.find("hello"))
 print("NAMES_ALIAS_PRESENT", "J" in sys_text)
 print("CHIPS", result["chips"])
 print("BUDGET_TOTAL_CAP", result["budget_report"]["total_cap"])
@@ -51,9 +51,9 @@ check "compose: returns exactly the three documented top-level keys" "HAS_KEYS T
 check "compose: input carries the RAW user message verbatim" "INPUT_IS_RAW True" "$out"
 check "compose: model passed through from persona_cfg.llm.model" "MODEL_PASSED True" "$out"
 check "compose: persona precedes roster in system text" "PERSONA_BEFORE_ROSTER True" "$out"
-check "compose: roster precedes notes in system text" "ROSTER_BEFORE_NOTES True" "$out"
-check "compose: notes precede summary in system text (AST-032 preview ordering)" "NOTES_BEFORE_SUMMARY True" "$out"
-check "compose: summary precedes turns in system text" "SUMMARY_BEFORE_TURNS True" "$out"
+check "compose: roster precedes rolling summary in system text" "ROSTER_BEFORE_SUMMARY True" "$out"
+check "compose: rolling summary precedes recalled notes in system text (AST-032 note-wins ordering)" "SUMMARY_BEFORE_NOTES True" "$out"
+check "compose: recalled notes precede last-N turns in system text" "NOTES_BEFORE_TURNS True" "$out"
 check "compose: name alias rendered into system text" "NAMES_ALIAS_PRESENT True" "$out"
 check "compose: chips derived from recall blocks" "'slug': 'note-one', 'strength': 2" "$out"
 check "compose: budget_report.total_cap is the documented ~6k token budget" "BUDGET_TOTAL_CAP 6000" "$out"
@@ -342,6 +342,34 @@ PY
 )"
 check "default_summarizer: respects cap_chars" "CAPPED_LEN True" "$out"
 check "default_summarizer: extractive -- prior summary text leads" "STARTS_WITH_PRIOR True" "$out"
+
+# ------------------------------------------------------- (13b) AST-032: stale-summary regression fixture --
+# a rolling summary asserting X ("deploy target is us-east-1") alongside a
+# FRESHER recalled note asserting not-X ("deploy target is eu-west-1"). This
+# does not assert anything about model behavior (no model runs here) -- it
+# asserts the documented note-wins MECHANISM: the assembled system prompt
+# places the note strictly after the summary, so prompt-order recency lets
+# the fresher note win over the stale summary blob.
+out="$(PYTHONPATH="$AT_SCRIPTS" python3 - <<'PY'
+from assistant import turns
+
+session_state = {
+    "summary": "Recap: the deploy target is us-east-1.",
+    "turns": [],
+}
+
+def recall_fn(message):
+    return {"blocks": ["### deploy-target-note  [strength 4]\nThe deploy target is now eu-west-1 (updated)."],
+            "seeds": 1, "injected": 1, "links_fired": []}
+
+result = turns.compose_context({}, None, recall_fn, session_state, "where do we deploy?")
+sys_text = result["context_for_adapter"]["system"]
+print("BOTH_PRESENT", "us-east-1" in sys_text and "eu-west-1" in sys_text)
+print("NOTE_AFTER_SUMMARY", sys_text.find("us-east-1") < sys_text.find("eu-west-1"))
+PY
+)"
+check "AST-032 regression: stale summary and fresher note both survive budget" "BOTH_PRESENT True" "$out"
+check "AST-032 regression: note-wins -- fresher note ordered after the stale summary" "NOTE_AFTER_SUMMARY True" "$out"
 
 # ------------------------------------------------------- (14) integration-ish: real brain.recall against a scaffolded temp brain
 AT_ROOT="$(mktemp -d)"
