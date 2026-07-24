@@ -35,7 +35,12 @@
      footprint (height + gap) kept current by applyUiState — it shrinks to the
      bare header when the section is folded and to 0 when collapsed away, so
      the note/settings panels below always reclaim the space */
-  --voiceh:calc(var(--colq)*.67);
+  /* grown from *.67 (#319 follow-up, human review): the waveform-only
+     height left no room once the assistant switcher moved from the
+     buried ⚙ settings popover to a permanent dock at the bottom of the
+     Voice section — see #voice-dock below. The waveform itself keeps
+     flex:1 and simply shares less of this larger total. */
+  --voiceh:calc(var(--colq)*1.1);
   --voice-below:calc(var(--voiceh) + 12px);
   /* --log-space mirrors --voice-below for the BOTTOM of the column: the room
      reserved for the activation log (height + gap), live-updated by
@@ -435,19 +440,44 @@ canvas.grabbing{cursor:grabbing}
    justify-content:center outlived #395's flex-row intent once the canvas
    below was pulled out of flow by position:absolute, centering the name
    label dead in the middle of the waveform instead of beside it. One rule. */
-#voice-viz{flex:1;position:relative;display:flex;align-items:center;gap:.5rem;overflow:hidden}
+#voice-viz{flex:1;min-height:34px;position:relative;display:flex;align-items:center;gap:.5rem;overflow:hidden}
 /* the explicit display:flex above would defeat the hidden attribute the
    section fold sets — restate it; .folded lets the panel shrink to its head */
 #voice-viz[hidden]{display:none}
 #voicebar.folded{height:auto}
 .ast-voice-name{font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:var(--cyan);white-space:nowrap;flex:0 0 auto}
 .ast-voice-name:empty{display:none}
-/* canvas is a REPLACED element needing position:absolute;inset:0 to fill
-   its box at true device pixels (see the file-level canvas note above) —
-   that pulls it out of flex flow, which is why .ast-voice-name carries its
-   own flex:0 0 auto above rather than relying on a sibling flex:1 canvas */
-#voice-viz canvas{position:absolute;inset:0;width:100%;height:100%}
+/* the canvas does NOT need position:absolute;inset:0 to size correctly —
+   drawViz() reads vizCanvas.clientWidth/clientHeight fresh every animation
+   frame (see the JS below) and resizes its backing buffer to match, so a
+   normal flex:1 box works just as well and, unlike absolute+inset:0 (which
+   ignores flex layout and always covers the FULL #voice-viz width), it
+   actually shares the row with .ast-voice-name instead of drawing under/
+   through it — unwinds #395's original approach, which is what caused the
+   name to visually overlap the bars in the first place (align-self:stretch
+   replaces the block-level height align-items:center would otherwise give
+   a canvas with no intrinsic height dependency). position/width/height must
+   be explicitly reset here: the file's global `canvas{}` rule (line ~61,
+   written for the main #stage 3D canvas) sets position:absolute;inset:0;
+   width/height:100% on EVERY canvas on the page: this rule's higher (ID)
+   specificity only wins for properties it actually sets, so without these
+   three the absolute positioning fell straight through from that global
+   rule and silently reproduced the exact same overlap this was meant to
+   fix — same duplicate-rule bug class as #395, one cascade layer deeper. */
+#voice-viz canvas{position:static;inset:auto;width:auto;height:auto;flex:1;min-width:0;align-self:stretch;display:block}
 #voice-viz-status{position:relative;font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:var(--amber)}
+/* assistant switcher, docked at the bottom of the Voice section (human
+   review, 2026-07-24): the finalized Option 5 design (docs/ui-options/
+   AST-022.html) was reachable only inside the ⚙ settings popover, invisible
+   until opened — moved here so it's always visible under the waveform,
+   same #ast-switcher/#ast-digest ids and render functions, just relocated.
+   flex:none (not flex:1) so it takes only the room its content needs;
+   own scroll region caps it if the candidate list grows long, rather than
+   pushing --voiceh (and everything below it) open further. */
+#voice-dock{flex:none;max-height:40%;overflow-y:auto;border-top:1px solid var(--border);
+  padding-top:.35rem;margin-top:.3rem}
+#voice-dock::-webkit-scrollbar{width:7px}
+#voice-dock::-webkit-scrollbar-thumb{background:rgba(90,190,255,.4);border-radius:4px}
 /* cog rides directly right of the VOICE heading, sized as a real target */
 #voice-settings{font-size:1rem;line-height:1;padding:.25rem .5rem}
 /* mic-mode dot: press-to-speak = dark red with a slash; always-on = solid red;
@@ -891,6 +921,10 @@ canvas.grabbing{cursor:grabbing}
     </div>
   </div>
   <div id="voice-viz"><span id="voice-viz-name" class="ast-voice-name"></span><canvas id="voice-viz-canvas"></canvas><span id="voice-viz-status" hidden></span></div>
+  <div id="voice-dock">
+    <div class="ast-switcher" id="ast-switcher" role="group" aria-label="Switch assistant"></div>
+    <div class="ast-digest" id="ast-digest" role="status" aria-label="Assistant activation digest"></div>
+  </div>
 </div>
 <button class="hud" id="voicebar-tab" title="Show voice" aria-label="Show voice" hidden>⟨</button>
 
@@ -950,9 +984,7 @@ canvas.grabbing{cursor:grabbing}
     <div class="vs-opts" role="group" aria-label="Assistant selection">
       <button class="iconbtn ast-ask-again" id="ast-ask-again" aria-pressed="false">Ask again on load</button>
     </div>
-    <div class="vs-hint">On: the picker shows every time this page loads, even if an assistant was chosen before. Off: the last choice loads automatically.</div>
-    <div class="ast-switcher" id="ast-switcher" role="group" aria-label="Switch assistant"></div>
-    <div class="ast-digest" id="ast-digest" role="status" aria-label="Assistant activation digest"></div>
+    <div class="vs-hint">On: the picker shows every time this page loads, even if an assistant was chosen before. Off: the last choice loads automatically. The switcher itself now lives docked under the waveform, always visible — not only here.</div>
   </div>
   <div class="vs-row"><span class="label">Metrics</span>
     <div class="vs-opts">
