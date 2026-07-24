@@ -56,6 +56,13 @@ WORKER_NAMES = ("distiller", "tasks", "traces", "index")
 HISTORY_DEFAULT_N = 20
 HISTORY_MAX_N = 500
 
+# AST-043 (SPEC-ASSISTANT.md Sec10.5, issue #329): GET /assistant/traces?
+# limit=N -- default window + hard cap, same "bounded read, never an
+# unbounded one" rationale as HISTORY_DEFAULT_N/HISTORY_MAX_N above (this
+# is the traces-table analogue of that same guard).
+TRACES_DEFAULT_LIMIT = 200
+TRACES_MAX_LIMIT = 1000
+
 # AST-030 (SPEC-ASSISTANT.md Sec9.2/Sec9.5): the distiller queue is bounded
 # so a stalled/slow distiller worker can never grow unbounded memory off a
 # long-running chat session. Overflow policy is DROP-OLDEST: when full, the
@@ -386,6 +393,10 @@ class AssistantEngine:
             return 200, self._status(), "application/json"
         if method == "GET" and path == "/assistant/history":
             return 200, self._history(query), "application/json"
+        if method == "GET" and path == "/assistant/metrics":
+            return 200, self._metrics(), "application/json"
+        if method == "GET" and path == "/assistant/traces":
+            return 200, self._traces(query), "application/json"
         if method == "POST" and path == "/assistant/chat":
             return self._chat(body)
         if method == "POST" and path == "/assistant/select":
@@ -613,6 +624,64 @@ class AssistantEngine:
             return {"exchanges": [], "warnings": [f"no assistant resolved: {exc}"]}
         return SessionStore(root).history(n)
 
+    def _metrics(self):
+        """GET /assistant/metrics -- SPEC-ASSISTANT.md §10.5, issue #329:
+        `{"roots": {label: observability.root_metrics(root), ...}}` for
+        EVERY currently-discovered candidate (not just the resolved/
+        selected one -- unlike `_history`/`_chat`, this is a fleet-wide
+        view, matching `_status`'s own "every candidate" posture rather
+        than a single resolved assistant). Roots are resolved the same way
+        `_status` does (`discovery.scan` over the live `_repos_getter()`),
+        so a marker added/removed after boot is reflected on the very next
+        poll here too.
+
+        A root with no `traces.sqlite` yet is NEVER an error --
+        `observability.root_metrics` (built on `_compute_root_metrics`,
+        which is itself built on `query()`, which returns `[]` for a
+        missing db) naturally yields all-zero counters for such a root,
+        so this method's only job is resolving WHICH roots to report on,
+        never guarding against an absent db."""
+        scan = discovery.scan(root for _, root in self._repos_getter())
+        out = {}
+        for root, section in scan.candidates:
+            label = _main_name(section) or str(root)
+            out[label] = observability.root_metrics(root)
+        return {"roots": out}
+
+    def _traces(self, query):
+        """GET /assistant/traces?since=&turn=&limit= -- SPEC-ASSISTANT.md
+        §10.5, issue #329: `{"events": [...]}` (or `{"events": [],
+        "warnings": [...]}` when nothing resolves) from
+        `observability.query` against the SAME resolved assistant
+        `_history` above resolves against -- one currently-selected/
+        resolvable session, not a fleet-wide view like `_metrics` (traces
+        are per-session correlation data; `_metrics` is the fleet
+        dashboard's aggregate). A resolution failure mirrors `_history`'s
+        own ResolutionError handling exactly (an empty, explained result,
+        never a 4xx/500) so both read-surface endpoints agree on what
+        "nothing to report on yet" looks like.
+
+        `since` is `observability.query`'s own `since` contract -- a `seq`
+        RESUME CURSOR (`seq > since`), NOT a timestamp, despite this
+        route's own `since=<iso>`-shaped naming in casual spec prose (§10.5)
+        -- see `observability.query`'s docstring for why a seq cursor, not
+        a timestamp, is the one that stays index-backed. `turn` filters to
+        one `turn_id`. `limit` is parsed/clamped by the module-level
+        `_parse_traces_query` (default `TRACES_DEFAULT_LIMIT`, hard cap
+        `TRACES_MAX_LIMIT` -- same "bounded read" shape `_parse_history_n`
+        already uses for `/assistant/history?n=`)."""
+        since, turn, limit = _parse_traces_query(query)
+        candidates = default_store.discover_candidates(
+            root for _, root in self._repos_getter()
+        )
+        try:
+            root, _section = default_store.resolve_assistant(candidates, state_dir=self.state_dir)
+        except default_store.ResolutionError as exc:
+            # Same "empty, explained result, never a crash" posture as
+            # `_history`'s own ResolutionError handling above.
+            return {"events": [], "warnings": [f"no assistant resolved: {exc}"]}
+        return {"events": observability.query(root, since=since, turn=turn, limit=limit)}
+
     def _chat_lock_for(self, root):
         """One `threading.Lock` per resolved assistant root, canonicalized
         via `os.path.realpath` so two different-looking paths to the same
@@ -835,3 +904,39 @@ def _parse_history_n(query):
     if n < 0:
         return 0
     return min(n, HISTORY_MAX_N)
+
+
+def _parse_traces_query(query):
+    """Parses `GET /assistant/traces`'s `since`/`turn`/`limit` query params
+    into `(since, turn, limit)` for `observability.query`. `since` parses
+    as an int (a `seq` cursor -- see `AssistantEngine._traces`'s docstring
+    for why, despite the route's own `since=<iso>`-shaped naming in casual
+    spec prose); an absent/malformed value is `None` (no lower bound), same
+    "malformed input degrades to the permissive default, never a 400" shape
+    `_parse_history_n` already uses for `?n=`. `turn` is passed through
+    verbatim (a `turn_id` string, no parsing needed). `limit` defaults to
+    `TRACES_DEFAULT_LIMIT` and is clamped to `[0, TRACES_MAX_LIMIT]` --
+    never negative, never past the documented hard cap, regardless of what
+    a client asks for."""
+    since = None
+    turn = None
+    limit = TRACES_DEFAULT_LIMIT
+    if query:
+        since_values = query.get("since")
+        if since_values:
+            try:
+                since = int(since_values[0])
+            except (TypeError, ValueError):
+                since = None
+        turn_values = query.get("turn")
+        if turn_values:
+            turn = turn_values[0]
+        limit_values = query.get("limit")
+        if limit_values:
+            try:
+                limit = int(limit_values[0])
+            except (TypeError, ValueError):
+                limit = TRACES_DEFAULT_LIMIT
+    if limit < 0:
+        limit = 0
+    return since, turn, min(limit, TRACES_MAX_LIMIT)

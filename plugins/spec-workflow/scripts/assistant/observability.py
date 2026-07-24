@@ -78,6 +78,11 @@ Library:
         docstring for why this differs from the writer thread's own
         internal `_prune_conn` call). `retain_days`/`max_mb` of `0` means
         that knob is unlimited (skipped).
+    root_metrics(root) -> dict
+        AST-043 (SPEC-ASSISTANT.md Sec10.5): one root's computed metrics as
+        a JSON-ready dict -- the same numbers `metrics_text` renders in
+        Prometheus text format, shaped for `GET /assistant/metrics`
+        instead. See the function's own docstring for the exact shape.
     metrics_text(roots) -> str
         AST-042 (SPEC-ASSISTANT.md Sec10.4): Prometheus text-format 0.0.4
         exposition, computed FRESH from `query()` on every call -- never
@@ -702,6 +707,39 @@ def _fmt_num(n):
     return text.rstrip("0").rstrip(".")
 
 
+def root_metrics(root):
+    """AST-043 (SPEC-ASSISTANT.md Sec10.5, issue #329): one root's computed
+    metrics as a JSON-ready dict -- `GET /assistant/metrics`'s per-root
+    value, and the page/terminal's read surface for the exact same numbers
+    `metrics_text` renders in Prometheus text format (same
+    `_compute_root_metrics`/`_histogram` computation, just shaped as JSON
+    instead of exposition lines). Computed FRESH from `query()` on every
+    call, same as `metrics_text` -- Sec10.4's "SHALL NOT own history"
+    applies here too. A root with no `traces.sqlite` yet returns all-zero
+    counters (never an error): `_compute_root_metrics` already returns
+    empty dicts/an empty duration list for a root `query()` finds nothing
+    for.
+
+    Shape: `{turnsByStatus, providerErrors, eventsTotal, distillBatches,
+    notesMinted, turnDuration: {count, sum, buckets}}` -- `buckets` maps
+    each `LATENCY_BUCKETS_SECONDS` boundary (stringified, plus "+Inf") to
+    its cumulative sample count, mirroring the histogram's Prometheus
+    rendering without the text-format's own bucket-per-line shape.
+    """
+    stats = _compute_root_metrics(root)
+    buckets, total, count = _histogram(stats["durations"])
+    bucket_map = {_fmt_num(b): buckets[b] for b in LATENCY_BUCKETS_SECONDS}
+    bucket_map["+Inf"] = count
+    return {
+        "turnsByStatus": dict(stats["turns_by_status"]),
+        "providerErrors": stats["provider_errors"],
+        "eventsTotal": dict(stats["events_total"]),
+        "distillBatches": stats["distill_batches"],
+        "notesMinted": stats["notes_minted"],
+        "turnDuration": {"count": count, "sum": total, "buckets": bucket_map},
+    }
+
+
 def metrics_text(roots):
     """AST-042 (SPEC-ASSISTANT.md Sec10.4, docs/design/ast-E4.md): Prometheus
     text-format 0.0.4 exposition, hand-rendered (stdlib only, no
@@ -840,7 +878,6 @@ class _MetricsHTTPServer(http.server.HTTPServer):
     port far more than for a real long-lived process, but costs nothing
     either way)."""
     allow_reuse_address = True
-    daemon_threads = True
 
 
 def start_metrics_server(host, port, roots_provider):

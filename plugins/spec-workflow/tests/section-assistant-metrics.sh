@@ -424,3 +424,196 @@ print('DEFAULT_PORT', observability.DEFAULT_METRICS_PORT)
 ")"
 check "defaults: localhost (127.0.0.1) is the default metrics host" "DEFAULT_HOST 127.0.0.1" "$default_out"
 check "defaults: 9464 is the default metrics port (spec §6 example)" "DEFAULT_PORT 9464" "$default_out"
+
+# ------------------------------------------------------------------------
+# #392 ride-along nits
+# ------------------------------------------------------------------------
+echo "-- #392: the inert daemon_threads attr is gone from _MetricsHTTPServer --"
+obs_src="$(cat "$AM_SCRIPTS/assistant/observability.py")"
+check_absent "#392: daemon_threads is removed (HTTPServer is not threaded, the attr did nothing)" "daemon_threads" "$obs_src"
+
+echo "-- #392: omitted host/port end-to-end falls back to 127.0.0.1:DEFAULT_METRICS_PORT --"
+_amf_root="$(mktemp -d)"
+mkdir -p "$_amf_root/.claude"
+printf "%s\n" "# neural-network" >"$_amf_root/.claude/.neural-network"
+printf "%s\n" \
+    "schemaVersion: 2" \
+    "assistant:" \
+    "    version: 1" \
+    "    enabled: true" \
+    "    names: [jarvis]" \
+    "    systemPrompt: |" \
+    "        You are jarvis." \
+    "    llm:" \
+    "        provider: openai" \
+    "        model: gpt-5.6-sol" \
+    "    capabilities:" \
+    "        codex:" \
+    "            enabled: true" \
+    "            provisioning:" \
+    "                bin: codex" \
+    "    observability:" \
+    "        metrics:" \
+    "            prometheus:" \
+    "                enabled: true" \
+    >"$_amf_root/.claude/project.yaml"
+amf_port="$(_rand_port)"
+
+fallback_out="$(SCRIPTS_DIR="$AM_SCRIPTS" ROOT="$_amf_root" PORT="$amf_port" python3 - <<'PY'
+import os, socket, sys, time
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import engine, observability
+
+root = os.environ["ROOT"]
+port = int(os.environ["PORT"])
+# Monkeypatch the module-level default port to a free, test-owned port so
+# this test verifies the ACTUAL fallback code path
+# (`host = cfg.get("host") or observability.DEFAULT_METRICS_HOST`) without
+# fighting over the real default 9464, which may be in use elsewhere.
+observability.DEFAULT_METRICS_PORT = port
+
+state_dir = os.path.join(root, ".claude", "assistant-engine-state")
+e = engine.AssistantEngine(lambda: [("jarvis", root)], state_dir)
+e.start()
+try:
+    configs = e._discover_metrics_configs()
+    print("DISCOVERED_HOST_PORT", [(h, p) for _r, h, p in configs])
+
+    deadline = time.monotonic() + 5.0
+    bound = False
+    while time.monotonic() < deadline:
+        try:
+            s = socket.create_connection(("127.0.0.1", port), timeout=1.0)
+            s.close()
+            bound = True
+            break
+        except (ConnectionRefusedError, OSError):
+            time.sleep(0.2)
+    print("BOUND_ON_DEFAULT_PORT", bound)
+finally:
+    e.stop()
+PY
+)"
+check "fallback: omitted host/port resolves to (127.0.0.1, DEFAULT_METRICS_PORT)" "DISCOVERED_HOST_PORT [('127.0.0.1'," "$fallback_out"
+check "fallback: the shared server actually binds on that resolved default port" "BOUND_ON_DEFAULT_PORT True" "$fallback_out"
+rm -rf "$_amf_root"
+
+# ------------------------------------------------------------------------
+echo "-- #392: metrics_text escapes a newline in a label value --"
+newline_escape_out="$(SCRIPTS_DIR="$AM_SCRIPTS" python3 - <<'PY'
+import os, sys, tempfile
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import observability
+
+root = tempfile.mkdtemp(prefix="am-escape-nl-")
+text = observability.metrics_text([("multi\nline", root)])
+print("ESCAPED_NEWLINE", "multi\\nline" in text)
+print("NO_RAW_NEWLINE_IN_LABEL", "root=\"multi\nline\"" not in text)
+PY
+)"
+check "escaping: a newline in a label value is backslash-escaped" "ESCAPED_NEWLINE True" "$newline_escape_out"
+check "escaping: no raw newline leaks into a label value" "NO_RAW_NEWLINE_IN_LABEL True" "$newline_escape_out"
+
+# ------------------------------------------------------------------------
+echo "== assistant metrics endpoint (AST-043: GET /assistant/metrics, SPEC-ASSISTANT.md Sec10.5, issue #329) =="
+
+echo "-- integration: GET /assistant/metrics returns the same counters metrics_text/Prometheus expose --"
+_ame2_root="$(mktemp -d)"
+at_repo_for_metrics() {
+    local dir="$1" main="$2"
+    mkdir -p "$dir/.claude"
+    printf "%s\n" "# neural-network" >"$dir/.claude/.neural-network"
+    printf "%s\n" \
+        "schemaVersion: 2" \
+        "assistant:" \
+        "    version: 1" \
+        "    enabled: true" \
+        "    names: [$main]" \
+        "    systemPrompt: |" \
+        "        You are $main." \
+        "    llm:" \
+        "        provider: openai" \
+        "        model: gpt-5.6-sol" \
+        "    capabilities:" \
+        "        codex:" \
+        "            enabled: true" \
+        "            provisioning:" \
+        "                bin: codex" \
+        >"$dir/.claude/project.yaml"
+}
+at_repo_for_metrics "$_ame2_root" jarvis
+
+metrics_endpoint_out="$(SCRIPTS_DIR="$AM_SCRIPTS" ROOT="$_ame2_root" python3 - <<'PY'
+import os, sys, threading, queue, time
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import engine, observability
+
+root = os.environ["ROOT"]
+
+# Seed traces.sqlite directly via the writer (same fixture shape as the
+# metrics_text unit test above) so this endpoint tests expected numbers are
+# cross-checked against that same fixture rather than invented separately.
+q = queue.Queue()
+stop = threading.Event()
+t = threading.Thread(target=observability.run_writer, args=(q, stop))
+t.start()
+observability.emit(q, root, {"kind": "turn.start", "turn_id": "t1", "ts": "2026-01-01T00:00:00+00:00"})
+observability.emit(q, root, {"kind": "turn.end", "turn_id": "t1", "status": "ok", "ts": "2026-01-01T00:00:01+00:00"})
+observability.emit(q, root, {"kind": "turn.start", "turn_id": "t2", "ts": "2026-01-01T00:01:00+00:00"})
+observability.emit(q, root, {"kind": "provider.error", "turn_id": "t2", "status": "error"})
+observability.emit(q, root, {"kind": "turn.end", "turn_id": "t2", "status": "error", "ts": "2026-01-01T00:01:00+00:00"})
+deadline = time.monotonic() + 5.0
+while time.monotonic() < deadline:
+    if len(observability.query(root, limit=100)) >= 5:
+        break
+    time.sleep(0.2)
+stop.set()
+t.join(timeout=3)
+
+state_dir = os.path.join(root, ".claude", "assistant-engine-state")
+e = engine.AssistantEngine(lambda: [("jarvis", root)], state_dir)
+status, payload, ct = e.handle("GET", "/assistant/metrics")
+print("STATUS", status)
+print("CONTENT_TYPE", ct)
+roots = payload.get("roots", {})
+jarvis = roots.get("jarvis", {})
+print("HAS_JARVIS_ROOT", "jarvis" in roots)
+print("TURNS_OK", jarvis.get("turnsByStatus", {}).get("ok"))
+print("TURNS_ERROR", jarvis.get("turnsByStatus", {}).get("error"))
+print("PROVIDER_ERRORS", jarvis.get("providerErrors"))
+print("TURN_DURATION_COUNT", jarvis.get("turnDuration", {}).get("count"))
+PY
+)"
+check "metrics endpoint: GET /assistant/metrics returns 200" "STATUS 200" "$metrics_endpoint_out"
+check "metrics endpoint: application/json content type" "CONTENT_TYPE application/json" "$metrics_endpoint_out"
+check "metrics endpoint: the resolved root label is a top-level key" "HAS_JARVIS_ROOT True" "$metrics_endpoint_out"
+check "metrics endpoint: ok-turn counter matches the traces fixture" "TURNS_OK 1" "$metrics_endpoint_out"
+check "metrics endpoint: error-turn counter matches the traces fixture" "TURNS_ERROR 1" "$metrics_endpoint_out"
+check "metrics endpoint: provider error counter matches the traces fixture" "PROVIDER_ERRORS 1" "$metrics_endpoint_out"
+check "metrics endpoint: turn duration sample count matches the traces fixture" "TURN_DURATION_COUNT 2" "$metrics_endpoint_out"
+rm -rf "$_ame2_root"
+
+# ------------------------------------------------------------------------
+echo "-- unit: GET /assistant/metrics gives a zero-state root when it has no traces db yet --"
+_amz_root="$(mktemp -d)"
+at_repo_for_metrics "$_amz_root" jarvis
+zero_out="$(SCRIPTS_DIR="$AM_SCRIPTS" ROOT="$_amz_root" python3 - <<'PY'
+import os, sys
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import engine
+
+root = os.environ["ROOT"]
+state_dir = os.path.join(root, ".claude", "assistant-engine-state")
+e = engine.AssistantEngine(lambda: [("jarvis", root)], state_dir)
+status, payload, _ct = e.handle("GET", "/assistant/metrics")
+jarvis = payload.get("roots", {}).get("jarvis", {})
+print("STATUS", status)
+print("TURN_DURATION_COUNT", jarvis.get("turnDuration", {}).get("count"))
+print("PROVIDER_ERRORS", jarvis.get("providerErrors"))
+print("NO_ERROR_RAISED", True)
+PY
+)"
+check "metrics endpoint: a fresh root with no traces db returns 200, never an error" "STATUS 200" "$zero_out"
+check "metrics endpoint: a fresh root has zero turn duration count" "TURN_DURATION_COUNT 0" "$zero_out"
+check "metrics endpoint: a fresh root has zero provider errors" "PROVIDER_ERRORS 0" "$zero_out"
+rm -rf "$_amz_root"

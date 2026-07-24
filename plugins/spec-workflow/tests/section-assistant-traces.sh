@@ -765,3 +765,115 @@ print(local_state.policy_of('.claude/assistant/'))
 check "manifest: .claude/assistant/ (covers traces.sqlite) is policy=ignore" "ignore" "$ls_policy"
 traces_src="$(cat "$AT_SCRIPTS/assistant/observability.py")"
 check "observability.py: traces.sqlite lives under the already-ignored .claude/assistant/ dir" "TRACES_DIR_REL = os.path.join(\".claude\", \"assistant\")" "$traces_src"
+
+# ------------------------------------------------------------------------
+echo "== assistant traces endpoint (AST-043: GET /assistant/traces, SPEC-ASSISTANT.md Sec10.5, issue #329) =="
+
+echo "-- integration: GET /assistant/traces returns the resolved assistant events, since/turn/limit honored --"
+_ate2_root="$(mktemp -d)"
+at_repo "$_ate2_root" jarvis
+
+traces_endpoint_out="$(SCRIPTS_DIR="$AT_SCRIPTS" ROOT="$_ate2_root" python3 - <<'PY'
+import os, sys, threading, queue, time
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import engine, observability
+
+root = os.environ["ROOT"]
+
+q = queue.Queue()
+stop = threading.Event()
+t = threading.Thread(target=observability.run_writer, args=(q, stop))
+t.start()
+observability.emit(q, root, {"kind": "turn.start", "turn_id": "tA"})
+observability.emit(q, root, {"kind": "turn.end", "turn_id": "tA", "status": "ok"})
+observability.emit(q, root, {"kind": "turn.start", "turn_id": "tB"})
+observability.emit(q, root, {"kind": "turn.end", "turn_id": "tB", "status": "ok"})
+deadline = time.monotonic() + 5.0
+while time.monotonic() < deadline:
+    if len(observability.query(root, limit=100)) >= 4:
+        break
+    time.sleep(0.2)
+stop.set()
+t.join(timeout=3)
+
+state_dir = os.path.join(root, ".claude", "assistant-engine-state")
+e = engine.AssistantEngine(lambda: [("jarvis", root)], state_dir)
+
+status, payload, ct = e.handle("GET", "/assistant/traces")
+events = payload.get("events", [])
+print("STATUS", status)
+print("CONTENT_TYPE", ct)
+print("ALL_EVENTS_COUNT", len(events))
+
+status2, payload2, _ct2 = e.handle("GET", "/assistant/traces", query={"turn": ["tA"]})
+events2 = payload2.get("events", [])
+print("TURN_FILTER_COUNT", len(events2))
+print("TURN_FILTER_ALL_TA", all(ev.get("turn_id") == "tA" for ev in events2))
+
+first_seq = events[0]["seq"]
+status3, payload3, _ct3 = e.handle("GET", "/assistant/traces", query={"since": [str(first_seq)]})
+events3 = payload3.get("events", [])
+print("SINCE_FILTER_COUNT", len(events3))
+print("SINCE_FILTER_EXCLUDES_FIRST", all(ev["seq"] > first_seq for ev in events3))
+
+status4, payload4, _ct4 = e.handle("GET", "/assistant/traces", query={"limit": ["2"]})
+events4 = payload4.get("events", [])
+print("LIMIT_COUNT", len(events4))
+PY
+)"
+check "traces endpoint: GET /assistant/traces returns 200" "STATUS 200" "$traces_endpoint_out"
+check "traces endpoint: application/json content type" "CONTENT_TYPE application/json" "$traces_endpoint_out"
+check "traces endpoint: all four events are returned with no filter" "ALL_EVENTS_COUNT 4" "$traces_endpoint_out"
+check "traces endpoint: turn filter returns only that turn's events" "TURN_FILTER_COUNT 2" "$traces_endpoint_out"
+check "traces endpoint: turn filter never mixes in another turn's rows" "TURN_FILTER_ALL_TA True" "$traces_endpoint_out"
+check "traces endpoint: since filter excludes everything at or before that seq" "SINCE_FILTER_COUNT 3" "$traces_endpoint_out"
+check "traces endpoint: since filter is a strict greater-than comparison" "SINCE_FILTER_EXCLUDES_FIRST True" "$traces_endpoint_out"
+check "traces endpoint: limit caps the returned event count" "LIMIT_COUNT 2" "$traces_endpoint_out"
+rm -rf "$_ate2_root"
+
+# ------------------------------------------------------------------------
+echo "-- unit: GET /assistant/traces clamps an over-cap limit to the documented max (1000) --"
+_atc_root="$(mktemp -d)"
+at_repo "$_atc_root" jarvis
+clamp_out="$(SCRIPTS_DIR="$AT_SCRIPTS" ROOT="$_atc_root" python3 - <<'PY'
+import os, sys
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import engine
+
+root = os.environ["ROOT"]
+state_dir = os.path.join(root, ".claude", "assistant-engine-state")
+e = engine.AssistantEngine(lambda: [("jarvis", root)], state_dir)
+
+status, payload, _ct = e.handle("GET", "/assistant/traces", query={"limit": ["5000"]})
+print("STATUS", status)
+print("EVENTS_IS_LIST", isinstance(payload.get("events"), list))
+print("CLAMPED_LIMIT", engine._parse_traces_query({"limit": ["5000"]})[2])
+print("DEFAULT_LIMIT", engine._parse_traces_query(None)[2])
+PY
+)"
+check "traces endpoint: an over-cap limit is clamped to 1000, never an error" "STATUS 200" "$clamp_out"
+check "traces endpoint: the events payload is still a list after clamping" "EVENTS_IS_LIST True" "$clamp_out"
+check "traces endpoint: limit=5000 clamps down to the documented max of 1000" "CLAMPED_LIMIT 1000" "$clamp_out"
+check "traces endpoint: an absent limit defaults to 200" "DEFAULT_LIMIT 200" "$clamp_out"
+rm -rf "$_atc_root"
+
+# ------------------------------------------------------------------------
+echo "-- unit: GET /assistant/traces with no assistant resolvable returns a clean error shape, never a crash --"
+none_out="$(SCRIPTS_DIR="$AT_SCRIPTS" python3 - <<'PY'
+import os, sys
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import engine
+
+state_dir = "/tmp/at-traces-none-state"
+e = engine.AssistantEngine(lambda: [], state_dir)
+status, payload, ct = e.handle("GET", "/assistant/traces")
+print("STATUS", status)
+print("CONTENT_TYPE", ct)
+print("EVENTS_EMPTY", payload.get("events") == [])
+print("HAS_WARNINGS", bool(payload.get("warnings")))
+PY
+)"
+check "traces endpoint: no assistant discovered returns 200 with an empty events list" "STATUS 200" "$none_out"
+check "traces endpoint: no-selection case still reports application/json" "CONTENT_TYPE application/json" "$none_out"
+check "traces endpoint: no-selection case returns an empty events list, not an error" "EVENTS_EMPTY True" "$none_out"
+check "traces endpoint: no-selection case explains itself via warnings, matching /assistant/history" "HAS_WARNINGS True" "$none_out"
