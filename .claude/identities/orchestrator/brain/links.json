@@ -59,6 +59,16 @@
     "last": null,
     "weight": 0.5
   },
+  "gate-verdict-before-merge->canonical-merge-locus": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "gate-verdict-before-merge->clean-main-repro-before-blame": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "idle-agent-is-not-done->brief-out-of-scope-failure-line": {
     "fires": 0,
     "last": null,
@@ -95,6 +105,16 @@
     "weight": 0.5
   },
   "numbers-gated-epic-doors->combined-two-pass-for-small-siblings": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "parallel-push-races->canonical-merge-locus": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "parallel-push-races->gate-verdict-before-merge": {
     "fires": 0,
     "last": null,
     "weight": 0.5

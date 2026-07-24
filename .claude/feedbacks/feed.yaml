@@ -1933,3 +1933,49 @@ items:
   routing:
     action: ignore
     ref: transient infra, recovered; no action
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-24T03:35:00Z'
+iteration:
+  task: AST-022
+  outcome: merged
+  reviewRounds: 1
+source:
+  role: orchestrator
+  model: claude-fable-5
+items:
+- category: incident
+  area: merge
+  severity: high
+  summary: Merge executed before the gate verdict was read — chained into one command
+  detail: The merge+push was scripted in the same shell chain that printed the gate
+    result, so the push happened regardless of the RED line above it. The red proved
+    unrelated, but only luck separated this from shipping a broken tree.
+  evidence:
+  - Zugruul/development-skills#319
+  generalized: Never chain merge/push into the same command as a gate check — the
+    gate line must be READ and judged before any merge command is issued; a merge
+    is a separate decision, not a pipeline stage after the gate.
+  routing:
+    action: brain-note
+    ref: orchestrator/gate-verdict-before-merge
+- category: incident
+  area: merge
+  severity: medium
+  summary: Direct-to-mainline pushes from a parallel session bypassed the gate and
+    broke it for the next merger
+  detail: A parallel interactive session pushed skill-doc edits straight to the mainline;
+    a prose lint they never ran went red and surfaced under the NEXT task's gate,
+    mis-attributing the failure. A second direct push also raced a hotfix push, forcing
+    a reflog recovery and transplant.
+  evidence:
+  - Zugruul/development-skills#319
+  generalized: Any session pushing directly to the mainline should run the recorded
+    gate first (or at minimum the lint sections covering its surfaces); the loop should
+    treat a red gate on an unchanged-surface task as possibly inherited and attribute
+    failures before assigning blame — and pushes should expect races and transplant
+    by SHA rather than assume a stable tip.
+  routing:
+    action: brain-note
+    ref: orchestrator/parallel-push-races
