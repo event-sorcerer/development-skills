@@ -167,6 +167,39 @@ class AssistantEngine:
         self._last_active = loaded["lastActive"]
         self._selection_lock = threading.Lock()
 
+    def _retention_config_for(self, root):
+        """AST-041 (SPEC-ASSISTANT.md §10.3, issue #327): per-root
+        `observability.traces` retention knobs, for the traces worker's
+        periodic prune pass (`observability.run_writer`'s `retention_config`
+        callable). Reuses `discovery.classify_repo` -- the same parse
+        (project.yaml) + validate (`config.validate_assistant`) path
+        `_status`/`_chat` already resolve a root's `assistant:` section
+        through -- rather than re-reading project.yaml itself, so this
+        stays in lockstep with whatever counts as a valid section elsewhere
+        in the engine.
+
+        Returns the raw `observability.traces.sqlite` mapping (§6's example:
+        `traces: {sqlite: {enabled, retainDays, maxMB}}` -- `config.py`'s
+        `_check_observability_group` validates `traces` as a group of named
+        backends, `sqlite` being the only one this epic defines; may be
+        `{}` or contain only some of `enabled`/`retainDays`/`maxMB`), or
+        `None` for any root that is not currently a `candidate` (no marker/
+        config/section, or an invalid section) or that has no
+        `observability.traces.sqlite` entry at all.
+        `observability._resolve_retention` treats `None` (and a mapping
+        missing either key) as "apply the §10.3 defaults (30/500)", never
+        as "skip retention" -- this method's only job is surfacing
+        whatever config exists, not deciding defaults."""
+        try:
+            classification = discovery.classify_repo(root)
+        except Exception:
+            return None
+        section = classification.section if classification.kind == "candidate" else None
+        if not section:
+            return None
+        traces = (section.get("observability") or {}).get("traces") or {}
+        return traces.get("sqlite")
+
     def start(self):
         """Launch the worker registry. Idempotent: a second call while
         already started is a no-op (does not spawn duplicate workers)."""
@@ -195,10 +228,15 @@ class AssistantEngine:
                     # AST-040 (SPEC-ASSISTANT.md §5a/§10.2): the traces
                     # slot runs the real single-writer traces.sqlite loop
                     # instead of the v1 heartbeat no-op -- see
-                    # observability.run_writer's docstring.
+                    # observability.run_writer's docstring. AST-041 (§10.3):
+                    # also hands it `_retention_config_for` so the writer's
+                    # own periodic prune pass resolves each root's
+                    # observability.traces {retainDays, maxMB} instead of
+                    # applying the 30/500 defaults to every root uniformly.
                     thread = threading.Thread(
                         target=observability.run_writer,
                         args=(self.queues["traces"], stop_event),
+                        kwargs={"retention_config": self._retention_config_for},
                         name=f"assistant-{name}",
                         daemon=False,
                     )

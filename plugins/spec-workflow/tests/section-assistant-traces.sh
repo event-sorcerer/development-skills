@@ -425,6 +425,336 @@ check "latency: loaded-writer latency stays within a generous multiple of the id
 rm -rf "$_atl_root"
 
 # ------------------------------------------------------------------------
+echo "-- unit: AST-041 retention -- age prune deletes only rows older than retainDays --"
+age_out="$(SCRIPTS_DIR="$AT_SCRIPTS" python3 - <<'PY'
+import os, sys, tempfile, threading, queue, time
+from datetime import datetime, timezone, timedelta
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import observability
+
+root = tempfile.mkdtemp(prefix="at-retage-")
+q = queue.Queue()
+stop = threading.Event()
+t = threading.Thread(target=observability.run_writer, args=(q, stop))
+t.start()
+
+old_ts = (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()
+recent_ts = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+observability.emit(q, root, {"kind": "turn.start", "turn_id": "old1", "ts": old_ts})
+observability.emit(q, root, {"kind": "turn.start", "turn_id": "old2", "ts": old_ts})
+observability.emit(q, root, {"kind": "turn.start", "turn_id": "keep1", "ts": recent_ts})
+
+deadline = time.monotonic() + 5.0
+rows = []
+while time.monotonic() < deadline:
+    rows = observability.query(root, limit=1000)
+    if len(rows) >= 3:
+        break
+    time.sleep(0.2)
+stop.set()
+t.join(timeout=3)
+
+observability.prune(root, retain_days=30, max_mb=0)
+after = observability.query(root, limit=1000)
+after_ids = sorted(r["turn_id"] for r in after)
+print("BEFORE_COUNT", len(rows))
+print("AFTER_IDS", after_ids)
+PY
+)"
+check "retention age: 3 rows exist before pruning" "BEFORE_COUNT 3" "$age_out"
+check "retention age: only the older-than-retainDays rows are deleted, newer row kept" "AFTER_IDS ['keep1']" "$age_out"
+
+# ------------------------------------------------------------------------
+echo "-- unit: AST-041 retention -- size prune deletes oldest-first until under maxMB --"
+size_out="$(SCRIPTS_DIR="$AT_SCRIPTS" python3 - <<'PY'
+import os, sys, tempfile, threading, queue, time
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import observability
+
+root = tempfile.mkdtemp(prefix="at-retsize-")
+q = queue.Queue()
+stop = threading.Event()
+t = threading.Thread(target=observability.run_writer, args=(q, stop))
+t.start()
+
+N = 1200
+pad = "x" * 2000
+for i in range(N):
+    observability.emit(q, root, {"kind": "turn.start", "turn_id": str(i), "payload": {"pad": pad}})
+
+deadline = time.monotonic() + 20.0
+rows = []
+while time.monotonic() < deadline:
+    rows = observability.query(root, limit=N + 10)
+    if len(rows) >= N:
+        break
+    time.sleep(0.2)
+stop.set()
+t.join(timeout=5)
+
+db_path = os.path.join(root, ".claude", "assistant", "traces.sqlite")
+before_count = len(rows)
+
+observability.prune(root, retain_days=0, max_mb=1)
+
+after = observability.query(root, limit=N + 10)
+after_ids = sorted(int(r["turn_id"]) for r in after)
+size_after = os.path.getsize(db_path)
+
+print("BEFORE_COUNT", before_count)
+print("SOME_ROWS_REMOVED", len(after) < before_count)
+print("SIZE_UNDER_BUDGET", size_after <= 1.5 * 1024 * 1024)
+print("OLDEST_FIRST", after_ids == list(range(N - len(after_ids), N)) if after_ids else False)
+PY
+)"
+check "retention size: all rows present before pruning" "BEFORE_COUNT 1200" "$size_out"
+check "retention size: pruning removes rows to come under the cap" "SOME_ROWS_REMOVED True" "$size_out"
+check "retention size: file size lands near/under the maxMB budget" "SIZE_UNDER_BUDGET True" "$size_out"
+check "retention size: deletion is oldest-first (only the lowest turn_ids are gone)" "OLDEST_FIRST True" "$size_out"
+
+# ------------------------------------------------------------------------
+echo "-- unit: AST-041 retention -- 0 means unlimited for both knobs --"
+unlimited_out="$(SCRIPTS_DIR="$AT_SCRIPTS" python3 - <<'PY'
+import os, sys, tempfile, threading, queue, time
+from datetime import datetime, timezone, timedelta
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import observability
+
+root = tempfile.mkdtemp(prefix="at-retunlim-")
+q = queue.Queue()
+stop = threading.Event()
+t = threading.Thread(target=observability.run_writer, args=(q, stop))
+t.start()
+
+ancient_ts = (datetime.now(timezone.utc) - timedelta(days=3650)).isoformat()
+pad = "x" * 2000
+for i in range(50):
+    observability.emit(q, root, {"kind": "turn.start", "turn_id": str(i), "ts": ancient_ts, "payload": {"pad": pad}})
+
+deadline = time.monotonic() + 10.0
+rows = []
+while time.monotonic() < deadline:
+    rows = observability.query(root, limit=200)
+    if len(rows) >= 50:
+        break
+    time.sleep(0.2)
+stop.set()
+t.join(timeout=3)
+
+observability.prune(root, retain_days=0, max_mb=0)
+after = observability.query(root, limit=200)
+print("BEFORE_COUNT", len(rows))
+print("AFTER_COUNT", len(after))
+PY
+)"
+check "retention unlimited: 50 ancient/large rows exist before pruning" "BEFORE_COUNT 50" "$unlimited_out"
+check "retention unlimited: retainDays=0, maxMB=0 prunes nothing" "AFTER_COUNT 50" "$unlimited_out"
+
+# ------------------------------------------------------------------------
+echo "-- unit: AST-041 retention -- non-trace files are never touched --"
+nontrace_out="$(SCRIPTS_DIR="$AT_SCRIPTS" python3 - <<'PY'
+import hashlib, os, sys, tempfile, threading, queue, time
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import observability
+
+root = tempfile.mkdtemp(prefix="at-retnontrace-")
+assistant_dir = os.path.join(root, ".claude", "assistant")
+os.makedirs(assistant_dir, exist_ok=True)
+session_path = os.path.join(assistant_dir, "session.jsonl")
+index_dir = os.path.join(root, ".claude", "assistant", "index")
+os.makedirs(index_dir, exist_ok=True)
+index_path = os.path.join(index_dir, "embeddings.idx")
+with open(session_path, "wb") as f:
+    f.write(b"session-line-1\nsession-line-2\n")
+with open(index_path, "wb") as f:
+    f.write(b"fake-embeddings-bytes")
+
+def sha(path):
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+before_session = sha(session_path)
+before_index = sha(index_path)
+
+q = queue.Queue()
+stop = threading.Event()
+t = threading.Thread(target=observability.run_writer, args=(q, stop))
+t.start()
+observability.emit(q, root, {"kind": "turn.start", "turn_id": "t1"})
+deadline = time.monotonic() + 5.0
+while time.monotonic() < deadline:
+    if len(observability.query(root)) >= 1:
+        break
+    time.sleep(0.2)
+stop.set()
+t.join(timeout=3)
+
+observability.prune(root, retain_days=1, max_mb=1)
+
+after_session = sha(session_path)
+after_index = sha(index_path)
+print("SESSION_UNCHANGED", before_session == after_session)
+print("INDEX_UNCHANGED", before_index == after_index)
+PY
+)"
+check "retention: session.jsonl is byte-identical after pruning" "SESSION_UNCHANGED True" "$nontrace_out"
+check "retention: the embeddings index file is byte-identical after pruning" "INDEX_UNCHANGED True" "$nontrace_out"
+
+# ------------------------------------------------------------------------
+echo "-- integration: AST-041 retention prune runs on the writer thread cadence --"
+cadence_out="$(SCRIPTS_DIR="$AT_SCRIPTS" python3 - <<'PY'
+import os, sys, tempfile, threading, queue, time
+from datetime import datetime, timezone, timedelta
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import observability
+
+root = tempfile.mkdtemp(prefix="at-retcadence-")
+q = queue.Queue()
+stop = threading.Event()
+
+def retention_config(root_arg):
+    return {"retainDays": 1, "maxMB": 0}
+
+t = threading.Thread(
+    target=observability.run_writer,
+    args=(q, stop),
+    kwargs={
+        "retention_config": retention_config,
+        "prune_every_drains": 1,
+        "prune_interval_seconds": 9999,
+    },
+)
+t.start()
+
+old_ts = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+observability.emit(q, root, {"kind": "turn.start", "turn_id": "old", "ts": old_ts})
+
+# The single "old" event's own flush+prune cycle runs back to back (prune_every_drains=1) --
+# it is pruned before this test's own query() connection has any chance to observe it, so
+# there is no "wait for it to appear, then wait for it to vanish" window to poll for. Instead
+# just give the writer thread a bounded head start to run its (flush -> prune) cycle, then
+# assert the row never shows up at all.
+time.sleep(1.5)
+pruned = not any(r["turn_id"] == "old" for r in observability.query(root, limit=100))
+
+observability.emit(q, root, {"kind": "turn.start", "turn_id": "new"})
+deadline2 = time.monotonic() + 5.0
+seen_new = False
+while time.monotonic() < deadline2:
+    rows = observability.query(root, limit=100)
+    if any(r["turn_id"] == "new" for r in rows):
+        seen_new = True
+        break
+    time.sleep(0.2)
+
+stop.set()
+t.join(timeout=3)
+
+print("OLD_PRUNED_BY_CADENCE", pruned)
+print("NEW_EVENT_STILL_PRESENT", seen_new)
+PY
+)"
+check "retention cadence: an old event is pruned by the writer thread's own periodic pass" "OLD_PRUNED_BY_CADENCE True" "$cadence_out"
+check "retention cadence: a fresh event still lands normally afterward" "NEW_EVENT_STILL_PRESENT True" "$cadence_out"
+
+# ------------------------------------------------------------------------
+echo "-- unit: AST-041 retention -- schema and indexes survive a prune pass --"
+schema_survive_out="$(SCRIPTS_DIR="$AT_SCRIPTS" python3 - <<'PY'
+import os, sys, tempfile, threading, queue, time, sqlite3
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import observability
+
+root = tempfile.mkdtemp(prefix="at-retschema-")
+q = queue.Queue()
+stop = threading.Event()
+t = threading.Thread(target=observability.run_writer, args=(q, stop))
+t.start()
+observability.emit(q, root, {"kind": "turn.start", "turn_id": "t1"})
+deadline = time.monotonic() + 5.0
+while time.monotonic() < deadline:
+    if len(observability.query(root)) >= 1:
+        break
+    time.sleep(0.2)
+stop.set()
+t.join(timeout=3)
+
+observability.prune(root, retain_days=30, max_mb=500)
+
+db_path = os.path.join(root, ".claude", "assistant", "traces.sqlite")
+conn = sqlite3.connect(db_path)
+mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+idx_names = {r[0] for r in conn.execute(
+    "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'ix_events_%'"
+).fetchall()}
+expected = {
+    "ix_events_seq", "ix_events_ts", "ix_events_session_id", "ix_events_turn_id",
+    "ix_events_span_id", "ix_events_parent_span_id", "ix_events_kind",
+    "ix_events_skill", "ix_events_modality", "ix_events_status",
+}
+conn.execute("INSERT INTO events (seq, ts, kind) VALUES (999, '2020-01-01', 'sanity')")
+conn.close()
+
+print("JOURNAL_MODE_AFTER", mode)
+print("ALL_INDEXES_PRESENT", expected.issubset(idx_names))
+print("TABLE_WRITABLE_AFTER", True)
+PY
+)"
+check "retention: WAL mode survives a prune pass" "JOURNAL_MODE_AFTER wal" "$schema_survive_out"
+check "retention: all first-class-column indexes survive a prune pass" "ALL_INDEXES_PRESENT True" "$schema_survive_out"
+check "retention: the events table is still writable after a prune pass" "TABLE_WRITABLE_AFTER True" "$schema_survive_out"
+
+# ------------------------------------------------------------------------
+echo "-- unit: AST-041 -- engine resolves per-root observability.traces retention config --"
+engine_cfg_out="$(SCRIPTS_DIR="$AT_SCRIPTS" python3 - <<'PY'
+import os, sys, tempfile
+sys.path.insert(0, os.environ["SCRIPTS_DIR"])
+from assistant import engine
+
+root = tempfile.mkdtemp(prefix="at-retcfg-")
+os.makedirs(os.path.join(root, ".claude"), exist_ok=True)
+with open(os.path.join(root, ".claude", ".neural-network"), "w") as f:
+    f.write("# neural-network\n")
+with open(os.path.join(root, ".claude", "project.yaml"), "w") as f:
+    f.write(
+        "schemaVersion: 2\n"
+        "assistant:\n"
+        "    version: 1\n"
+        "    enabled: true\n"
+        "    names: [jarvis]\n"
+        "    systemPrompt: |\n"
+        "        You are jarvis.\n"
+        "    llm:\n"
+        "        provider: openai\n"
+        "        model: gpt-5.6-sol\n"
+        "    capabilities:\n"
+        "        codex:\n"
+        "            enabled: true\n"
+        "            provisioning:\n"
+        "                bin: codex\n"
+        "    observability:\n"
+        "        traces:\n"
+        "            sqlite:\n"
+        "                enabled: true\n"
+        "                retainDays: 7\n"
+        "                maxMB: 42\n"
+    )
+
+state_dir = os.path.join(root, ".claude", "assistant-engine-state")
+e = engine.AssistantEngine(lambda: [("jarvis", root)], state_dir)
+cfg = e._retention_config_for(root)
+print("RETAIN_DAYS", cfg.get("retainDays") if cfg else None)
+print("MAX_MB", cfg.get("maxMB") if cfg else None)
+
+other_root = tempfile.mkdtemp(prefix="at-retcfg-none-")
+cfg_none = e._retention_config_for(other_root)
+print("NO_MARKER_ROOT_CFG", cfg_none)
+PY
+)"
+check "retention config: engine reads retainDays from observability.traces" "RETAIN_DAYS 7" "$engine_cfg_out"
+check "retention config: engine reads maxMB from observability.traces" "MAX_MB 42" "$engine_cfg_out"
+check "retention config: a non-candidate root resolves to None (defaults apply)" "NO_MARKER_ROOT_CFG None" "$engine_cfg_out"
+
+# ------------------------------------------------------------------------
 echo "-- guard: traces.sqlite is registered in the local-state manifest mechanism --"
 ls_policy="$(python3 -c "
 import sys

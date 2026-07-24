@@ -52,6 +52,28 @@ or open `/plugin` in Claude Code and use **Update now** on the `development-skil
 
 Dual-host support for [OpenAI Codex](https://developers.openai.com/codex) is landing incrementally — `spec-workflow` and `scaffold-project` already ship a `.codex-plugin/plugin.json` and are installable from a repo-local `.agents/plugins/marketplace.json`, and an end-to-end smoke test proves a real Codex session can discover and run an installed skill. A Codex-side agent working in this repo should start at [`AGENTS.md`](AGENTS.md) for orientation (Claude Code reads [`CLAUDE.md`](CLAUDE.md), a one-line pointer to the same file). Full install/invocation docs for Codex, a per-host compatibility matrix, and CI coverage are tracked in [`docs/BACKLOG-CODEX-COMPAT.md`](docs/BACKLOG-CODEX-COMPAT.md) (epics E1–E4) and will land here once that work ships — `.claude/` remains the canonical, always-supported host in the meantime.
 
+## Assistant observability (in progress)
+
+The in-repo assistant (`SPEC-ASSISTANT.md`) records every turn as an event in a
+per-repo, gitignored `.claude/assistant/traces.sqlite` (append-only, WAL mode).
+Retention is pruned automatically by a single background writer thread, oldest
+events first, configured per repo via `assistant.observability.traces.sqlite`
+in `project.yaml`:
+
+```yaml
+assistant:
+  observability:
+    traces:
+      sqlite:
+        retainDays: 30   # delete events older than N days; 0 = unlimited
+        maxMB: 500        # trim oldest events until the file is under N MB; 0 = unlimited
+```
+
+Both knobs default to `30`/`500` when omitted. Retention only ever touches
+`traces.sqlite` — it never deletes the embeddings index, `session.jsonl`, or
+any other local-state file. Full observability epic tracked in
+[`docs/design/ast-E4.md`](docs/design/ast-E4.md).
+
 ## Testing
 
 ```bash

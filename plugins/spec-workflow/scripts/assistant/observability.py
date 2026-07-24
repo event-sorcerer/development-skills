@@ -58,21 +58,33 @@ Library:
         `skill`/`modality`/`status`/`payload` are optional (stored as NULL /
         `{}` when absent). `ts` is stamped here if the caller did not supply
         one.
-    run_writer(q, stop_event, poll_timeout=..., max_drain=...) -> None
+    run_writer(q, stop_event, poll_timeout=..., max_drain=..., retention_config=None,
+               prune_every_drains=..., prune_interval_seconds=...) -> None
         The `traces` worker loop body (engine.py's start() binds this into
-        the AST-010 `traces` slot). Runs on its own thread only.
+        the AST-010 `traces` slot). Runs on its own thread only. AST-041:
+        also runs the periodic retention prune pass (see `_prune_all`'s
+        docstring) on this same thread, every `prune_every_drains` drain
+        cycles OR every `prune_interval_seconds` wall-clock seconds,
+        whichever comes first.
     query(root, since=None, turn=None, limit=200) -> list[dict]
         Read-only path for endpoints/terminal (AST-043/AST-045 consume
         this). `since` is a `seq` cursor (rows with `seq > since`), not a
         timestamp -- matches "resume after the last seq I've already seen"
         polling, and stays an indexed-integer-column comparison.
+    prune(root, retain_days, max_mb) -> None
+        AST-041 (SPEC-ASSISTANT.md Sec10.3): standalone retention pass for
+        one root -- opens its own short-lived connection (see its
+        docstring for why this differs from the writer thread's own
+        internal `_prune_conn` call). `retain_days`/`max_mb` of `0` means
+        that knob is unlimited (skipped).
 """
 import json
 import os
 import queue as queue_module
 import sqlite3
 import sys
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
 
 TRACES_DIR_REL = os.path.join(".claude", "assistant")  # same dir as store.py's SessionStore
 TRACES_FILE_NAME = "traces.sqlite"
@@ -88,6 +100,26 @@ DEFAULT_POLL_TIMEOUT_SECONDS = 0.5
 # burst into one commit per root without letting a single drain run forever
 # and starve stop_event checks under a truly enormous backlog.
 DEFAULT_MAX_DRAIN = 500
+
+# AST-041 (SPEC-ASSISTANT.md Sec10.3): retention defaults applied whenever a
+# root's assistant.observability.traces config is absent or omits a knob.
+DEFAULT_RETAIN_DAYS = 30
+DEFAULT_MAX_MB = 500
+
+# How often (in drain cycles, and in wall-clock seconds -- whichever comes
+# first) run_writer's own loop runs a retention prune pass. Both are
+# generous: retention is a background-hygiene concern, not a per-event one,
+# so it rides the same thread's existing poll cadence instead of adding a
+# dedicated timer/thread (Sec5a: single writer thread per subsystem).
+DEFAULT_PRUNE_EVERY_DRAINS = 50
+DEFAULT_PRUNE_INTERVAL_SECONDS = 300.0
+
+# AST-041 size pass: rows deleted per chunk while trimming toward max_mb, and
+# a hard cap on how many chunk-delete+re-measure iterations one prune pass
+# will run (guards against spinning forever if max_mb is set below what the
+# schema/index overhead alone occupies -- see `_prune_conn`'s docstring).
+PRUNE_SIZE_CHUNK = 500
+PRUNE_MAX_SIZE_ITERATIONS = 200
 
 _COLUMNS = (
     "seq", "ts", "session_id", "turn_id", "span_id", "parent_span_id",
@@ -222,8 +254,143 @@ def _flush(conns, buffers):
             sys.stderr.write("observability writer: batch failed for %s: %s\n" % (root, exc))
 
 
+def _resolve_retention(root, retention_config):
+    """Per-root (retain_days, max_mb) pair (SPEC-ASSISTANT.md Sec10.3),
+    defaulting to 30/500 whenever `retention_config` is None, raises, or
+    returns a mapping missing/mis-typed either key -- "absent/disabled
+    config" resolves to the spec's defaults, never to skipping retention
+    outright. `retention_config` is a `root -> dict|None` callable (engine.py
+    supplies `AssistantEngine._retention_config_for`, reading
+    `assistant.observability.traces` off the root's project.yaml); it is
+    called defensively since it may re-parse config on every call."""
+    cfg = None
+    if retention_config is not None:
+        try:
+            cfg = retention_config(root)
+        except Exception:
+            cfg = None
+    cfg = cfg or {}
+
+    def _int_or_default(value, default):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            return default
+        return value
+
+    retain_days = _int_or_default(cfg.get("retainDays", DEFAULT_RETAIN_DAYS), DEFAULT_RETAIN_DAYS)
+    max_mb = _int_or_default(cfg.get("maxMB", DEFAULT_MAX_MB), DEFAULT_MAX_MB)
+    return retain_days, max_mb
+
+
+def _prune_conn(conn, root, retain_days, max_mb):
+    """Core retention pass (SPEC-ASSISTANT.md Sec10.3) against an ALREADY
+    OPEN connection for `root` -- never opens or closes a connection itself,
+    so it is safe to call from the writer thread against a connection it
+    already holds (Sec10.2 single-writer discipline: no second connection to
+    the same file is ever opened while the writer thread is running).
+
+    Age pass (retain_days > 0): one DELETE of every row with `ts` older than
+    `now - retain_days` -- cheap, index-backed (`ix_events_ts`), oldest rows
+    only.
+
+    Size pass (max_mb > 0): measures ACTUAL on-disk bytes (`os.path.getsize`
+    after a `VACUUM`), not `PRAGMA page_count` -- a bare DELETE leaves freed
+    pages on sqlite's internal freelist without shrinking the file, so
+    page_count alone would never reflect a size reduction. A full `VACUUM`
+    per prune pass is acceptable at these sizes (retention runs at most every
+    `DEFAULT_PRUNE_INTERVAL_SECONDS`/`DEFAULT_PRUNE_EVERY_DRAINS`, on
+    traces.sqlite files that are, by construction, capped at `max_mb`
+    megabytes) and keeps the measurement exact rather than approximate. When
+    over budget, the oldest `PRUNE_SIZE_CHUNK` rows (by `seq`, index-backed
+    via `ix_events_seq`) are deleted and the loop re-VACUUMs to re-measure;
+    this repeats until under budget, the table is empty (nothing left to
+    delete -- schema/index overhead alone may exceed max_mb, which is not an
+    error), or `PRUNE_MAX_SIZE_ITERATIONS` is hit as a safety bound.
+
+    Both passes run under `retain_days == 0` / `max_mb == 0` guards (0 =
+    unlimited per Sec10.3) so a caller with both knobs at 0 does zero work
+    -- not even a VACUUM.
+    """
+    if retain_days > 0:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=retain_days)).isoformat()
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("DELETE FROM events WHERE ts < ?", (cutoff,))
+        conn.execute("COMMIT")
+
+    if max_mb <= 0:
+        return
+
+    path = _db_path(root)
+    max_bytes = max_mb * 1024 * 1024
+    for _ in range(PRUNE_MAX_SIZE_ITERATIONS):
+        conn.execute("VACUUM")
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            size = 0
+        if size <= max_bytes:
+            return
+        conn.execute("BEGIN IMMEDIATE")
+        cur = conn.execute(
+            "DELETE FROM events WHERE seq IN "
+            "(SELECT seq FROM events ORDER BY seq ASC LIMIT ?)",
+            (PRUNE_SIZE_CHUNK,),
+        )
+        deleted = cur.rowcount
+        conn.execute("COMMIT")
+        if deleted <= 0:
+            return  # table is already empty -- nothing left to trim
+
+
+def _prune_all(conns, retention_config):
+    """Runs `_prune_conn` for every root the writer thread currently holds a
+    connection open for (`conns`, `run_writer`'s own dict). Deliberately
+    scoped to already-open connections rather than discovering every root
+    with a traces.sqlite on disk -- this keeps the writer thread decoupled
+    from repo enumeration (that is the engine's job, e.g. `_status`'s
+    `discovery.scan`) and only ever touches a root it has already opened at
+    least once via a real emitted event, matching the "one writer thread,
+    per-root connections held by that thread only" decision (design doc).
+    Never lets one root's prune failure stop another's (park-and-continue,
+    matching `_flush`'s own posture)."""
+    for root, (conn, _next_seq) in list(conns.items()):
+        try:
+            retain_days, max_mb = _resolve_retention(root, retention_config)
+            if retain_days == 0 and max_mb == 0:
+                continue
+            _prune_conn(conn, root, retain_days, max_mb)
+        except Exception as exc:  # park-and-continue -- never kill the writer thread
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            sys.stderr.write("observability writer: prune failed for %s: %s\n" % (root, exc))
+
+
+def prune(root, retain_days, max_mb):
+    """Public/standalone entry point (AST-041's `prune(root, retain_days,
+    max_mb)` contract): opens its OWN short-lived connection for `root` via
+    `_open_conn` (idempotent schema create, same as the writer), runs
+    `_prune_conn`, and closes it. Intended for callers OTHER than the
+    writer thread itself -- tests, and any offline/administrative caller --
+    since it is only safe to open a connection to `root` this way when the
+    writer thread is not concurrently holding its own connection open for
+    the same root (Sec10.2 single-writer discipline). `run_writer`'s own
+    periodic pass calls `_prune_conn` directly against the connection it
+    already holds instead of calling this function, for exactly that
+    reason."""
+    if retain_days <= 0 and max_mb <= 0:
+        return
+    conn, _next_seq = _open_conn(root)
+    try:
+        _prune_conn(conn, root, retain_days, max_mb)
+    finally:
+        conn.close()
+
+
 def run_writer(q, stop_event, poll_timeout=DEFAULT_POLL_TIMEOUT_SECONDS,
-                max_drain=DEFAULT_MAX_DRAIN):
+                max_drain=DEFAULT_MAX_DRAIN, retention_config=None,
+                prune_every_drains=DEFAULT_PRUNE_EVERY_DRAINS,
+                prune_interval_seconds=DEFAULT_PRUNE_INTERVAL_SECONDS):
     """The `traces` worker body engine.py's `start()` binds into the
     AST-010 `traces` slot, replacing the v1 heartbeat no-op. Drains `q` for
     items shaped `{"root": str, "event": dict}` (this module's `emit`),
@@ -241,8 +408,19 @@ def run_writer(q, stop_event, poll_timeout=DEFAULT_POLL_TIMEOUT_SECONDS,
     drained and flushed once more before every held connection is closed --
     a crash loses at most the never-drained tail; an orderly stop() loses
     nothing already enqueued.
+
+    Retention (AST-041, Sec10.3): after every drain+flush cycle, once
+    `prune_every_drains` cycles have passed OR `prune_interval_seconds` of
+    wall-clock time has elapsed (whichever comes first), this SAME thread
+    runs `_prune_all(conns, retention_config)` -- a prune pass is just
+    another thing this single writer thread does between polls, never a
+    separate thread/timer. `retention_config` is a `root -> dict|None`
+    callable (engine.py wires `AssistantEngine._retention_config_for`); see
+    `_resolve_retention` for the absent/disabled-config default (30/500).
     """
     conns = {}
+    drains_since_prune = 0
+    last_prune = time.monotonic()
     try:
         while not stop_event.is_set():
             try:
@@ -260,6 +438,13 @@ def run_writer(q, stop_event, poll_timeout=DEFAULT_POLL_TIMEOUT_SECONDS,
                 _bucket(buffers, item)
                 q.task_done()
             _flush(conns, buffers)
+            drains_since_prune += 1
+            now = time.monotonic()
+            if (drains_since_prune >= prune_every_drains
+                    or (now - last_prune) >= prune_interval_seconds):
+                _prune_all(conns, retention_config)
+                drains_since_prune = 0
+                last_prune = now
     finally:
         drained = {}
         while True:
