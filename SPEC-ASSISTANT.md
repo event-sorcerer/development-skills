@@ -199,9 +199,11 @@ assistant:
   provider-CLI invocation (`codex exec --json -m <model>` / `claude -p --output-format
   json`) via the adapter interface `complete(context) -> {text, usage, timings}`.
 - §8.2 THE SYSTEM SHALL build the turn context as: systemPrompt persona + names + roster
-  (§11) + top-k recalled notes + rolling summary + last N turns (N≤6) + user message,
+  (§11) + rolling summary + top-k recalled notes + last N turns (N≤6) + user message,
   under a hard total budget (≤ ~6k tokens) with per-component caps; the rolling summary
-  SHALL be size-capped and refreshed every K turns.
+  SHALL be size-capped and refreshed every K turns; recalled notes SHALL render AFTER
+  the rolling summary so a note that contradicts a stale summary wins by prompt-order
+  recency (note wins).
 - §8.3 THE SYSTEM SHALL pass the RAW user message to recall (hybrid lexical+embeddings,
   §9) and SHALL render which notes fired as recall chips on the reply.
 - §8.4 Turns SHALL run answer-only: adapters SHALL pin isolation flags (no user-global
