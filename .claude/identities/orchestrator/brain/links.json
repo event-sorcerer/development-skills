@@ -1,4 +1,14 @@
 {
+  "attribute-all-gate-legs->attribute-red-gate-to-sections-first": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "attribute-all-gate-legs->gate-verdict-before-merge": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "background-suites-log-to-file-not-pipes->bisect-before-blaming-tracked-flakiness": {
     "fires": 0,
     "last": null,
@@ -65,6 +75,16 @@
     "weight": 0.5
   },
   "fixed-iteration-shape->name-the-failure-modes": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "gap-to-pinned-contract->batch-red-across-surfaces": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "gap-to-pinned-contract->fixed-iteration-shape": {
     "fires": 0,
     "last": null,
     "weight": 0.5

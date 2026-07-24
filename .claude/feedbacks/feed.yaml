@@ -2170,3 +2170,46 @@ items:
   routing:
     action: brain-note
     ref: orchestrator/fixed-iteration-shape
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-24T14:30:00Z'
+iteration:
+  task: mini-loop close (skill fix + layout conformance)
+  outcome: merged
+  reviewRounds: 0
+source:
+  role: orchestrator
+  model: claude-fable-5
+items:
+- category: incident
+  area: testing
+  severity: medium
+  summary: A red gate was mis-attributed for a full suite run because only the test
+    leg was checked
+  detail: The gate chains three legs (suite, shellcheck, manifest validation); an
+    info-severity shellcheck finding on a new pinned-phrase line made the gate red
+    while the suite was fully green, and the first diagnosis re-ran the whole suite
+    instead of checking the other legs.
+  generalized: When the gate goes red, attribute across ALL of its legs before rerunning
+    anything — the test suite, the linter, and the manifest validation each fail the
+    gate independently, and an info-severity lint finding on a brand-new line is the
+    cheapest leg to check first.
+  routing:
+    action: brain-note
+    ref: orchestrator/attribute-all-gate-legs
+- category: worked-well
+  area: other
+  severity: low
+  summary: A process gap the human flagged became an enforced, pinned skill contract
+    within one sitting
+  detail: The human noticed the loop close skipped the feedback/retrospective skills;
+    the mandate was added to the skill text, pinned in the contracts section, gated,
+    merged — and immediately honored by the very session that shipped it.
+  generalized: When a human flags a workflow-protocol gap, the fix is a pinned skill-contract
+    change (text + contract test in one PR), not a memory note — and the shipping
+    session should immediately execute the new protocol itself, proving it runnable
+    before any other session inherits it.
+  routing:
+    action: brain-note
+    ref: orchestrator/gap-to-pinned-contract
