@@ -149,6 +149,16 @@
     "last": null,
     "weight": 0.5
   },
+  "ui-split-logic-first->batch-same-surface-bugs": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
+  "ui-split-logic-first->mode-elastic-loop": {
+    "fires": 0,
+    "last": null,
+    "weight": 0.5
+  },
   "unresponsive-agent-take-over->brief-out-of-scope-failure-line": {
     "fires": 0,
     "last": null,

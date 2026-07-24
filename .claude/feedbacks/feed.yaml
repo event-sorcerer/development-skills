@@ -1889,3 +1889,47 @@ items:
   routing:
     action: brain-note
     ref: orchestrator/resumed-branch-staleness-pass
+---
+schemaVersion: 1
+kind: loop-feedback
+ts: '2026-07-24T02:45:00Z'
+iteration:
+  task: AST-021
+  outcome: merged
+  reviewRounds: 1
+source:
+  role: orchestrator
+  model: claude-fable-5
+items:
+- category: worked-well
+  area: briefing
+  severity: medium
+  summary: Iterative-UI logic-first split let an approved task merge despite a pending
+    visual choice
+  detail: The brief split the task into all-logic-with-restyle-hooks (built, reviewed,
+    merged) vs visual polish (pending the human option pick as a follow-up round)
+    — the epic kept moving without guessing UI.
+  evidence:
+  - Zugruul/development-skills#318
+  generalized: When iterative-UI gates a task, brief the dev to build every behavior
+    with named restyle-hook classes and placeholder styling; the reviewed logic can
+    merge on human direction while the visual choice stays an open follow-up round
+    — the loop never idles on aesthetics.
+  routing:
+    action: brain-note
+    ref: orchestrator/ui-split-logic-first
+- category: friction
+  area: other
+  severity: low
+  summary: Transient infra failures (safety-classifier outage, reviewer connection
+    drop) each cost a wake cycle
+  detail: One agent spawn was refused by a temporary model-availability error and
+    one reviewer died mid-response; both recovered via retry/resume.
+  evidence:
+  - Zugruul/development-skills#318
+  generalized: Transient spawn/connection failures are recoverable by retry-later
+    and resume-by-message; no protocol change needed beyond treating them as wake
+    events, not blockers.
+  routing:
+    action: ignore
+    ref: transient infra, recovered; no action
