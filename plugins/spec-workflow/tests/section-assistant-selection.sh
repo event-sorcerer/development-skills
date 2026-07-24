@@ -259,7 +259,7 @@ const document = {
 // initAssistantSelection now unconditionally refreshes them, so they need
 // to exist as real elements here too even though this section doesn't
 // assert on them (section-assistant-selection-memory.sh does).
-const STATIC_IDS = ["sect-voice", "voice-mic", "voice-in", "voice-out", "voice-both", "voicebar", "ast-ask-again", "ast-switcher"];
+const STATIC_IDS = ["sect-voice", "voice-mic", "voice-in", "voice-out", "voice-both", "voicebar", "ast-ask-again", "ast-switcher", "voice-viz-name"];
 for (const id of STATIC_IDS) {
     const el = mkEl(id);
     el.classList._parent = el;
@@ -312,7 +312,8 @@ async function run(outcome, candidates) {
     const autoSelect = fetchCalls.find(c => c.url === "/assistant/select");
     if (!autoSelect) throw new Error("outcome one did not auto-POST /assistant/select");
     if (JSON.parse(autoSelect.opts.body).name !== "jarvis") throw new Error("outcome one selected the wrong candidate");
-    if (document.getElementById("sect-voice").textContent !== "Voice · jarvis") throw new Error("header did not get the main name: " + document.getElementById("sect-voice").textContent);
+    if (document.getElementById("sect-voice").textContent !== "Voice") throw new Error("title must stay plain Voice (395): " + document.getElementById("sect-voice").textContent);
+    if (document.getElementById("voice-viz-name").textContent !== "jarvis") throw new Error("name did not render beside the bars (395): " + document.getElementById("voice-viz-name").textContent);
     if (document.getElementById("voice-mic").disabled) throw new Error("outcome one left voice-mic disabled");
     console.log("ONE_OK true");
 

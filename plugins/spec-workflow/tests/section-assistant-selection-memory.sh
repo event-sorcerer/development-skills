@@ -208,7 +208,7 @@ const document = {
     },
 };
 
-const STATIC_IDS = ["sect-voice", "voice-mic", "voice-in", "voice-out", "voice-both", "voicebar", "ast-ask-again", "ast-switcher", "ast-digest"];
+const STATIC_IDS = ["sect-voice", "voice-mic", "voice-in", "voice-out", "voice-both", "voicebar", "ast-ask-again", "ast-switcher", "ast-digest", "voice-viz-name"];
 for (const id of STATIC_IDS) {
     const el = mkEl(id);
     el.classList._parent = el;
@@ -267,7 +267,7 @@ async function run(outcome, candidates, selected, askAgain) {
     await run("multiple", [{name: "jarvis", aliases: [], root: "/a"}, {name: "friday", aliases: [], root: "/b"}], "friday", false);
     if (document.getElementById("ast-picker")) throw new Error("a remembered selection must not re-show the picker");
     if (document.getElementById("voice-mic").disabled) throw new Error("a remembered selection must un-gate voice");
-    if (document.getElementById("sect-voice").textContent !== "Voice · friday") throw new Error("remembered selection did not set the header");
+    if (document.getElementById("voice-viz-name").textContent !== "friday") throw new Error("remembered selection did not render the name beside the bars (395)");
     console.log("REMEMBERED_OK true");
 
     // ---- askAgain true: server already reports selected=null on boot, picker still shows ----

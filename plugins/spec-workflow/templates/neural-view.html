@@ -434,6 +434,10 @@ canvas.grabbing{cursor:grabbing}
    section fold sets — restate it; .folded lets the panel shrink to its head */
 #voice-viz[hidden]{display:none}
 #voicebar.folded{height:auto}
+#voice-viz{display:flex;align-items:center;gap:.5rem}
+.ast-voice-name{font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:var(--cyan);white-space:nowrap;flex:0 0 auto}
+.ast-voice-name:empty{display:none}
+#voice-viz canvas{flex:1;min-width:0}
 #voice-viz canvas{position:absolute;inset:0;width:100%;height:100%}
 #voice-viz-status{position:relative;font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:var(--amber)}
 /* cog rides directly right of the VOICE heading, sized as a real target */
@@ -878,7 +882,7 @@ canvas.grabbing{cursor:grabbing}
       <button class="iconbtn" id="voicebar-collapse" title="Hide voice" aria-label="Hide voice">⟩</button>
     </div>
   </div>
-  <div id="voice-viz"><canvas id="voice-viz-canvas"></canvas><span id="voice-viz-status" hidden></span></div>
+  <div id="voice-viz"><span id="voice-viz-name" class="ast-voice-name"></span><canvas id="voice-viz-canvas"></canvas><span id="voice-viz-status" hidden></span></div>
 </div>
 <button class="hud" id="voicebar-tab" title="Show voice" aria-label="Show voice" hidden>⟨</button>
 
@@ -4945,8 +4949,13 @@ function gateVoiceAndChat(gated){
   }
 }
 function setVoiceHeaderName(name){
+  // #395: the finalized voice-visualizer layout puts the assistant name
+  // BESIDE the in/out bars, not in the section title (where a long name
+  // wraps the header to two lines). The title stays plain "Voice".
   const el = document.getElementById("sect-voice");
-  if(el) el.textContent = name ? `Voice · ${name}` : "Voice";
+  if(el) el.textContent = "Voice";
+  const tag = document.getElementById("voice-viz-name");
+  if(tag) tag.textContent = name || "";
 }
 function renderAssistantPicker(candidates){
   const bar = document.getElementById("voicebar");
